@@ -26,6 +26,16 @@ def add_favor(user_id, amount):
     favor[uid] = favor.get(uid, 0) + amount
     favor[uid] = max(-100, min(100, favor[uid]))
 
+ANGRY_WORDS = [
+    "시발", "씨발", "ㅅㅂ", "ㅗ",
+    "꺼져", "닥쳐", "죽어", "좆까",
+    "ㅈ까", "병신", "멍청이"
+]
+
+DIRTY_WORDS = [
+    "섹스", "야스", "보지", "자지",
+    "꼴려", "따먹", "야한", "19금"
+]
 RESPONSES = {
     "안녕": [
         "안녕! 난 푸리나야, 반가워!",
@@ -151,6 +161,31 @@ DEFAULT_RESPONSES = [
     "무슨 말인지 이해 못 했어..."
 ]
 
+ANGRY_RESPONSES = [
+    "야! 그런 말은 하지 마!",
+    "흥! 기분 나빠!",
+    "너무하네 진짜...",
+    "그렇게 말하면 나 화낼 거야!",
+    "나도 사람이야! 상처받는다고!",
+]
+
+SAD_RESPONSES = [
+    "어... 조금 슬픈걸...",
+    "그런 말 들으니까 우울해졌어...",
+    "왜 그렇게 말해...?",
+    "상처받았어...",
+    "흑... 너무해.."
+]
+
+DIRTY_RESPONSES = [
+    "야!! 이상한 말 하지 마!",
+    "그런 건 안 돼!",
+    "변태같은 소리 하지 마!",
+    "흥! 부끄럽게 왜 그래!",
+    "난 못 들은 걸로 할래..",
+    "뭐?! 으 징그러! 다신 그런 말 하지마!"
+]
+
 @bot.event
 async def on_ready():
     print(f"{bot.user} 로그인 완료")
@@ -163,20 +198,29 @@ async def on_message(message):
     if message.content.startswith("푸리나"):
         text = message.content.replace("푸리나", "", 1).strip()
 
-        add_favor(message.author.id, 1)
+        lower = text.lower()
 
-        for keyword, answers in RESPONSES.items():
-            if keyword in text:
-                await message.reply(random.choice(answers))
-                return
+        if any(word in lower for word in ANGRY_WORDS):
+            add_favor(message.author.id, -5)
+            await message.reply(random.choice(ANGRY_RESPONSES))
+            return
+
+        if any(word in lower for word in DIRTY_WORDS):
+            add_favor(message.author.id, -3)
+            await message.reply(random.choice(DIRTY_RESPONSES))
+            return
 
         await message.reply(random.choice(DEFAULT_RESPONSES))
+        
+        if get_favor(message.author.id) <= -50:
+            await message.reply("흥. 너랑 말 안 해.")
+            return
 
     await bot.process_commands(message)
 
 @bot.command(name="호감도")
 async def favor_command(ctx):
     love = get_favor(ctx.author.id)
-    await ctx.reply(f"{ctx.author.mention}님의 현재 호감도는 **{love}**야!")
+    await ctx.reply(f"{ctx.author.mention}의 현재 호감도는 **{love}**야!")
 
 bot.run(TOKEN)
