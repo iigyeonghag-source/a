@@ -38,6 +38,24 @@ DIRTY_WORDS = [
     "꼴려", "따먹", "야한", "19금",
     "임신", "강간", "교미", "삽입"
 ]
+
+ANGRY_RESPONSES = [
+    "야! 그런 말은 하지 마!",
+    "흥! 기분 나빠!",
+    "너무하네 진짜...",
+    "그렇게 말하면 나 화낼 거야!",
+    "나도 사람이야! 상처받는다고!",
+]
+
+DIRTY_RESPONSES = [
+    "야!! 이상한 말 하지 마!",
+    "그런 건 안 돼!",
+    "변태같은 소리 하지 마!",
+    "흥! 부끄럽게 왜 그래!",
+    "난 못 들은 걸로 할래..",
+    "뭐?! 으 징그러! 다신 그런 말 하지마!"
+]
+
 RESPONSES = {
     "안녕": [
         "안녕! 난 푸리나야, 반가워!",
@@ -155,6 +173,44 @@ RESPONSES = {
     ]
 }
 
+KEYWORDS = {
+    "안녕": ["안녕", "안뇽", "ㅎㅇ", "하이", "hello", "hi", "헬로"],
+    "뭐해": ["뭐해", "뭐함", "머해", "모해", "뭐하냐", "뭐하고 있어"],
+    "좋아해": ["좋아해", "좋아", "호감", "마음에 들어"],
+    "싫어": ["싫어", "싫다", "싫음", "하기 싫", "안 할래", "별로야"],
+    "심심": ["심심", "노잼", "재미없", "할 거 없"],
+    "배고파": ["배고파", "배고픔", "출출", "밥", "먹을 거", "간식"],
+    "잘자": ["잘자", "잘 자", "굿나잇", "good night", "자러감"],
+    "고마워": ["고마워", "감사", "ㄱㅅ", "땡큐", "thanks", "thank you"],
+    "미안": ["미안", "죄송", "사과", "잘못했"],
+    "이름": ["이름", "누구야", "정체", "너 뭐야"],
+    "귀여워": ["귀여워", "커여워", "귀엽", "카와이"],
+    "바보": ["바보", "멍청"],
+    "사랑해": ["사랑해", "사랑", "알러뷰", "love you"],
+    "게임": ["게임", "겜", "로블록스", "마크"],
+    "학교": ["학교", "수업", "등교", "하교"],
+    "공부": ["공부", "숙제", "과제", "시험"]
+}
+
+PRIORITY = [
+    "미안",
+    "싫어",
+    "잘자",
+    "고마워",
+    "안녕",
+    "뭐해",
+    "좋아해",
+    "사랑해",
+    "귀여워",
+    "심심",
+    "배고파",
+    "게임",
+    "학교",
+    "공부",
+    "이름",
+    "바보"
+]
+
 DEFAULT_RESPONSES = [
     "음... 무슨 뜻인지 잘 모르겠어.",
     "조금 더 자세히 말해줄래?",
@@ -163,30 +219,20 @@ DEFAULT_RESPONSES = [
     "무슨 말인지 이해 못 했어..."
 ]
 
-ANGRY_RESPONSES = [
-    "야! 그런 말은 하지 마!",
-    "흥! 기분 나빠!",
-    "너무하네 진짜...",
-    "그렇게 말하면 나 화낼 거야!",
-    "나도 사람이야! 상처받는다고!",
-]
+def find_response_key(text):
+    lower = text.lower()
 
-SAD_RESPONSES = [
-    "어... 조금 슬픈걸...",
-    "그런 말 들으니까 우울해졌어...",
-    "왜 그렇게 말해...?",
-    "상처받았어...",
-    "흑... 너무해.."
-]
+    for key in PRIORITY:
+        words = KEYWORDS.get(key, [key])
+        if any(word in lower for word in words):
+            return key
 
-DIRTY_RESPONSES = [
-    "야!! 이상한 말 하지 마!",
-    "그런 건 안 돼!",
-    "변태같은 소리 하지 마!",
-    "흥! 부끄럽게 왜 그래!",
-    "난 못 들은 걸로 할래..",
-    "뭐?! 으 징그러! 다신 그런 말 하지마!"
-]
+    for key in RESPONSES:
+        words = KEYWORDS.get(key, [key])
+        if any(word in lower for word in words):
+            return key
+
+    return None
 
 @bot.event
 async def on_ready():
@@ -199,21 +245,38 @@ async def on_message(message):
 
     if message.content.startswith("푸리나"):
         text = message.content.replace("푸리나", "", 1).strip()
-        
-        if get_favor(message.author.id) <= -50:
-            await message.reply("흥. 너랑은 말 안 해.")
+        lower = text.lower()
+
+        if any(word in lower for word in KEYWORDS["미안"]):
+            add_favor(message.author.id, 5)
+            await message.reply(random.choice(RESPONSES["미안"]))
             return
 
-        lower = text.lower()
+        if get_favor(message.author.id) <= -50:
+            await message.reply(random.choice([
+                "흥. 너랑은 말 안 해.",
+                "말 걸지 마.",
+                "아직도 나한테 할 말이 있어?",
+                "기분 안 좋아.",
+                "..."
+            ]))
+            return
+
+        if any(word in lower for word in DIRTY_WORDS):
+            add_favor(message.author.id, -3)
+            await message.reply(random.choice(DIRTY_RESPONSES))
+            return
 
         if any(word in lower for word in ANGRY_WORDS):
             add_favor(message.author.id, -5)
             await message.reply(random.choice(ANGRY_RESPONSES))
             return
 
-        if any(word in lower for word in DIRTY_WORDS):
-            add_favor(message.author.id, -3)
-            await message.reply(random.choice(DIRTY_RESPONSES))
+        key = find_response_key(text)
+
+        if key:
+            add_favor(message.author.id, 1)
+            await message.reply(random.choice(RESPONSES[key]))
             return
 
         await message.reply(random.choice(DEFAULT_RESPONSES))
