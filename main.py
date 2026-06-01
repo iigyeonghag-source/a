@@ -197,6 +197,10 @@ async def on_message(message):
 
     if message.content.startswith("푸리나"):
         text = message.content.replace("푸리나", "", 1).strip()
+        
+        if get_favor(message.author.id) <= -50:
+            await message.reply("흥. 너랑은 말 안 해.")
+            return
 
         lower = text.lower()
 
@@ -211,10 +215,6 @@ async def on_message(message):
             return
 
         await message.reply(random.choice(DEFAULT_RESPONSES))
-        
-        if get_favor(message.author.id) <= -50:
-            await message.reply("흥. 너랑 말 안 해.")
-            return
 
     await bot.process_commands(message)
 
