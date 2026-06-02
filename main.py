@@ -17,6 +17,8 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 favor = {}
+last_response_key = {}
+
 
 def get_favor(user_id):
     return favor.get(str(user_id), 0)
@@ -261,6 +263,161 @@ RESPONSES = {
     ]
 }
 
+
+COMBO_RESPONSES = {
+    ("공부", "싫어"): [
+        "오? 공부하기 싫구나? 후후, 그런 날도 있는 법이지.",
+        "공부하기 싫은 거야? 흠... 그렇다고 완전히 도망치는 건 추천하지 않아!",
+        "으음, 공부가 싫다라... 조금 쉬었다가 다시 해보는 건 어때?",
+        "후후, 공부하기 싫은 마음은 이해하지만 너무 미루면 나중에 더 귀찮아진다고?",
+        "공부가 싫구나? 좋아, 그럼 잠깐 쉬고 다시 하는 걸 특별히 허락해 주도록 하지!"
+    ],
+    ("학교", "싫어"): [
+        "학교 가기 싫은 날인가 보네?",
+        "흠... 학교가 싫다니, 오늘 무슨 일이라도 있었어?",
+        "학교가 귀찮은 날도 있지. 그래도 너무 축 처지진 말라고?",
+        "으음, 그 마음은 알겠지만... 일단 이야기라도 들어볼까?"
+    ],
+    ("공부", "졸려"): [
+        "졸린데 공부까지 해야 한다고? 그건 꽤 힘든 조합인데...",
+        "후암... 졸리면 공부 효율도 떨어진다고? 잠깐 쉬는 게 어때?",
+        "졸린 상태로 공부라니, 무리하다 쓰러지면 곤란하잖아?",
+        "공부도 중요하지만 잠도 중요해. 물의 신이 하는 말이니 새겨들으라고?"
+    ],
+    ("공부", "배고파"): [
+        "배고픈데 공부라니! 우선 뭐라도 먹는 게 좋겠어.",
+        "공부보다 먼저 식사야. 배고프면 집중도 안 된다구!",
+        "흠, 간식이라도 먹고 시작하는 게 어때?",
+        "배고픈 상태로 공부하면 머리가 안 돌아간다니까?"
+    ],
+    ("게임", "심심"): [
+        "심심하면 역시 게임이지! 후후, 어떤 게임을 할 생각이야?",
+        "게임이라... 심심함을 달래기엔 꽤 괜찮은 선택이네!",
+        "좋아, 오늘의 무대는 게임인가 보네?",
+        "후훗, 게임으로 시간을 보내겠다는 거지? 나쁘지 않아!"
+    ],
+    ("게임", "싫어"): [
+        "게임이 싫다고? 흠, 무슨 일이 있었던 거야?",
+        "오? 게임이 재미없어진 거야? 꽤 드문 일이네.",
+        "게임이 싫을 때도 있지. 그럴 땐 잠깐 다른 걸 해보는 게 좋아."
+    ],
+    ("학교", "졸려"): [
+        "학교에서 졸린 거야? 수업이 꽤 강적이었나 보네.",
+        "후암... 학교에서 졸리면 진짜 버티기 힘들지.",
+        "설마 수업 시간에 꾸벅꾸벅한 건 아니겠지?"
+    ],
+    ("화나", "학교"): [
+        "학교에서 화나는 일이 있었어?",
+        "흠... 학교에서 무슨 일이 있었길래 그렇게 화가 난 거야?",
+        "좋아, 천천히 말해봐. 내가 들어줄게."
+    ],
+    ("우울", "학교"): [
+        "학교 때문에 우울한 거야?",
+        "오늘 학교에서 힘든 일이 있었나 보네...",
+        "흠, 학교 생활이 항상 쉬운 건 아니지. 그래도 혼자 끌어안고 있진 마."
+    ],
+    ("우울", "심심"): [
+        "기분도 가라앉고 심심하기까지 한 거야?",
+        "그럴 땐 혼자 멍하니 있기보다 나랑 이야기라도 하자.",
+        "후후, 비 오는 날도 언젠가는 맑아지니까. 지금은 천천히 쉬어가자."
+    ],
+    ("배고파", "졸려"): [
+        "배고프고 졸리기까지 해? 그건 몸이 쉬라고 외치는 거 아니야?",
+        "우선 가볍게 뭐라도 먹고 쉬는 게 좋겠어.",
+        "흠, 지금은 무리하지 말고 몸부터 챙기자."
+    ],
+    ("좋아해", "게임"): [
+        "게임을 좋아하는구나? 후후, 꽤 취향이 확실한걸!",
+        "오, 게임을 좋아한다라... 어떤 게임이 제일 마음에 들어?",
+        "좋아하는 게임 이야기는 얼마든지 들어줄 수 있어!"
+    ],
+    ("싫어", "다시"): [
+        "뭐? 다시 말하기 싫다고? 흠, 그럼 어쩔 수 없지.",
+        "싫으면 안 해도 돼. 하지만 궁금하게 만들어 놓고 도망치진 말라고?"
+    ]
+}
+
+REPEAT_KEYWORDS = ["다시", "다시 말해", "다시말해", "한번 더", "한 번 더", "또 말해", "또말해", "재방송"]
+
+REPEAT_RESPONSES = {
+    "소개": [
+        "뭐? 내 소개를 다시 해달라고? 싫은데?! ...라고 하고 싶지만, 특별히 한 번 더 해주도록 하지!",
+        "또 내 소개? 후후, 그렇게 내 이야기가 듣고 싶었구나?",
+        "흠흠, 잘 들어! 이번엔 잊어버리면 안 된다?"
+    ],
+    "이름": [
+        "내 이름을 또 묻는 거야? 설마 벌써 잊은 건 아니겠지?",
+        "푸리나! 푸리나라고! 기억해 두는 게 좋을 거야.",
+        "후후, 내 이름을 다시 듣고 싶었다니 보는 눈이 있네."
+    ],
+    "공부": [
+        "공부 이야기 다시 해달라고? 후후, 결국 공부가 신경 쓰이는 모양이네.",
+        "아까 공부 얘기였지? 너무 무리하지 말고, 그래도 손은 놓지 말라고?",
+        "다시 말하자면! 공부도 중요하지만 쉬는 것도 중요해."
+    ],
+    "싫어": [
+        "싫다는 말을 다시 말해달라고? 너도 참 특이하네.",
+        "흥, 싫은 건 싫은 거지만... 이유는 들어볼 수 있잖아?",
+        "다시 말하자면, 그런 말 들으면 조금 상처받는다고?"
+    ],
+    "게임": [
+        "게임 이야기 다시? 후후, 오늘의 무대가 꽤 마음에 들었나 보네!",
+        "아까 게임 얘기였지? 그래서, 어떤 게임을 할 건데?",
+        "게임이라면 얼마든지 다시 이야기해줄 수 있어!"
+    ],
+    "학교": [
+        "학교 이야기 다시? 오늘 학교에서 뭔가 있었던 거야?",
+        "아까 학교 얘기였지. 흠, 수업은 잘 버텼어?",
+        "학교 이야기는 늘 꽤 흥미롭다니까?"
+    ],
+    "졸려": [
+        "졸리다는 얘기 다시? 그럼 정말 자야 하는 거 아니야?",
+        "다시 말해줄게. 졸리면 쉬어! 명령이야!",
+        "후암... 나까지 졸려지잖아."
+    ],
+    "우울": [
+        "아까 힘든 얘기였지...? 다시 말하지만, 혼자 끌어안고 있지는 마.",
+        "우울할 땐 잠깐 쉬어가도 괜찮아. 정말이야.",
+        "비가 오면 언젠가 맑아지는 법이야. 지금은 천천히 가자."
+    ],
+    "화나": [
+        "화났다는 얘기 다시? 좋아, 이번엔 천천히 말해봐.",
+        "다시 말하자면, 일단 심호흡부터 해보자.",
+        "흠, 아직도 화가 안 풀린 모양이네."
+    ],
+    "안녕": [
+        "인사를 다시 하라고? 후후, 좋아. 안녕!",
+        "또 인사? 반가워, 또 반가워!",
+        "후훗, 몇 번을 와도 환영해 주도록 하지!"
+    ],
+    "공부+싫어": [
+        "뭐? 공부하기 싫다는 말을 다시 해달라고? 후후, 꽤 솔직하네.",
+        "다시 말하자면, 공부하기 싫은 날도 있지만 완전히 도망치면 나중에 더 귀찮아진다고?",
+        "공부하기 싫구나? 좋아, 잠깐 쉬는 건 허락해 줄게. 아주 잠깐이야!"
+    ],
+    "공부+졸려": [
+        "졸린데 공부해야 한다는 얘기였지? 다시 말하지만, 조금 쉬는 게 먼저야.",
+        "후암... 공부와 졸림의 조합은 위험하다고?",
+        "공부도 좋지만 잠이 부족하면 머리가 안 돌아간다니까!"
+    ],
+    "게임+심심": [
+        "심심해서 게임 얘기였지? 후후, 그래서 뭘 할 건데?",
+        "다시 말하자면, 심심할 땐 게임도 나쁘지 않은 선택이야!",
+        "좋아, 게임 무대에 다시 올라가 볼까?"
+    ],
+    "우울+심심": [
+        "기분도 별로고 심심하다는 얘기였지...? 그럼 나랑 조금 더 이야기하자.",
+        "다시 말하지만, 혼자 멍하니 있으면 더 가라앉을 수도 있어.",
+        "지금은 거창한 걸 안 해도 괜찮아. 그냥 천천히 있자."
+    ],
+    "default": [
+        "뭘 다시 말해달라는 거야? 아까 말한 걸 내가 기억 못 할 리는... 아마 없겠지?",
+        "다시 말해달라고? 흠, 방금 어떤 이야기를 했는지 조금 더 말해봐.",
+        "으음, 다시 말하고 싶은데 아까 주제가 조금 애매했어."
+    ]
+}
+
+
 KEYWORDS = {
     "안녕": ["안녕", "안뇽", "ㅎㅇ", "하이", "hello", "hi", "헬로", "할로"],
     "뭐해": ["뭐해", "뭐함", "머해", "모해", "뭐하냐", "뭐하고 있어"],
@@ -318,20 +475,45 @@ DEFAULT_RESPONSES = [
     "응? 뭐라 했어? 다시 말해줘!"
 ]
 
+def has_keyword(text, key):
+    words = KEYWORDS.get(key, [key])
+    return any(word in text for word in words)
+
+def is_repeat_request(text):
+    return any(word in text for word in REPEAT_KEYWORDS)
+
 def find_response_key(text):
     lower = text.lower()
 
     for key in PRIORITY:
-        words = KEYWORDS.get(key, [key])
-        if any(word in lower for word in words):
+        if has_keyword(lower, key):
             return key
 
     for key in RESPONSES:
-        words = KEYWORDS.get(key, [key])
-        if any(word in lower for word in words):
+        if has_keyword(lower, key):
             return key
 
     return None
+
+def find_combo_key(text):
+    lower = text.lower()
+
+    matched_keys = set()
+    for key in KEYWORDS:
+        if has_keyword(lower, key):
+            matched_keys.add(key)
+
+    for combo in COMBO_RESPONSES:
+        if all(key in matched_keys for key in combo):
+            return combo
+
+    return None
+
+def remember_key(user_id, key):
+    last_response_key[str(user_id)] = key
+
+def get_last_key(user_id):
+    return last_response_key.get(str(user_id))
 
 @bot.event
 async def on_ready():
@@ -347,8 +529,17 @@ async def on_message(message):
         lower = text.lower()
 
         if any(word in lower for word in KEYWORDS["미안"]):
-            add_favor(message.author.id, 5)
-            await message.reply(random.choice(RESPONSES["미안"]))
+            if get_favor(message.author.id) <= 0:
+                add_favor(message.author.id, 5)
+                await message.reply(random.choice(RESPONSES["미안"]))
+            else:
+                await message.reply(random.choice([
+                    "후후, 지금은 딱히 화난 것도 아닌걸?",
+                    "사과를 받아줄 상황이 아닌 것 같은데?",
+                    "흠흠, 그래도 사과는 받아두도록 하지!",
+                    "갑자기 왜 그래? 조금 당황스러운걸.",
+                    "이미 용서한 것 같은데 말이야?"
+                ]))
             return
 
         if get_favor(message.author.id) <= -50:
@@ -371,10 +562,26 @@ async def on_message(message):
             await message.reply(random.choice(ANGRY_RESPONSES))
             return
 
+        if is_repeat_request(lower):
+            last_key = get_last_key(message.author.id)
+            responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
+            add_favor(message.author.id, 1)
+            await message.reply(random.choice(responses))
+            return
+
+        combo_key = find_combo_key(text)
+
+        if combo_key:
+            add_favor(message.author.id, 1)
+            remember_key(message.author.id, "+".join(combo_key))
+            await message.reply(random.choice(COMBO_RESPONSES[combo_key]))
+            return
+
         key = find_response_key(text)
 
         if key:
             add_favor(message.author.id, 1)
+            remember_key(message.author.id, key)
             await message.reply(random.choice(RESPONSES[key]))
             return
 
