@@ -348,7 +348,8 @@ COMBO_RESPONSES = {
         "오, 안녕! 방금까지 우아하게 쉬고 있었지! 너도 같이 누워볼래? 후후, 운 좋게도 자리는 남아 있다고?"
     ],
     ("너임마", "종훈"): [
-        "..너 방금 선 넘은 거 알지? 모르겠다고? 너임마종훈"
+        "..너 방금 선 넘은 거 알지? 모르겠다고? 너임마종훈",
+        "나 방금 모든 걸 잃은 거지..? 그치?"
     ],
     ("너임마", "돈키"): [
         "돈키러버? 그게 누군데? 뭔가 눈치가 없을 거 같은 이름이네."
@@ -506,14 +507,6 @@ DEFAULT_RESPONSES = [
     "응? 뭐라 했어? 다시 말해줘!"
 ]
 
-response = random.choice(RESPONSES[key])
-
-response = response.format(
-user=message.author.mention
-)
-
-await message.reply(response)
-
 def has_keyword(text, key):
     words = KEYWORDS.get(key, [key])
     return any(word in text for word in words)
@@ -621,7 +614,14 @@ async def on_message(message):
         if key:
             add_favor(message.author.id, 1)
             remember_key(message.author.id, key)
-            await message.reply(random.choice(RESPONSES[key]))
+
+            response = random.choice(RESPONSES[key])
+
+            response = response.format(
+                user=message.author.mention
+            )
+
+            await message.reply(response)
             return
 
         await message.reply(random.choice(DEFAULT_RESPONSES))
