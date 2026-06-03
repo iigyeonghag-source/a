@@ -1,5 +1,6 @@
 import os
 import random
+from datetime import datetime
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -18,6 +19,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 favor = {}
 last_response_key = {}
+last_topic = {}
 
 
 def get_favor(user_id):
@@ -613,7 +615,7 @@ KEYWORDS = {
     "갈게": ["갈게", "ㅂㅂ", "가야", "갈 거야", "갈래", "잘 있어"],
     "졸려": ["졸려", "졸령", "졸리다", "잘래"],
     "화나": ["화나", "짜증", "빡", "킹받"],
-    "행복": ["행복","좋다"],
+    "행복": ["행복", "기분좋", "좋아죽겠", "신난", "개좋", "행복해"],
     "우울": ["정병", "멘헤라", "자살"],
     "재밌어": ["즐겁", "재밌다"],
     "천재": ["천재", "지니어스", "똑똑"],
@@ -623,7 +625,8 @@ KEYWORDS = {
     "다": ["다", "드 폰타인", "야"],
     "도로": ["도로", "DORO", "doro"],
     "쟤 죽여": ["쟤 죽여", "족쳐", "처리해", "가라", "조져", "죽이", "가랏"],
-    "광질": ["광질", "낚시", "전체", "상점", "돈넣기", "돈빼기"]
+    "광질": ["광질", "낚시", "전체", "상점", "돈넣기", "돈빼기"],
+    "물어": ["물어", "뜯어"]
 }
 
 PRIORITY = [
@@ -657,6 +660,119 @@ DEFAULT_RESPONSES = [
     "무슨 말인지 이해 못 했어...",
     "응? 뭐라 했어? 다시 말해줘!"
 ]
+
+FAVOR_STAGE_RESPONSES = {
+    "love": [
+        "후후, 네가 말 걸어주니까 괜히 기분 좋아졌어!",
+        "오, 왔구나? 오늘도 특별히 상대해 주도록 하지!",
+        "너라면 조금 더 오래 이야기해도 괜찮을지도?"
+    ],
+    "friendly": [
+        "흠흠, 꽤 반가운걸?",
+        "좋아, 오늘도 이야기해 보자!",
+        "네가 오니까 심심하진 않네!"
+    ],
+    "cold": [
+        "흥... 그래도 대답은 해줄게.",
+        "아직 조금 삐졌지만, 특별히 들어줄게.",
+        "말은 해봐. 내가 들어는 줄 테니까."
+    ]
+}
+
+FOLLOW_UP_QUESTIONS = {
+    "학교": [
+        "오늘 수업은 어땠어?",
+        "학교에서 제일 기억나는 일 있었어?",
+        "친구들이랑은 잘 지냈어?"
+    ],
+    "게임": [
+        "그래서 요즘 무슨 게임 하고 있어?",
+        "오늘은 이겼어? 졌어?",
+        "어떤 캐릭터나 무기 쓰는데?"
+    ],
+    "배고파": [
+        "지금 제일 먹고 싶은 건 뭐야?",
+        "밥 쪽이야, 간식 쪽이야?",
+        "꾸덕한 거 먹고 싶어?"
+    ],
+    "공부": [
+        "무슨 과목 하고 있었어?",
+        "어디 부분이 제일 막혀?",
+        "지금 과제야 시험공부야?"
+    ],
+    "화나": [
+        "무슨 일 있었는지 말해봐.",
+        "누가 건드렸어?",
+        "지금은 좀 진정됐어?"
+    ],
+    "우울": [
+        "오늘 무슨 일이 있었어?",
+        "그냥 기분이 가라앉은 거야, 아니면 이유가 있어?",
+        "지금 혼자 있기 힘든 느낌이야?"
+    ],
+    "심심": [
+        "게임할래, 수다 떨래, 아니면 퀴즈할래?",
+        "지금 할 수 있는 게 뭐 있어?",
+        "완전 심심한 거면 내가 놀아줄까?"
+    ]
+}
+
+TIME_GREETING_RESPONSES = {
+    "아침": [
+        "좋은 아침이야... 으으, 아침은 역시 힘들어.",
+        "아침부터 왔구나? 꽤 부지런한데?",
+        "좋은 아침! 오늘 하루도 잘 버텨보자고!"
+    ],
+    "점심": [
+        "점심 시간이네! 밥은 먹었어?",
+        "안녕! 슬슬 맛있는 걸 먹어야 할 시간 아니야?",
+        "점심의 푸리나 등장! ...케이크는 어디 있지?"
+    ],
+    "저녁": [
+        "좋은 저녁이야. 오늘 하루는 어땠어?",
+        "저녁이네! 이제 조금 쉬어도 되는 시간 아닐까?",
+        "오늘도 살아남았구나? 후후, 훌륭해!"
+    ]
+}
+
+
+def get_time_key():
+    hour = datetime.now().hour
+    if 5 <= hour < 12:
+        return "아침"
+    if 12 <= hour < 18:
+        return "점심"
+    return "저녁"
+
+
+def get_favor_stage(user_id):
+    love = get_favor(user_id)
+    if love >= 80:
+        return "love"
+    if love >= 40:
+        return "friendly"
+    if love <= -30:
+        return "cold"
+    return None
+
+def maybe_stage_response(user_id):
+    stage = get_favor_stage(user_id)
+    if not stage:
+        return None
+    if random.random() < 0.18:
+        return random.choice(FAVOR_STAGE_RESPONSES[stage])
+    return None
+
+def maybe_follow_up(key):
+    if key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
+        return "\n" + random.choice(FOLLOW_UP_QUESTIONS[key])
+    return ""
+
+def remember_topic(user_id, key):
+    last_topic[str(user_id)] = key
+
+def get_last_topic(user_id):
+    return last_topic.get(str(user_id))
 
 def has_keyword(text, key):
     words = KEYWORDS.get(key, [key])
@@ -711,6 +827,21 @@ async def on_message(message):
         text = message.content.replace("푸리나", "", 1).strip()
         lower = text.lower()
 
+        if not text:
+            time_key = get_time_key()
+            add_favor(message.author.id, 1)
+            remember_key(message.author.id, time_key)
+            remember_topic(message.author.id, time_key)
+            response = random.choice(TIME_GREETING_RESPONSES[time_key])
+            response = response.format(user=message.author.mention)
+            await message.reply(maybe_add_ending(response))
+            return
+
+        stage_response = maybe_stage_response(message.author.id)
+        if stage_response:
+            await message.reply(maybe_add_ending(stage_response))
+            return
+
         if any(word in lower for word in KEYWORDS["미안"]):
             if get_favor(message.author.id) <= 0:
                 add_favor(message.author.id, 5)
@@ -749,15 +880,21 @@ async def on_message(message):
             last_key = get_last_key(message.author.id)
             responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
             add_favor(message.author.id, 1)
-            await message.reply(random.choice(responses))
+            response = random.choice(responses).format(user=message.author.mention)
+            await message.reply(maybe_add_ending(response))
             return
 
         combo_key = find_combo_key(text)
 
         if combo_key:
             add_favor(message.author.id, 1)
-            remember_key(message.author.id, "+".join(combo_key))
-            await message.reply(random.choice(COMBO_RESPONSES[combo_key]))
+            combo_name = "+".join(combo_key)
+            remember_key(message.author.id, combo_name)
+            remember_topic(message.author.id, combo_name)
+            response = random.choice(COMBO_RESPONSES[combo_key])
+            response = response.format(user=message.author.mention)
+            response += maybe_follow_up(combo_key[0])
+            await message.reply(maybe_add_ending(response))
             return
 
         key = find_response_key(text)
@@ -771,11 +908,17 @@ async def on_message(message):
             response = response.format(
                 user=message.author.mention
             )
+            remember_topic(message.author.id, key)
+            response += maybe_follow_up(key)
 
-            await message.reply(response)
+            await message.reply(maybe_add_ending(response))
             return
 
-        await message.reply(random.choice(DEFAULT_RESPONSES))
+        topic = get_last_topic(message.author.id)
+        response = random.choice(DEFAULT_RESPONSES)
+        if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
+            response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[topic])
+        await message.reply(maybe_add_ending(response))
 
     await bot.process_commands(message)
 
