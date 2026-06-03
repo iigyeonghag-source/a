@@ -931,7 +931,7 @@ async def favor_command(ctx):
     love = get_favor(ctx.author.id)
     await ctx.reply(f"{ctx.author.mention}의 현재 호감도는 **{love}**야!")
     
+print(get_time_key())
 print(datetime.now())
-print(datetime.now().hour)
 
 bot.run(TOKEN)
