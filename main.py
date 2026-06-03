@@ -834,7 +834,6 @@ async def on_message(message):
             remember_topic(message.author.id, time_key)
             response = random.choice(TIME_GREETING_RESPONSES[time_key])
             response = response.format(user=message.author.mention)
-            await message.reply(maybe_add_ending(response))
             return
 
         stage_response = maybe_stage_response(message.author.id)
