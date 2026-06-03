@@ -838,7 +838,6 @@ async def on_message(message):
 
         stage_response = maybe_stage_response(message.author.id)
         if stage_response:
-            await message.reply(maybe_add_ending(stage_response))
             return
 
         if any(word in lower for word in KEYWORDS["미안"]):
