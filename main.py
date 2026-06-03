@@ -880,7 +880,6 @@ async def on_message(message):
             responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
             add_favor(message.author.id, 1)
             response = random.choice(responses).format(user=message.author.mention)
-            await message.reply(maybe_add_ending(response))
             return
 
         combo_key = find_combo_key(text)
@@ -893,7 +892,6 @@ async def on_message(message):
             response = random.choice(COMBO_RESPONSES[combo_key])
             response = response.format(user=message.author.mention)
             response += maybe_follow_up(combo_key[0])
-            await message.reply(maybe_add_ending(response))
             return
 
         key = find_response_key(text)
@@ -910,14 +908,12 @@ async def on_message(message):
             remember_topic(message.author.id, key)
             response += maybe_follow_up(key)
 
-            await message.reply(maybe_add_ending(response))
             return
 
         topic = get_last_topic(message.author.id)
         response = random.choice(DEFAULT_RESPONSES)
         if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
             response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[topic])
-        await message.reply(maybe_add_ending(response))
 
     await bot.process_commands(message)
 
