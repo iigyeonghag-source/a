@@ -834,34 +834,38 @@ async def on_message(message):
             remember_topic(message.author.id, time_key)
             response = random.choice(TIME_GREETING_RESPONSES[time_key])
             response = response.format(user=message.author.mention)
+            await message.reply(response)
             return
 
         stage_response = maybe_stage_response(message.author.id)
         if stage_response:
+            await message.reply(stage_response)
             return
 
         if any(word in lower for word in KEYWORDS["미안"]):
             if get_favor(message.author.id) <= 0:
                 add_favor(message.author.id, 5)
-                await message.reply(random.choice(RESPONSES["미안"]))
+                response = random.choice(RESPONSES["미안"])
             else:
-                await message.reply(random.choice([
+                response = random.choice([
                     "후후, 지금은 딱히 화난 것도 아닌걸?",
                     "사과를 받아줄 상황이 아닌 것 같은데?",
                     "흠흠, 그래도 사과는 받아두도록 하지!",
                     "갑자기 왜 그래? 조금 당황스러운걸.",
                     "이미 용서한 것 같은데 말이야?"
-                ]))
+                ])
+            await message.reply(response.format(user=message.author.mention))
             return
 
         if get_favor(message.author.id) <= -50:
-            await message.reply(random.choice([
+            response = random.choice([
                 "흥. 너랑은 말 안 해.",
                 "말 걸지 마.",
                 "아직도 나한테 할 말이 있어?",
                 "기분 안 좋아.",
                 "..."
-            ]))
+            ])
+            await message.reply(response)
             return
 
         if any(word in lower for word in DIRTY_WORDS):
@@ -879,6 +883,7 @@ async def on_message(message):
             responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
             add_favor(message.author.id, 1)
             response = random.choice(responses).format(user=message.author.mention)
+            await message.reply(response)
             return
 
         combo_key = find_combo_key(text)
@@ -891,6 +896,7 @@ async def on_message(message):
             response = random.choice(COMBO_RESPONSES[combo_key])
             response = response.format(user=message.author.mention)
             response += maybe_follow_up(combo_key[0])
+            await message.reply(response)
             return
 
         key = find_response_key(text)
@@ -898,21 +904,22 @@ async def on_message(message):
         if key:
             add_favor(message.author.id, 1)
             remember_key(message.author.id, key)
+            remember_topic(message.author.id, key)
 
             response = random.choice(RESPONSES[key])
-
-            response = response.format(
-                user=message.author.mention
-            )
-            remember_topic(message.author.id, key)
+            response = response.format(user=message.author.mention)
             response += maybe_follow_up(key)
 
+            await message.reply(response)
             return
 
         topic = get_last_topic(message.author.id)
         response = random.choice(DEFAULT_RESPONSES)
         if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
             response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[topic])
+
+        await message.reply(response.format(user=message.author.mention))
+        return
 
     await bot.process_commands(message)
 
