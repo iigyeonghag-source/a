@@ -908,13 +908,12 @@ async def on_message(message):
             remember_key(message.author.id, key)
             remember_topic(message.author.id, key)
 
-        topic = get_last_topic(message.author.id)
-        response = random.choice(DEFAULT_RESPONSES)
-        if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
-            response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[topic])
+            response = get_response(key)
+            response = response.format(user=message.author.mention)
+            response += maybe_follow_up(key)
 
-        await message.reply(response.format(user=message.author.mention))
-        return
+            await message.reply(response)
+            return
 
     await bot.process_commands(message)
     
