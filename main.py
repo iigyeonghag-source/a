@@ -70,7 +70,7 @@ RESPONSES = {
         "반가워! 오늘은 어떤 이야기를 들려주려고?",
         "안녕! 나는 푸리나야. 설마 내 이름을 모르는 건 아니겠지?",
         "후훗, 찾아와 줘서 기쁜걸!",
-        "좋은 날이네! 네가 왔으니까!"
+        "좋은 날이네! 네가 왔으니까!"  
     ],
     "뭐해": [
         "나? 폰타인을 내려다보고 있었지! ..라고 하면 좀 멋있으려나?",
@@ -346,6 +346,13 @@ RESPONSES = {
     "물어": [
         "알겠어! (왕)",
         "뭐?! 나한테 그런 걸 시킨다고?!"
+    ],
+    "날씨": [
+        "날씨가 궁금해? 창밖을 보는 게 제일 빠를지도!",
+        "흠흠, 오늘 날씨는 어때 보여? 구름이라도 꼈을까?",
+        "비 오는 날은 싫지 않아. 기분이 되레 좋아지는 걸. ..뭐? 물의 신답다고? 고마워! 보는 눈이 있네.",
+        "날씨가 좋으면 되레 산책하고 싶어지는걸!",
+        "구름이 잔뜩 끼었네? 흥, 걱정할 필요 없어. 이 푸리나님이 있으니까 말이야!"
     ]
 }
 
@@ -626,7 +633,9 @@ KEYWORDS = {
     "도로": ["도로", "DORO", "doro"],
     "쟤 죽여": ["쟤 죽여", "족쳐", "처리해", "가라", "조져", "죽이", "가랏"],
     "광질": ["광질", "낚시", "전체", "상점", "돈넣기", "돈빼기"],
-    "물어": ["물어", "뜯어"]
+    "물어": ["물어", "뜯어"],
+    "날씨": ["날씨", "하늘", "구름"]
+    
 }
 
 PRIORITY = [
@@ -720,18 +729,21 @@ FOLLOW_UP_QUESTIONS = {
 TIME_GREETING_RESPONSES = {
     "아침": [
         "좋은 아침이야... 으으, 아침은 역시 힘들어.",
-        "아침부터 왔구나? 꽤 부지런한데?",
-        "좋은 아침! 오늘 하루도 잘 버텨보자고!"
+        "아침 일찍 왔구나? 꽤 부지런한데?",
+        "좋은 아침! 오늘 하루도 잘 버텨보자고! 네 곁엔 이 푸리나님이 있으니까! 후훗",
+        "창밖 날씨는 어때? 폰타인은 오늘도 물이 넘쳐나는데!"
     ],
     "점심": [
-        "점심 시간이네! 밥은 먹었어?",
-        "안녕! 슬슬 맛있는 걸 먹어야 할 시간 아니야?",
-        "점심의 푸리나 등장! ...케이크는 어디 있지?"
+        "벌써 점심 시간이네! 밥은 먹었어?",
+        "안녕! 슬슬 맛있는 걸 먹어야 할 시간 같은데.. 혹시 먹을 거 있어? 웬만하면 달달한 거로!",
+        "점심의 푸리나 등장! ...케이크는 어디 있어?",
+        "오늘 날씨가 좋으면 산책도 괜찮을 텐데!"
     ],
     "저녁": [
         "좋은 저녁이야. 오늘 하루는 어땠어?",
-        "저녁이네! 이제 조금 쉬어도 되는 시간 아닐까?",
-        "오늘도 살아남았구나? 후후, 훌륭해!"
+        "저녁이네! 이제 조금은 쉬어도 되는 시간 아닐까? ..아님 말고!",
+        "오늘도 살아남았구나? 후후, 훌륭해!",
+        "비가 오는 저녁이면 괜히 분위기가 좋아지지 않아?"
     ]
 }
 
@@ -827,16 +839,6 @@ async def on_message(message):
         text = message.content.replace("푸리나", "", 1).strip()
         lower = text.lower()
 
-        if not text:
-            time_key = get_time_key()
-            add_favor(message.author.id, 1)
-            remember_key(message.author.id, time_key)
-            remember_topic(message.author.id, time_key)
-            response = random.choice(TIME_GREETING_RESPONSES[time_key])
-            response = response.format(user=message.author.mention)
-            await message.reply(response)
-            return
-
         stage_response = maybe_stage_response(message.author.id)
         if stage_response:
             await message.reply(stage_response)
@@ -906,13 +908,6 @@ async def on_message(message):
             remember_key(message.author.id, key)
             remember_topic(message.author.id, key)
 
-            response = random.choice(RESPONSES[key])
-            response = response.format(user=message.author.mention)
-            response += maybe_follow_up(key)
-
-            await message.reply(response)
-            return
-
         topic = get_last_topic(message.author.id)
         response = random.choice(DEFAULT_RESPONSES)
         if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
@@ -922,7 +917,16 @@ async def on_message(message):
         return
 
     await bot.process_commands(message)
+    
+def get_response(key):
+    candidates = RESPONSES[key].copy()
 
+    if key == "안녕":
+        time_key = get_time_key()
+        candidates += TIME_GREETING_RESPONSES[time_key]
+
+    return random.choice(candidates)
+    
 @bot.command(name="호감도")
 async def favor_command(ctx):
     love = get_favor(ctx.author.id)
