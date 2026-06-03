@@ -1,6 +1,6 @@
 import os
 import random
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
@@ -21,6 +21,8 @@ favor = {}
 last_response_key = {}
 last_topic = {}
 
+
+KST = timezone(timedelta(hours=9))
 
 def get_favor(user_id):
     return favor.get(str(user_id), 0)
@@ -749,7 +751,8 @@ TIME_GREETING_RESPONSES = {
 
 
 def get_time_key():
-    hour = datetime.now().hour
+    hour = datetime.now(KST).hour
+
     if 5 <= hour < 12:
         return "아침"
     if 12 <= hour < 18:
