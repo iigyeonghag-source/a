@@ -778,6 +778,43 @@ def make_deck():
 
 def card_text(cards):
     return " ".join([f"{rank}{suit}" for rank, suit in cards])
+
+def hand_score(cards):
+    values = sorted([RANK_VALUE[r] for r, s in cards], reverse=True)
+    ranks = [r for r, s in cards]
+    suits = [s for r, s in cards]
+
+    counts = {r: ranks.count(r) for r in ranks}
+    count_values = sorted(counts.values(), reverse=True)
+
+    is_flush = len(set(suits)) == 1
+    unique_values = sorted(set(values), reverse=True)
+
+    is_straight = False
+    if len(unique_values) == 5:
+        if unique_values[0] - unique_values[-1] == 4:
+            is_straight = True
+        elif unique_values == [14, 5, 4, 3, 2]:
+            is_straight = True
+            values = [5, 4, 3, 2, 1]
+
+    if is_straight and is_flush:
+        return (8, values, "스트레이트 플러시")
+    if 4 in count_values:
+        return (7, values, "포카드")
+    if count_values == [3, 2]:
+        return (6, values, "풀하우스")
+    if is_flush:
+        return (5, values, "플러시")
+    if is_straight:
+        return (4, values, "스트레이트")
+    if 3 in count_values:
+        return (3, values, "트리플")
+    if count_values == [2, 2, 1]:
+        return (2, values, "투 페어")
+    if 2 in count_values:
+        return (1, values, "원 페어")
+    return (0, values, "하이 카드")
     
 from itertools import combinations
 
