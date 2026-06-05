@@ -755,422 +755,456 @@ TIME_GREETING_RESPONSES = {
     ]
 }
 
-poker_games = {}
+from itertools import combinations
 
-SUITS = ["♠", "♥", "♦", "♣"]
-RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-RANK_VALUE = {r: i for i, r in enumerate(RANKS, start=2)}
+poker_rooms = {}
+poker_money = {}
+poker_last_claim = {}
 
-def make_deck():
-    deck = []
-    for suit in SUITS:
-        for rank in RANKS:
-            deck.append((rank, suit))
-    random.shuffle(deck)
-    return deck
+SMALL_BLIND = 2
+BIG_BLIND = 5
+FURINA_ID = "FURINA_BOT"
 
-def card_text(cards):
-    return " ".join([f"{rank}{suit}" for rank, suit in cards])
+def get_poker_money(user_id):
+    return poker_money.get(str(user_id), 100)
 
-def hand_score(cards):
-    values = sorted([RANK_VALUE[r] for r, s in cards], reverse=True)
-    ranks = [r for r, s in cards]
-    suits = [s for r, s in cards]
+def add_poker_money(user_id, amount):
+    uid = str(user_id)
+    poker_money[uid] = get_poker_money(uid) + amount
+    return poker_money[uid]
 
-    counts = {r: ranks.count(r) for r in ranks}
-    count_values = sorted(counts.values(), reverse=True)
+def best_score(cards):
+    return max(hand_score(list(combo)) for combo in combinations(cards, 5))
 
-    is_flush = len(set(suits)) == 1
-    unique_values = sorted(set(values), reverse=True)
+def poker_name(ctx, user_id):
+    if user_id == FURINA_ID:
+        return "푸리나"
+    member = ctx.guild.get_member(int(user_id))
+    return member.display_name if member else str(user_id)
 
-    is_straight = False
-    if len(unique_values) == 5:
-        if unique_values[0] - unique_values[-1] == 4:
-            is_straight = True
-        elif unique_values == [14, 5, 4, 3, 2]:
-            is_straight = True
-            values = [5, 4, 3, 2, 1]
+def new_poker_room(ctx):
+    cid = str(ctx.channel.id)
+    poker_rooms[cid] = {
+        "host": str(ctx.author.id),
+        "players": [FURINA_ID, str(ctx.author.id)],
+        "dealer_index": 0,
+        "started": False,
+        "deck": [],
+        "hands": {},
+        "community": [],
+        "pot": 0,
+        "current_bet": 0,
+        "bets": {},
+        "folded": set(),
+        "acted": set(),
+        "turn_index": 0,
+        "stage": "lobby"
+    }
+    return poker_rooms[cid]
 
-    if is_straight and is_flush:
-        return (8, values, "스트레이트 플러시")
-    if 4 in count_values:
-        return (7, values, "포카드")
-    if count_values == [3, 2]:
-        return (6, values, "풀하우스")
-    if is_flush:
-        return (5, values, "플러시")
-    if is_straight:
-        return (4, values, "스트레이트")
-    if 3 in count_values:
-        return (3, values, "트리플")
-    if count_values == [2, 2, 1]:
-        return (2, values, "투 페어")
-    if 2 in count_values:
-        return (1, values, "원 페어")
-    return (0, values, "하이 카드")
+def get_room(ctx):
+    return poker_rooms.get(str(ctx.channel.id))
 
-def judge_winner(player_cards, bot_cards):
-    p_score = hand_score(player_cards)
-    b_score = hand_score(bot_cards)
+def active_players(room):
+    return [p for p in room["players"] if p not in room["folded"]]
 
-    if p_score[:2] > b_score[:2]:
-        return "player", p_score, b_score
-    elif p_score[:2] < b_score[:2]:
-        return "bot", p_score, b_score
+def next_index(room, start):
+    players = room["players"]
+    for i in range(1, len(players) + 1):
+        idx = (start + i) % len(players)
+        if players[idx] not in room["folded"]:
+            return idx
+    return start
+
+def current_player(room):
+    return room["players"][room["turn_index"]]
+
+def all_called(room):
+    for p in active_players(room):
+        if room["bets"].get(p, 0) != room["current_bet"]:
+            return False
+        if p not in room["acted"]:
+            return False
+    return True
+
+def stage_text(room):
+    cards = card_text(room["community"]) if room["community"] else "아직 없음"
+    return f"공개 카드: **{cards}**\n판돈: **{room['pot']}원**"
+
+async def advance_stage(ctx, room):
+    room["acted"].clear()
+    room["bets"] = {p: 0 for p in room["players"]}
+    room["current_bet"] = 0
+
+    if room["stage"] == "preflop":
+        room["community"] += [room["deck"].pop() for _ in range(3)]
+        room["stage"] = "flop"
+    elif room["stage"] == "flop":
+        room["community"].append(room["deck"].pop())
+        room["stage"] = "turn"
+    elif room["stage"] == "turn":
+        room["community"].append(room["deck"].pop())
+        room["stage"] = "river"
     else:
-        return "draw", p_score, b_score
-
-def get_time_key():
-    hour = datetime.now(KST).hour
-
-    if 5 <= hour < 12:
-        return "아침"
-    if 12 <= hour < 18:
-        return "점심"
-    return "저녁"
-
-
-def get_favor_stage(user_id):
-    love = get_favor(user_id)
-    if love >= 80:
-        return "love"
-    if love >= 40:
-        return "friendly"
-    if love <= -30:
-        return "cold"
-    return None
-
-def maybe_stage_response(user_id):
-    stage = get_favor_stage(user_id)
-    if not stage:
-        return None
-    if random.random() < 0.18:
-        return random.choice(FAVOR_STAGE_RESPONSES[stage])
-    return None
-
-def maybe_follow_up(key):
-    if key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
-        return "\n" + random.choice(FOLLOW_UP_QUESTIONS[key])
-    return ""
-
-def remember_topic(user_id, key):
-    last_topic[str(user_id)] = key
-
-def get_last_topic(user_id):
-    return last_topic.get(str(user_id))
-
-def has_keyword(text, key):
-    words = KEYWORDS.get(key, [key])
-    return any(word in text for word in words)
-
-def is_repeat_request(text):
-    return any(word in text for word in REPEAT_KEYWORDS)
-
-def find_response_key(text):
-    lower = text.lower()
-
-    for key in PRIORITY:
-        if has_keyword(lower, key):
-            return key
-
-    for key in RESPONSES:
-        if has_keyword(lower, key):
-            return key
-
-    return None
-
-def find_combo_key(text):
-    lower = text.lower()
-
-    matched_keys = set()
-    for key in KEYWORDS:
-        if has_keyword(lower, key):
-            matched_keys.add(key)
-
-    for combo in COMBO_RESPONSES:
-        if all(key in matched_keys for key in combo):
-            return combo
-
-    return None
-
-def remember_key(user_id, key):
-    last_response_key[str(user_id)] = key
-
-def get_last_key(user_id):
-    return last_response_key.get(str(user_id))
-
-@bot.event
-async def on_ready():
-    print(f"{bot.user} 로그인 완료")
-
-@bot.event
-async def on_message(message):
-    if message.author.bot:
+        await showdown(ctx, room)
         return
 
-    if message.content.startswith("푸리나"):
-        text = message.content.replace("푸리나", "", 1).strip()
-        lower = text.lower()
+    room["turn_index"] = next_index(room, room["dealer_index"])
+    await ctx.send(
+        f"다음 라운드! 현재 단계: **{room['stage']}**\n"
+        f"{stage_text(room)}\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
 
-        stage_response = maybe_stage_response(message.author.id)
-        if stage_response:
-            await message.reply(stage_response)
+    await furina_auto(ctx, room)
+
+async def showdown(ctx, room):
+    alive = active_players(room)
+
+    scores = {}
+    for p in alive:
+        scores[p] = best_score(room["hands"][p] + room["community"])
+
+    best = max(scores.values())
+    winners = [p for p, s in scores.items() if s == best]
+
+    prize = room["pot"] // len(winners)
+
+    for w in winners:
+        if w != FURINA_ID:
+            add_poker_money(w, prize)
+
+    result_lines = []
+    for p in room["players"]:
+        hand = card_text(room["hands"][p])
+        if p in room["folded"]:
+            result_lines.append(f"{poker_name(ctx, p)}: **폴드** / 패: {hand}")
+        else:
+            result_lines.append(f"{poker_name(ctx, p)}: **{scores[p][2]}** / 패: {hand}")
+
+    winner_names = ", ".join(poker_name(ctx, w) for w in winners)
+
+    room["dealer_index"] = (room["dealer_index"] + 1) % len(room["players"])
+    room["started"] = False
+    room["stage"] = "lobby"
+
+    await ctx.send(
+        f"쇼다운!\n\n"
+        f"{stage_text(room)}\n\n"
+        + "\n".join(result_lines)
+        + f"\n\n승자: **{winner_names}** / 획득: **{prize}원**"
+    )
+
+async def furina_auto(ctx, room):
+    while room["started"] and current_player(room) == FURINA_ID:
+        if FURINA_ID in room["folded"]:
             return
 
-        if any(word in lower for word in KEYWORDS["미안"]):
-            if get_favor(message.author.id) <= 0:
-                add_favor(message.author.id, 5)
-                response = random.choice(RESPONSES["미안"])
+        need = room["current_bet"] - room["bets"].get(FURINA_ID, 0)
+
+        if need > 0:
+            if random.random() < 0.18:
+                room["folded"].add(FURINA_ID)
+                await ctx.send("푸리나: 으... 이번 판은 물러나 주지! **폴드!**")
             else:
-                response = random.choice([
-                    "후후, 지금은 딱히 화난 것도 아닌걸?",
-                    "사과를 받아줄 상황이 아닌 것 같은데?",
-                    "흠흠, 그래도 사과는 받아두도록 하지!",
-                    "갑자기 왜 그래? 조금 당황스러운걸.",
-                    "이미 용서한 것 같은데 말이야?"
-                ])
-            await message.reply(response.format(user=message.author.mention))
+                room["pot"] += need
+                room["bets"][FURINA_ID] += need
+                room["acted"].add(FURINA_ID)
+                await ctx.send(f"푸리나: 후후, 받아주겠어. **콜 {need}원!**")
+        else:
+            if random.random() < 0.25:
+                amount = random.choice([5, 10, 15])
+                room["current_bet"] = amount
+                room["bets"][FURINA_ID] += amount
+                room["pot"] += amount
+                room["acted"].add(FURINA_ID)
+                await ctx.send(f"푸리나: 후후... 그럼 **레이즈 {amount}원!**")
+            else:
+                room["acted"].add(FURINA_ID)
+                await ctx.send("푸리나: 체크. ...뭔가 수상하지?")
+
+        if len(active_players(room)) == 1:
+            await win_by_fold(ctx, room)
             return
 
-        if get_favor(message.author.id) <= -50:
-            response = random.choice([
-                "흥. 너랑은 말 안 해.",
-                "말 걸지 마.",
-                "아직도 나한테 할 말이 있어?",
-                "기분 안 좋아.",
-                "..."
-            ])
-            await message.reply(response)
+        if all_called(room):
+            await advance_stage(ctx, room)
             return
 
-        if any(word in lower for word in DIRTY_WORDS):
-            add_favor(message.author.id, -3)
-            await message.reply(random.choice(DIRTY_RESPONSES))
-            return
+        room["turn_index"] = next_index(room, room["turn_index"])
 
-        if any(word in lower for word in ANGRY_WORDS):
-            add_favor(message.author.id, -5)
-            await message.reply(random.choice(ANGRY_RESPONSES))
-            return
+async def win_by_fold(ctx, room):
+    winner = active_players(room)[0]
 
-        if is_repeat_request(lower):
-            last_key = get_last_key(message.author.id)
-            responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
-            add_favor(message.author.id, 1)
-            response = random.choice(responses).format(user=message.author.mention)
-            await message.reply(response)
-            return
+    if winner != FURINA_ID:
+        add_poker_money(winner, room["pot"])
 
-        combo_key = find_combo_key(text)
+    await ctx.send(
+        f"모두 폴드!\n"
+        f"승자: **{poker_name(ctx, winner)}**\n"
+        f"획득: **{room['pot']}원**"
+    )
 
-        if combo_key:
-            add_favor(message.author.id, 1)
-            combo_name = "+".join(combo_key)
-            remember_key(message.author.id, combo_name)
-            remember_topic(message.author.id, combo_name)
-            response = random.choice(COMBO_RESPONSES[combo_key])
-            response = response.format(user=message.author.mention)
-            response += maybe_follow_up(combo_key[0])
-            await message.reply(response)
-            return
+    room["dealer_index"] = (room["dealer_index"] + 1) % len(room["players"])
+    room["started"] = False
+    room["stage"] = "lobby"
 
-        key = find_response_key(text)
+async def after_action(ctx, room):
+    if len(active_players(room)) == 1:
+        await win_by_fold(ctx, room)
+        return
 
-        if key:
-            add_favor(message.author.id, 1)
-            remember_key(message.author.id, key)
-            remember_topic(message.author.id, key)
+    if all_called(room):
+        await advance_stage(ctx, room)
+        return
 
-            response = get_response(key)
-            response = response.format(user=message.author.mention)
-            response += maybe_follow_up(key)
+    room["turn_index"] = next_index(room, room["turn_index"])
 
-            await message.reply(response)
-            return
+    await ctx.send(f"현재 턴: **{poker_name(ctx, current_player(room))}**")
+    await furina_auto(ctx, room)
 
-    await bot.process_commands(message)
-    
-def get_response(key):
-    candidates = RESPONSES[key].copy()
+@bot.command(name="돈")
+async def poker_money_command(ctx):
+    await ctx.reply(f"{ctx.author.mention}의 포커 돈: **{get_poker_money(ctx.author.id)}원**")
 
-    if key == "안녕":
-        time_key = get_time_key()
-        candidates += TIME_GREETING_RESPONSES[time_key]
+@bot.command(name="돈받기")
+async def poker_claim(ctx):
+    uid = str(ctx.author.id)
+    now = datetime.now(timezone.utc)
 
-    return random.choice(candidates)
+    last = poker_last_claim.get(uid)
+    if last and now - last < timedelta(hours=24):
+        left = timedelta(hours=24) - (now - last)
+        hours = int(left.total_seconds() // 3600)
+        minutes = int((left.total_seconds() % 3600) // 60)
+        await ctx.reply(f"아직 못 받아! 남은 시간: **{hours}시간 {minutes}분**")
+        return
+
+    poker_last_claim[uid] = now
+    money = add_poker_money(uid, 100)
+    await ctx.reply(f"100원 지급 완료! 현재 돈: **{money}원**")
 
 @bot.command(name="포커")
-async def poker_start(ctx):
-    user_id = str(ctx.author.id)
+async def poker_lobby(ctx):
+    room = get_room(ctx)
 
-    deck = make_deck()
-
-    player_cards = [deck.pop() for _ in range(5)]
-    bot_cards = [deck.pop() for _ in range(5)]
-
-    poker_games[user_id] = {
-    "player_cards": player_cards,
-    "bot_cards": bot_cards,
-    "deck": deck,
-    "player_money": 100,
-    "bot_money": 100,
-    "pot": 0,
-    "current_bet": 0,
-    "player_bet": 0,
-    "bot_bet": 0
-    }
-
-    await ctx.reply(
-        f"후후, 포커 한 판 붙어볼까?\n"
-        f"네 패: **{card_text(player_cards)}**\n\n"
-        f"`!콜` 하면 승부, `!폴드` 하면 도망이야!"
-    )
-
-
-@bot.command(name="콜")
-async def poker_call(ctx):
-    user_id = str(ctx.author.id)
-
-    if user_id not in poker_games:
-        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+    if room and room["started"]:
+        await ctx.reply("이미 이 채널에서 포커가 진행 중이야!")
         return
 
-        game = poker_games[user_id]
-
-    call_amount = game["current_bet"] - game["player_bet"]
-
-    if call_amount > 0:
-        if call_amount > game["player_money"]:
-            await ctx.reply("콜할 돈이 부족해!")
-            return
-
-        game["player_money"] -= call_amount
-        game["player_bet"] += call_amount
-        game["pot"] += call_amount
-        
-    poker_games[user_id]
-        
-
-    player_cards = game["player_cards"]
-    bot_cards = game["bot_cards"]
-
-    winner, p_score, b_score = judge_winner(player_cards, bot_cards)
-
-    if winner == "player":
-        add_favor(ctx.author.id, 2)
-        result = "네 승리야! 뭐, 뭐야?! 내가 졌다고?!"
-    elif winner == "bot":
-        add_favor(ctx.author.id, -1)
-        result = "후후, 내 승리네! 역시 나야!"
-    else:
-        result = "무승부야. 흠... 다시 붙어야겠는걸?"
+    room = new_poker_room(ctx)
 
     await ctx.reply(
-        f"네 패: **{card_text(player_cards)}**\n"
-        f"푸리나 패: **{card_text(bot_cards)}**\n\n"
-        f"너: **{p_score[2]}**\n"
-        f"푸리나: **{b_score[2]}**\n\n"
-        f"{result}"
+        f"포커 방 생성!\n"
+        f"참가자: **푸리나**, **{ctx.author.display_name}**\n\n"
+        f"`!참가`로 참가 가능\n"
+        f"`!시작`으로 시작"
     )
+
+@bot.command(name="참가")
+async def poker_join(ctx):
+    room = get_room(ctx)
+
+    if not room:
+        await ctx.reply("포커 방이 없어! `!포커`로 먼저 만들어!")
+        return
+
+    if room["started"]:
+        await ctx.reply("이미 게임 시작했어!")
+        return
+
+    uid = str(ctx.author.id)
+
+    if uid in room["players"]:
+        await ctx.reply("이미 참가했잖아!")
+        return
+
+    room["players"].append(uid)
+
+    await ctx.reply(
+        f"{ctx.author.display_name} 참가 완료!\n"
+        f"현재 참가자: **{len(room['players'])}명**"
+    )
+
+@bot.command(name="시작")
+async def poker_start(ctx):
+    room = get_room(ctx)
+
+    if not room:
+        await ctx.reply("포커 방이 없어! `!포커`부터 해!")
+        return
+
+    if room["started"]:
+        await ctx.reply("이미 시작했어!")
+        return
+
+    if str(ctx.author.id) != room["host"]:
+        await ctx.reply("방장만 시작할 수 있어!")
+        return
+
+    if len(room["players"]) < 2:
+        await ctx.reply("참가자가 부족해!")
+        return
+
+    deck = make_deck()
+    room["deck"] = deck
+    room["hands"] = {p: [deck.pop(), deck.pop()] for p in room["players"]}
+    room["community"] = []
+    room["pot"] = 0
+    room["current_bet"] = BIG_BLIND
+    room["bets"] = {p: 0 for p in room["players"]}
+    room["folded"] = set()
+    room["acted"] = set()
+    room["stage"] = "preflop"
+    room["started"] = True
+
+    players = room["players"]
+    dealer = room["dealer_index"]
+
+    small_idx = (dealer + 1) % len(players)
+    big_idx = (dealer + 2) % len(players)
+
+    if len(players) == 2:
+        small_idx = dealer
+        big_idx = (dealer + 1) % len(players)
+
+    small = players[small_idx]
+    big = players[big_idx]
+
+    for p, blind in [(small, SMALL_BLIND), (big, BIG_BLIND)]:
+        room["bets"][p] += blind
+        room["pot"] += blind
+        if p != FURINA_ID:
+            add_poker_money(p, -blind)
+
+    room["turn_index"] = next_index(room, big_idx)
+
+    msg = (
+        f"포커 시작!\n"
+        f"딜러: **{poker_name(ctx, players[dealer])}**\n"
+        f"스몰 블라인드: **{poker_name(ctx, small)} {SMALL_BLIND}원**\n"
+        f"빅 블라인드: **{poker_name(ctx, big)} {BIG_BLIND}원**\n\n"
+        f"현재 판돈: **{room['pot']}원**\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+
+    await ctx.send(msg)
+
+    for p in players:
+        if p != FURINA_ID:
+            user = await bot.fetch_user(int(p))
+            await user.send(f"네 포커 패: **{card_text(room['hands'][p])}**")
+
+    await furina_auto(ctx, room)
 
 @bot.command(name="체크")
 async def poker_check(ctx):
-    user_id = str(ctx.author.id)
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
 
-    if user_id not in poker_games:
-        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
         return
 
-    game = poker_games[user_id]
-
-    if game["current_bet"] > game["player_bet"]:
-        await ctx.reply("상대가 이미 베팅했어! 체크는 못 하고 `!콜`이나 `!폴드` 해야 해!")
+    if current_player(room) != uid:
+        await ctx.reply("지금 네 턴이 아니야!")
         return
 
-    if random.random() < 0.35:
-        raise_amount = random.choice([5, 10, 20])
-        game["current_bet"] = raise_amount
-        game["bot_bet"] += raise_amount
-        game["bot_money"] -= raise_amount
-        game["pot"] += raise_amount
+    if room["current_bet"] > room["bets"].get(uid, 0):
+        await ctx.reply("상대 베팅이 있어서 체크 못 해! `!콜` 또는 `!폴드` 해야 해.")
+        return
 
-        await ctx.reply(
-            f"네가 체크하자 푸리나가 씨익 웃었어.\n"
-            f"“후후... 그럼 나는 **{raise_amount} 레이즈**!”\n\n"
-            f"현재 판돈: **{game['pot']}**\n"
-            f"`!콜` / `!폴드`"
-        )
-    else:
-        await ctx.reply(
-            f"둘 다 체크!\n"
-            f"이제 승부를 보자. `!콜` 입력하면 패를 공개해!"
-        )
+    room["acted"].add(uid)
+    await ctx.reply("체크!")
+
+    await after_action(ctx, room)
+
+@bot.command(name="콜")
+async def poker_call(ctx):
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
+
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
+        return
+
+    if current_player(room) != uid:
+        await ctx.reply("지금 네 턴이 아니야!")
+        return
+
+    need = room["current_bet"] - room["bets"].get(uid, 0)
+
+    if need <= 0:
+        await ctx.reply("콜할 금액이 없어. 체크 처리할게!")
+        room["acted"].add(uid)
+        await after_action(ctx, room)
+        return
+
+    if get_poker_money(uid) < need:
+        await ctx.reply("돈이 부족해서 콜 못 해!")
+        return
+
+    add_poker_money(uid, -need)
+    room["bets"][uid] += need
+    room["pot"] += need
+    room["acted"].add(uid)
+
+    await ctx.reply(f"콜! **{need}원** 지불.")
+
+    await after_action(ctx, room)
 
 @bot.command(name="레이즈")
 async def poker_raise(ctx, amount: int = 10):
-    user_id = str(ctx.author.id)
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
 
-    if user_id not in poker_games:
-        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
         return
 
-    game = poker_games[user_id]
-
-    if amount <= 0:
-        await ctx.reply("레이즈 금액은 1 이상이어야 해!")
+    if current_player(room) != uid:
+        await ctx.reply("지금 네 턴이 아니야!")
         return
 
-    if amount > game["player_money"]:
-        await ctx.reply("돈이 부족해! 지금 가진 돈보다 크게 레이즈할 수 없어!")
+    if amount <= room["current_bet"]:
+        await ctx.reply(f"레이즈는 현재 베팅 **{room['current_bet']}원**보다 커야 해!")
         return
 
-    game["player_money"] -= amount
-    game["player_bet"] += amount
-    game["pot"] += amount
-    game["current_bet"] = game["player_bet"]
+    need = amount - room["bets"].get(uid, 0)
 
-    bot_choice = random.random()
-
-    if bot_choice < 0.2:
-        poker_games[user_id]
-        add_favor(ctx.author.id, 1)
-        await ctx.reply(
-            f"네가 **{amount} 레이즈**하자 푸리나가 움찔했어.\n"
-            f"“으... 이번엔 물러나 주지!”\n\n"
-            f"푸리나가 폴드! 네 승리!"
-        )
+    if get_poker_money(uid) < need:
+        await ctx.reply("돈이 부족해!")
         return
 
-    call_amount = game["current_bet"] - game["bot_bet"]
+    add_poker_money(uid, -need)
+    room["bets"][uid] = amount
+    room["current_bet"] = amount
+    room["pot"] += need
+    room["acted"] = {uid}
 
-    if call_amount > game["bot_money"]:
-        call_amount = game["bot_money"]
+    await ctx.reply(f"레이즈! 현재 베팅 **{amount}원** / 판돈 **{room['pot']}원**")
 
-    game["bot_money"] -= call_amount
-    game["bot_bet"] += call_amount
-    game["pot"] += call_amount
-
-    await ctx.reply(
-        f"네가 **{amount} 레이즈**!\n"
-        f"푸리나가 콜했어.\n\n"
-        f"현재 판돈: **{game['pot']}**\n"
-        f"네 돈: **{game['player_money']}** / 푸리나 돈: **{game['bot_money']}**\n\n"
-        f"`!콜` 하면 승부 공개, `!레이즈 금액`으로 더 밀어붙이기, `!폴드`로 접기."
-    )
-    
+    await after_action(ctx, room)
 
 @bot.command(name="폴드")
 async def poker_fold(ctx):
-    user_id = str(ctx.author.id)
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
 
-    if user_id not in poker_games:
-        await ctx.reply("접을 판도 없는데?! `!포커`부터 시작하라구!")
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
         return
 
-    poker_games[user_id]
-    add_favor(ctx.author.id, -1)
+    if current_player(room) != uid:
+        await ctx.reply("지금 네 턴이 아니야!")
+        return
 
-    await ctx.reply("폴드? 후후, 도망치는 거야? 뭐... 현명한 판단일지도 모르지!")
+    room["folded"].add(uid)
+    room["acted"].add(uid)
+
+    await ctx.reply("폴드!")
+
+    await after_action(ctx, room)
     
 @bot.command(name="호감도")
 async def favor_command(ctx):
