@@ -1385,7 +1385,194 @@ async def poker_my_hand(ctx):
         await ctx.reply("DM으로 네 패랑 현재 족보 알려줬어!")
     except discord.Forbidden:
         await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
-        
+
+
+def get_favor_stage(user_id):
+    love = get_favor(user_id)
+    if love >= 80:
+        return "love"
+    if love >= 40:
+        return "friendly"
+    if love <= -30:
+        return "cold"
+    return None
+
+def maybe_stage_response(user_id):
+    stage = get_favor_stage(user_id)
+    if not stage:
+        return None
+    if random.random() < 0.18:
+        return random.choice(FAVOR_STAGE_RESPONSES[stage])
+    return None
+
+def maybe_follow_up(key):
+    if key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
+        return "\n" + random.choice(FOLLOW_UP_QUESTIONS[key])
+    return ""
+
+def remember_topic(user_id, key):
+    last_topic[str(user_id)] = key
+
+def get_last_topic(user_id):
+    return last_topic.get(str(user_id))
+
+def has_keyword(text, key):
+    words = KEYWORDS.get(key, [key])
+    return any(word in text for word in words)
+
+def is_repeat_request(text):
+    return any(word in text for word in REPEAT_KEYWORDS)
+
+def find_response_key(text):
+    lower = text.lower()
+
+    for key in PRIORITY:
+        if has_keyword(lower, key):
+            return key
+
+    for key in RESPONSES:
+        if has_keyword(lower, key):
+            return key
+
+    return None
+
+def find_combo_key(text):
+    lower = text.lower()
+
+    matched_keys = set()
+    for key in KEYWORDS:
+        if has_keyword(lower, key):
+            matched_keys.add(key)
+
+    for combo in COMBO_RESPONSES:
+        if all(key in matched_keys for key in combo):
+            return combo
+
+    return None
+
+def remember_key(user_id, key):
+    last_response_key[str(user_id)] = key
+
+def get_last_key(user_id):
+    return last_response_key.get(str(user_id))
+
+@bot.event
+async def on_ready():
+    print(f"{bot.user} 로그인 완료")
+
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    if not message.content.startswith("푸리나") and not message.content.startswith("!"):
+        pending_response = get_pending_response(message.author.id, message.content)
+        if pending_response:
+            await message.reply(pending_response.format(user=message.author.mention))
+            return
+
+    if message.content.startswith("푸리나"):
+        text = message.content.replace("푸리나", "", 1).strip()
+        lower = text.lower()
+
+        pending_response = get_pending_response(message.author.id, text)
+        if pending_response:
+            await message.reply(pending_response.format(user=message.author.mention))
+            return
+
+        stage_response = maybe_stage_response(message.author.id)
+        if stage_response:
+            await message.reply(stage_response)
+            return
+
+        if any(word in lower for word in KEYWORDS["미안"]):
+            if get_favor(message.author.id) <= 0:
+                add_favor(message.author.id, 5)
+                response = random.choice(RESPONSES["미안"])
+            else:
+                response = random.choice([
+                    "후후, 지금은 딱히 화난 것도 아닌걸?",
+                    "사과를 받아줄 상황이 아닌 것 같은데?",
+                    "흠흠, 그래도 사과는 받아두도록 하지!",
+                    "갑자기 왜 그래? 조금 당황스러운걸.",
+                    "이미 용서한 것 같은데 말이야?"
+                ])
+            await message.reply(response.format(user=message.author.mention))
+            return
+
+        if get_favor(message.author.id) <= -50:
+            response = random.choice([
+                "흥. 너랑은 말 안 해.",
+                "말 걸지 마.",
+                "아직도 나한테 할 말이 있어?",
+                "기분 안 좋아.",
+                "..."
+            ])
+            await message.reply(response)
+            return
+
+        if any(word in lower for word in DIRTY_WORDS):
+            add_favor(message.author.id, -3)
+            await message.reply(random.choice(DIRTY_RESPONSES))
+            return
+
+        if any(word in lower for word in ANGRY_WORDS):
+            add_favor(message.author.id, -5)
+            await message.reply(random.choice(ANGRY_RESPONSES))
+            return
+
+        if is_repeat_request(lower):
+            last_key = get_last_key(message.author.id)
+            responses = REPEAT_RESPONSES.get(last_key, REPEAT_RESPONSES["default"])
+            add_favor(message.author.id, 1)
+            response = random.choice(responses).format(user=message.author.mention)
+            await message.reply(response)
+            return
+
+        combo_key = find_combo_key(text)
+
+        if combo_key:
+            add_favor(message.author.id, 1)
+            combo_name = "+".join(combo_key)
+            remember_key(message.author.id, combo_name)
+            remember_topic(message.author.id, combo_name)
+            set_pending_question(message.author.id, combo_key[0])
+            response = random.choice(COMBO_RESPONSES[combo_key])
+            response = response.format(user=message.author.mention)
+            response += maybe_follow_up(combo_key[0])
+            await message.reply(response)
+            return
+
+        key = find_response_key(text)
+
+        if key:
+            add_favor(message.author.id, 1)
+            remember_key(message.author.id, key)
+            remember_topic(message.author.id, key)
+            set_pending_question(message.author.id, key)
+
+            if key == "안녕" and random.random() < 0.35:
+                time_key = get_time_key()
+                response = random.choice(TIME_GREETING_RESPONSES[time_key])
+            else:
+                response = random.choice(RESPONSES[key])
+            response = response.format(user=message.author.mention)
+            response += maybe_follow_up(key)
+
+            await message.reply(response)
+            return
+
+        topic = get_last_topic(message.author.id)
+        response = random.choice(DEFAULT_RESPONSES)
+        if topic in FOLLOW_UP_QUESTIONS and random.random() < 0.35:
+            response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[topic])
+
+        await message.reply(response.format(user=message.author.mention))
+        return
+
+    await bot.process_commands(message)
+
+
 @bot.command(name="호감도")
 async def favor_command(ctx):
     love = get_favor(ctx.author.id)
