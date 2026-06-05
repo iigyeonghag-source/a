@@ -1048,7 +1048,7 @@ async def poker_call(ctx):
         game["player_bet"] += call_amount
         game["pot"] += call_amount
         
-    poker_games.pop(user_id) = {
+    poker_games[user_id] = {
         
 
     player_cards = game["player_cards"]
@@ -1132,7 +1132,7 @@ async def poker_raise(ctx, amount: int = 10):
     bot_choice = random.random()
 
     if bot_choice < 0.2:
-        poker_games.pop(user_id)
+        poker_games[user_id]
         add_favor(ctx.author.id, 1)
         await ctx.reply(
             f"네가 **{amount} 레이즈**하자 푸리나가 움찔했어.\n"
@@ -1167,7 +1167,7 @@ async def poker_fold(ctx):
         await ctx.reply("접을 판도 없는데?! `!포커`부터 시작하라구!")
         return
 
-    poker_games.pop(user_id)
+    poker_games[user_id]
     add_favor(ctx.author.id, -1)
 
     await ctx.reply("폴드? 후후, 도망치는 거야? 뭐... 현명한 판단일지도 모르지!")
