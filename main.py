@@ -779,6 +779,48 @@ def make_deck():
 def card_text(cards):
     return " ".join([f"{rank}{suit}" for rank, suit in cards])
 
+def hand_score(cards):
+    values = sorted([RANK_VALUE[r] for r, s in cards], reverse=True)
+    ranks = [r for r, s in cards]
+    suits = [s for r, s in cards]
+
+    counts = {r: ranks.count(r) for r in ranks}
+    count_values = sorted(counts.values(), reverse=True)
+
+    is_flush = len(cards) >= 5 and len(set(suits)) == 1
+    unique_values = sorted(set(values), reverse=True)
+
+    is_straight = False
+    if len(unique_values) >= 5:
+        for i in range(len(unique_values) - 4):
+            window = unique_values[i:i+5]
+            if window[0] - window[-1] == 4:
+                is_straight = True
+                values = window
+                break
+
+        if not is_straight and set([14, 5, 4, 3, 2]).issubset(set(unique_values)):
+            is_straight = True
+            values = [5, 4, 3, 2, 1]
+
+    if is_straight and is_flush:
+        return (8, values, "스트레이트 플러시")
+    if 4 in count_values:
+        return (7, values, "포카드")
+    if 3 in count_values and 2 in count_values:
+        return (6, values, "풀하우스")
+    if is_flush:
+        return (5, values, "플러시")
+    if is_straight:
+        return (4, values, "스트레이트")
+    if 3 in count_values:
+        return (3, values, "트리플")
+    if count_values.count(2) >= 2:
+        return (2, values, "투 페어")
+    if 2 in count_values:
+        return (1, values, "원 페어")
+    return (0, values, "하이 카드")
+    
 def hand_name_detail(cards):
     score = hand_score(cards)
     rank_type = score[0]
