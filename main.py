@@ -25,27 +25,43 @@ last_topic = {}
 
 MONEY_FILE = "poker_money.json"
 
-def load_poker_money():
-    global poker_money
+DATA_DIR = "/data"
+DATA_FILE = "/data/data.json"
 
-    if os.path.exists(MONEY_FILE):
-        try:
-            with open(MONEY_FILE, "r", encoding="utf-8") as f:
-                poker_money = json.load(f)
-        except:
-            poker_money = {}
-    else:
-        poker_money = {}
+data = {
+    "poker_money": {},
+    "poker_last_claim": {}
+}
 
-def save_poker_money():
-    with open(MONEY_FILE, "w", encoding="utf-8") as f:
-        json.dump(poker_money, f, ensure_ascii=False, indent=4)
+def load_data():
+    global data, poker_money, poker_last_claim
 
+    os.makedirs(DATA_DIR, exist_ok=True)
 
-poker_rooms = {}
-poker_money = {}
-poker_last_claim = {}
+    if os.path.exists(DATA_FILE):
+        with open(DATA_FILE, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
 
+        data["poker_money"] = loaded.get("poker_money", {})
+        data["poker_last_claim"] = loaded.get("poker_last_claim", {})
+
+    poker_money = data["poker_money"]
+
+    poker_last_claim = {}
+    for uid, value in data["poker_last_claim"].items():
+        poker_last_claim[uid] = datetime.fromisoformat(value)
+
+def save_data():
+    os.makedirs(DATA_DIR, exist_ok=True)
+
+    data["poker_money"] = poker_money
+    data["poker_last_claim"] = {
+        uid: value.isoformat()
+        for uid, value in poker_last_claim.items()
+    }
+
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 load_poker_money()
 
 KST = timezone(timedelta(hours=9))
@@ -999,6 +1015,7 @@ def get_poker_money(user_id):
 def add_poker_money(user_id, amount):
     uid = str(user_id)
     poker_money[uid] = get_poker_money(uid) + amount
+    save_data()
     return poker_money[uid]
 
 def best_score(cards):
@@ -1209,6 +1226,7 @@ async def poker_claim(ctx):
         return
 
     poker_last_claim[uid] = now
+    save_data()
     money = add_poker_money(uid, 100)
     await ctx.reply(f"100원 지급 완료! 현재 돈: **{money}원**")
 
