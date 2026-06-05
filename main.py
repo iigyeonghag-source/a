@@ -614,7 +614,7 @@ KEYWORDS = {
     "안녕": ["안녕", "안뇽", "ㅎㅇ", "하이", "hello", "hi", "헬로", "할로"],
     "뭐해": ["뭐해", "뭐함", "머해", "모해", "뭐하냐", "뭐하고 있어"],
     "좋아해": ["좋아해", "좋아", "호감", "마음에 들어"],
-    "싫어": ["싫어", "싫다", "싫음", "하기 싫", "안 할래", "별로야"],
+    "싫어": ["싫어", "싫다", "싫음", "하기 싫", "안 할래", "별로야", "뭐"],
     "심심": ["심심", "노잼", "재미없", "할 거 없"],
     "배고파": ["배고파", "배고픔", "출출", "밥", "먹을 거", "간식"],
     "잘자": ["잘자", "잘 자", "굿나잇", "good night", "자러감"],
@@ -755,6 +755,70 @@ TIME_GREETING_RESPONSES = {
     ]
 }
 
+poker_games = {}
+
+SUITS = ["♠", "♥", "♦", "♣"]
+RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+RANK_VALUE = {r: i for i, r in enumerate(RANKS, start=2)}
+
+def make_deck():
+    deck = []
+    for suit in SUITS:
+        for rank in RANKS:
+            deck.append((rank, suit))
+    random.shuffle(deck)
+    return deck
+
+def card_text(cards):
+    return " ".join([f"{rank}{suit}" for rank, suit in cards])
+
+def hand_score(cards):
+    values = sorted([RANK_VALUE[r] for r, s in cards], reverse=True)
+    ranks = [r for r, s in cards]
+    suits = [s for r, s in cards]
+
+    counts = {r: ranks.count(r) for r in ranks}
+    count_values = sorted(counts.values(), reverse=True)
+
+    is_flush = len(set(suits)) == 1
+    unique_values = sorted(set(values), reverse=True)
+
+    is_straight = False
+    if len(unique_values) == 5:
+        if unique_values[0] - unique_values[-1] == 4:
+            is_straight = True
+        elif unique_values == [14, 5, 4, 3, 2]:
+            is_straight = True
+            values = [5, 4, 3, 2, 1]
+
+    if is_straight and is_flush:
+        return (8, values, "스트레이트 플러시")
+    if 4 in count_values:
+        return (7, values, "포카드")
+    if count_values == [3, 2]:
+        return (6, values, "풀하우스")
+    if is_flush:
+        return (5, values, "플러시")
+    if is_straight:
+        return (4, values, "스트레이트")
+    if 3 in count_values:
+        return (3, values, "트리플")
+    if count_values == [2, 2, 1]:
+        return (2, values, "투 페어")
+    if 2 in count_values:
+        return (1, values, "원 페어")
+    return (0, values, "하이 카드")
+
+def judge_winner(player_cards, bot_cards):
+    p_score = hand_score(player_cards)
+    b_score = hand_score(bot_cards)
+
+    if p_score[:2] > b_score[:2]:
+        return "player", p_score, b_score
+    elif p_score[:2] < b_score[:2]:
+        return "bot", p_score, b_score
+    else:
+        return "draw", p_score, b_score
 
 def get_time_key():
     hour = datetime.now(KST).hour
@@ -934,6 +998,179 @@ def get_response(key):
         candidates += TIME_GREETING_RESPONSES[time_key]
 
     return random.choice(candidates)
+
+@bot.command(name="포커")
+async def poker_start(ctx):
+    user_id = str(ctx.author.id)
+
+    deck = make_deck()
+
+    player_cards = [deck.pop() for _ in range(5)]
+    bot_cards = [deck.pop() for _ in range(5)]
+
+    poker_games[user_id] = {
+    "player_cards": player_cards,
+    "bot_cards": bot_cards,
+    "deck": deck,
+    "player_money": 100,
+    "bot_money": 100,
+    "pot": 0,
+    "current_bet": 0,
+    "player_bet": 0,
+    "bot_bet": 0
+    }
+
+    await ctx.reply(
+        f"후후, 포커 한 판 붙어볼까?\n"
+        f"네 패: **{card_text(player_cards)}**\n\n"
+        f"`!콜` 하면 승부, `!폴드` 하면 도망이야!"
+    )
+
+
+@bot.command(name="콜")
+async def poker_call(ctx):
+    user_id = str(ctx.author.id)
+
+    if user_id not in poker_games:
+        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+        return
+
+        game = poker_games[user_id]
+
+    call_amount = game["current_bet"] - game["player_bet"]
+
+    if call_amount > 0:
+        if call_amount > game["player_money"]:
+            await ctx.reply("콜할 돈이 부족해!")
+            return
+
+        game["player_money"] -= call_amount
+        game["player_bet"] += call_amount
+        game["pot"] += call_amount
+        
+    game = poker_games.pop(user_id) = {
+        
+
+    player_cards = game["player_cards"]
+    bot_cards = game["bot_cards"]
+
+    winner, p_score, b_score = judge_winner(player_cards, bot_cards)
+
+    if winner == "player":
+        add_favor(ctx.author.id, 2)
+        result = "네 승리야! 뭐, 뭐야?! 내가 졌다고?!"
+    elif winner == "bot":
+        add_favor(ctx.author.id, -1)
+        result = "후후, 내 승리네! 역시 나야!"
+    else:
+        result = "무승부야. 흠... 다시 붙어야겠는걸?"
+
+    await ctx.reply(
+        f"네 패: **{card_text(player_cards)}**\n"
+        f"푸리나 패: **{card_text(bot_cards)}**\n\n"
+        f"너: **{p_score[2]}**\n"
+        f"푸리나: **{b_score[2]}**\n\n"
+        f"{result}"
+    )
+
+@bot.command(name="체크")
+async def poker_check(ctx):
+    user_id = str(ctx.author.id)
+
+    if user_id not in poker_games:
+        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+        return
+
+    game = poker_games[user_id]
+
+    if game["current_bet"] > game["player_bet"]:
+        await ctx.reply("상대가 이미 베팅했어! 체크는 못 하고 `!콜`이나 `!폴드` 해야 해!")
+        return
+
+    if random.random() < 0.35:
+        raise_amount = random.choice([5, 10, 20])
+        game["current_bet"] = raise_amount
+        game["bot_bet"] += raise_amount
+        game["bot_money"] -= raise_amount
+        game["pot"] += raise_amount
+
+        await ctx.reply(
+            f"네가 체크하자 푸리나가 씨익 웃었어.\n"
+            f"“후후... 그럼 나는 **{raise_amount} 레이즈**!”\n\n"
+            f"현재 판돈: **{game['pot']}**\n"
+            f"`!콜` / `!폴드`"
+        )
+    else:
+        await ctx.reply(
+            f"둘 다 체크!\n"
+            f"이제 승부를 보자. `!콜` 입력하면 패를 공개해!"
+        )
+
+@bot.command(name="레이즈")
+async def poker_raise(ctx, amount: int = 10):
+    user_id = str(ctx.author.id)
+
+    if user_id not in poker_games:
+        await ctx.reply("진행 중인 포커 게임이 없어! `!포커`로 시작해!")
+        return
+
+    game = poker_games[user_id]
+
+    if amount <= 0:
+        await ctx.reply("레이즈 금액은 1 이상이어야 해!")
+        return
+
+    if amount > game["player_money"]:
+        await ctx.reply("돈이 부족해! 지금 가진 돈보다 크게 레이즈할 수 없어!")
+        return
+
+    game["player_money"] -= amount
+    game["player_bet"] += amount
+    game["pot"] += amount
+    game["current_bet"] = game["player_bet"]
+
+    bot_choice = random.random()
+
+    if bot_choice < 0.2:
+        poker_games.pop(user_id)
+        add_favor(ctx.author.id, 1)
+        await ctx.reply(
+            f"네가 **{amount} 레이즈**하자 푸리나가 움찔했어.\n"
+            f"“으... 이번엔 물러나 주지!”\n\n"
+            f"푸리나가 폴드! 네 승리!"
+        )
+        return
+
+    call_amount = game["current_bet"] - game["bot_bet"]
+
+    if call_amount > game["bot_money"]:
+        call_amount = game["bot_money"]
+
+    game["bot_money"] -= call_amount
+    game["bot_bet"] += call_amount
+    game["pot"] += call_amount
+
+    await ctx.reply(
+        f"네가 **{amount} 레이즈**!\n"
+        f"푸리나가 콜했어.\n\n"
+        f"현재 판돈: **{game['pot']}**\n"
+        f"네 돈: **{game['player_money']}** / 푸리나 돈: **{game['bot_money']}**\n\n"
+        f"`!콜` 하면 승부 공개, `!레이즈 금액`으로 더 밀어붙이기, `!폴드`로 접기."
+    )
+    
+
+@bot.command(name="폴드")
+async def poker_fold(ctx):
+    user_id = str(ctx.author.id)
+
+    if user_id not in poker_games:
+        await ctx.reply("접을 판도 없는데?! `!포커`부터 시작하라구!")
+        return
+
+    poker_games.pop(user_id)
+    add_favor(ctx.author.id, -1)
+
+    await ctx.reply("폴드? 후후, 도망치는 거야? 뭐... 현명한 판단일지도 모르지!")
     
 @bot.command(name="호감도")
 async def favor_command(ctx):
