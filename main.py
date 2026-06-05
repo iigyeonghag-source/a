@@ -764,6 +764,21 @@ def get_time_key():
         return "점심"
     return "저녁"
 
+SUITS = ["♠", "♥", "♦", "♣"]
+RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+RANK_VALUE = {r: i for i, r in enumerate(RANKS, start=2)}
+
+def make_deck():
+    deck = []
+    for suit in SUITS:
+        for rank in RANKS:
+            deck.append((rank, suit))
+    random.shuffle(deck)
+    return deck
+
+def card_text(cards):
+    return " ".join([f"{rank}{suit}" for rank, suit in cards])
+    
 from itertools import combinations
 
 poker_rooms = {}
