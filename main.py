@@ -779,42 +779,54 @@ def make_deck():
 def card_text(cards):
     return " ".join([f"{rank}{suit}" for rank, suit in cards])
 
-def hand_score(cards):
-    values = sorted([RANK_VALUE[r] for r, s in cards], reverse=True)
+def hand_name_detail(cards):
+    score = hand_score(cards)
+    rank_type = score[0]
+
     ranks = [r for r, s in cards]
-    suits = [s for r, s in cards]
+    values = [RANK_VALUE[r] for r, s in cards]
 
-    counts = {r: ranks.count(r) for r in ranks}
-    count_values = sorted(counts.values(), reverse=True)
+    value_to_rank = {v: r for r, v in RANK_VALUE.items()}
+    counts = {}
 
-    is_flush = len(set(suits)) == 1
-    unique_values = sorted(set(values), reverse=True)
+    for r in ranks:
+        counts[r] = counts.get(r, 0) + 1
 
-    is_straight = False
-    if len(unique_values) == 5:
-        if unique_values[0] - unique_values[-1] == 4:
-            is_straight = True
-        elif unique_values == [14, 5, 4, 3, 2]:
-            is_straight = True
-            values = [5, 4, 3, 2, 1]
+    pairs = sorted(
+        [RANK_VALUE[r] for r, c in counts.items() if c == 2],
+        reverse=True
+    )
+    triples = sorted(
+        [RANK_VALUE[r] for r, c in counts.items() if c == 3],
+        reverse=True
+    )
+    quads = sorted(
+        [RANK_VALUE[r] for r, c in counts.items() if c == 4],
+        reverse=True
+    )
 
-    if is_straight and is_flush:
-        return (8, values, "스트레이트 플러시")
-    if 4 in count_values:
-        return (7, values, "포카드")
-    if count_values == [3, 2]:
-        return (6, values, "풀하우스")
-    if is_flush:
-        return (5, values, "플러시")
-    if is_straight:
-        return (4, values, "스트레이트")
-    if 3 in count_values:
-        return (3, values, "트리플")
-    if count_values == [2, 2, 1]:
-        return (2, values, "투 페어")
-    if 2 in count_values:
-        return (1, values, "원 페어")
-    return (0, values, "하이 카드")
+    if rank_type == 8:
+        high = max(score[1])
+        return f"스트레이트 플러시, {value_to_rank[high]} 하이"
+    if rank_type == 7:
+        return f"포카드, {value_to_rank[quads[0]]}"
+    if rank_type == 6:
+        return f"풀하우스, {value_to_rank[triples[0]]} 풀"
+    if rank_type == 5:
+        high = max(values)
+        return f"플러시, {value_to_rank[high]} 하이"
+    if rank_type == 4:
+        high = max(score[1])
+        return f"스트레이트, {value_to_rank[high]} 하이"
+    if rank_type == 3:
+        return f"트리플, {value_to_rank[triples[0]]}"
+    if rank_type == 2:
+        return f"투 페어, {value_to_rank[pairs[0]]}와 {value_to_rank[pairs[1]]}"
+    if rank_type == 1:
+        return f"원 페어, {value_to_rank[pairs[0]]}"
+
+    high = max(values)
+    return f"하이 카드, {value_to_rank[high]}"
     
 from itertools import combinations
 
@@ -1289,11 +1301,9 @@ async def poker_my_hand(ctx):
     community = room["community"]
 
     if len(community) >= 3:
-        score = best_score(player_cards + community)
-        hand_name = score[2]
+        hand_name = hand_name_detail(player_cards + community)
     else:
-        score = hand_score(player_cards)
-        hand_name = score[2]
+        hand_name = hand_name_detail(player_cards)
 
     community_text = card_text(community) if community else "아직 없음"
 
