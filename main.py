@@ -63,7 +63,7 @@ def save_data():
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
-load_poker_money()
+load_data()
 
 poker_rooms = {}
 poker_money = {}
