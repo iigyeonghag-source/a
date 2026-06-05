@@ -1,9 +1,11 @@
+import json
 import os
 import random
 from datetime import datetime, timezone, timedelta
 import discord
 from discord.ext import commands
 from dotenv import load_dotenv
+
 
 load_dotenv()
 
@@ -21,6 +23,30 @@ favor = {}
 last_response_key = {}
 last_topic = {}
 
+MONEY_FILE = "poker_money.json"
+
+def load_poker_money():
+    global poker_money
+
+    if os.path.exists(MONEY_FILE):
+        try:
+            with open(MONEY_FILE, "r", encoding="utf-8") as f:
+                poker_money = json.load(f)
+        except:
+            poker_money = {}
+    else:
+        poker_money = {}
+
+def save_poker_money():
+    with open(MONEY_FILE, "w", encoding="utf-8") as f:
+        json.dump(poker_money, f, ensure_ascii=False, indent=4)
+
+
+poker_rooms = {}
+poker_money = {}
+poker_last_claim = {}
+
+load_poker_money()
 
 KST = timezone(timedelta(hours=9))
 
