@@ -1266,7 +1266,48 @@ async def poker_fold(ctx):
     await ctx.reply("폴드!")
 
     await after_action(ctx, room)
-    
+
+
+@bot.command(name="패")
+async def poker_my_hand(ctx):
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
+
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
+        return
+
+    if uid not in room["players"]:
+        await ctx.reply("너는 이번 포커에 참가 중이 아니야!")
+        return
+
+    if uid in room["folded"]:
+        await ctx.reply("이미 폴드했잖아! 패 확인은 안 돼.")
+        return
+
+    player_cards = room["hands"][uid]
+    community = room["community"]
+
+    if len(community) >= 3:
+        score = best_score(player_cards + community)
+        hand_name = score[2]
+    else:
+        score = hand_score(player_cards)
+        hand_name = score[2]
+
+    community_text = card_text(community) if community else "아직 없음"
+
+    try:
+        await ctx.author.send(
+            f"후후, 네 패를 몰래 확인해줄게.\n\n"
+            f"네 패: **{card_text(player_cards)}**\n"
+            f"공개 카드: **{community_text}**\n"
+            f"현재 족보: **{hand_name}**"
+        )
+        await ctx.reply("DM으로 네 패랑 현재 족보 알려줬어!")
+    except discord.Forbidden:
+        await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
+        
 @bot.command(name="호감도")
 async def favor_command(ctx):
     love = get_favor(ctx.author.id)
