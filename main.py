@@ -755,6 +755,15 @@ TIME_GREETING_RESPONSES = {
     ]
 }
 
+def get_time_key():
+    hour = datetime.now(KST).hour
+
+    if 5 <= hour < 12:
+        return "아침"
+    if 12 <= hour < 18:
+        return "점심"
+    return "저녁"
+
 from itertools import combinations
 
 poker_rooms = {}
