@@ -23,6 +23,7 @@ favor = {}
 last_response_key = {}
 last_topic = {}
 
+
 MONEY_FILE = "poker_money.json"
 
 DATA_DIR = "/data"
@@ -63,6 +64,12 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 load_poker_money()
+
+poker_rooms = {}
+poker_money = {}
+poker_last_claim = {}
+
+load_data()
 
 KST = timezone(timedelta(hours=9))
 
@@ -1000,10 +1007,6 @@ def hand_name_detail(cards):
     return f"하이 카드, {value_to_rank[high]}"
     
 from itertools import combinations
-
-poker_rooms = {}
-poker_money = {}
-poker_last_claim = {}
 
 SMALL_BLIND = 2
 BIG_BLIND = 5
