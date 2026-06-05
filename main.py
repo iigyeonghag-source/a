@@ -1048,7 +1048,7 @@ async def poker_call(ctx):
         game["player_bet"] += call_amount
         game["pot"] += call_amount
         
-    game = poker_games.pop(user_id) = {
+    poker_games.pop(user_id) = {
         
 
     player_cards = game["player_cards"]
