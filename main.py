@@ -1923,6 +1923,8 @@ async def on_member_update(before, after):
 
                 await channel.send(msg)
                 
+print(after.guild.id)
+print(SERVER_ID)
 print(get_time_key())
 print(datetime.now())
 
