@@ -1901,7 +1901,28 @@ async def on_member_update(before, after):
                     f"{after.mention}\n{ROLE_MESSAGES[role.name]}"
                 )
 
+@bot.event
+async def on_member_update(before, after):
+    print("업데이트 감지")
 
+    before_roles = {role.id for role in before.roles}
+
+    for role in after.roles:
+        if role.id not in before_roles:
+            print(f"새 역할 획득: {role.name}")
+
+            if role.name in ROLE_MESSAGES:
+                print("메시지 대상 역할 확인")
+
+                channel = after.guild.get_channel(CHANNEL_ID)
+                print(channel)
+
+                msg = ROLE_MESSAGES[role.name].format(
+                    user=after.mention
+                )
+
+                await channel.send(msg)
+                
 print(get_time_key())
 print(datetime.now())
 
