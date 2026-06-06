@@ -1875,8 +1875,8 @@ async def favor_check(ctx):
     )
 
 
-SERVER_ID =  1510681614919794868
-CHANNEL_ID =  1512642190302777415
+SERVER_ID = 1510681614919794868
+CHANNEL_ID = 1512642190302777415
 
 ROLE_MESSAGES = {
     "오타쿠": "🎉 축하해! {user} 너도 이제 오타쿠가 되었구나!",
@@ -1887,44 +1887,28 @@ ROLE_MESSAGES = {
 
 @bot.event
 async def on_member_update(before, after):
+    print("업데이트 감지")
+    print("서버 ID:", after.guild.id)
+    print("설정 SERVER_ID:", SERVER_ID)
+
     if after.guild.id != SERVER_ID:
         return
 
     before_roles = {role.id for role in before.roles}
 
     for role in after.roles:
-        if role.id not in before_roles and role.name in ROLE_MESSAGES:
-            channel = bot.get_channel(CHANNEL_ID)
-
-            if channel:
-                await channel.send(
-                    f"{after.mention}\n{ROLE_MESSAGES[role.name]}"
-                )
-
-@bot.event
-async def on_member_update(before, after):
-    print("업데이트 감지")
-
-    before_roles = {role.id for role in before.roles}
-
-    for role in after.roles:
         if role.id not in before_roles:
-            print(f"새 역할 획득: {role.name}")
+            print("새 역할:", repr(role.name))
 
             if role.name in ROLE_MESSAGES:
-                print("메시지 대상 역할 확인")
-
                 channel = after.guild.get_channel(CHANNEL_ID)
-                print(channel)
 
-                msg = ROLE_MESSAGES[role.name].format(
-                    user=after.mention
-                )
+                if channel is None:
+                    print("채널 못 찾음")
+                    return
 
+                msg = ROLE_MESSAGES[role.name].format(user=after.mention)
                 await channel.send(msg)
-                
-print(after.guild.id)
-print(SERVER_ID)
 print(get_time_key())
 print(datetime.now())
 
