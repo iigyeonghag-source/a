@@ -2005,6 +2005,7 @@ print(datetime.now())
 
 @bot.event
 async def on_ready():
+    birthday_check.start()
     print(f"로그인됨: {bot.user}")
     
 bot.run(TOKEN)
