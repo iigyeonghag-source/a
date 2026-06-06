@@ -892,12 +892,7 @@ def get_furina_birthday_response():
         return random.choice(FURINA_BIRTHDAY_MESSAGES)
 
     return random.choice(FURINA_NORMAL_BIRTHDAY_MESSAGES)
-
-    if now.month == 10 and now.day == 13:
-        return """오늘은 이 슈퍼스타의 생일이야! 아침에 집을 나서자마자 축하 인파가 몰려드는 거 있지? 다들 내가 출연한 영화 포스터를 들고 와서 사인을 부탁했다는 말씀이야!
-        초인기작부터 마이너한 작품에 이르기까지, 내 개인 소장품보다 더 많더라니까? 게다가 나랑 똑같이 생긴 인형도 받았는데, 너무 귀여워서 첫눈에 반해버린 거 있지?
-        그러니 생일 케이크 커팅하는 건 네게 맡길게, 내 팬 1호님!"""
-
+    
 def get_time_key():
     hour = datetime.now(KST).hour
 
@@ -914,11 +909,10 @@ async def birthday_check():
     if now.month == 10 and now.day == 13 and now.hour == 0 and now.minute == 0:
         channel = bot.get_channel(1510686602567876789)
 
-        await channel.send(
-            """오늘은 이 슈퍼스타의 생일이야! 아침에 집을 나서자마자 축하 인파가 몰려드는 거 있지? 다들 내가 출연한 영화 포스터를 들고 와서 사인을 부탁했다는 말씀이야!
-            초인기작부터 마이너한 작품에 이르기까지, 내 개인 소장품보다 더 많더라니까? 게다가 나랑 똑같이 생긴 인형도 받았는데, 너무 귀여워서 첫눈에 반해버린 거 있지?
-            그러니 생일 케이크 커팅하는 건 네게 맡길게, 내 팬 1호님!"""
-        )
+        if channel:
+            await channel.send("""오늘은 이 슈퍼스타의 생일이야! 아침에 집을 나서자마자 축하 인파가 몰려드는 거 있지? 다들 내가 출연한 영화 포스터를 들고 와서 사인을 부탁했다는 말씀이야!
+초인기작부터 마이너한 작품에 이르기까지, 내 개인 소장품보다 더 많더라니까? 게다가 나랑 똑같이 생긴 인형도 받았는데, 너무 귀여워서 첫눈에 반해버린 거 있지?
+그러니 생일 케이크 커팅하는 건 네게 맡길게, 내 팬 1호님!""")
         
 @bot.event
 async def on_message(message):
