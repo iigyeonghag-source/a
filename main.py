@@ -31,11 +31,12 @@ DATA_FILE = "/data/data.json"
 
 data = {
     "poker_money": {},
-    "poker_last_claim": {}
+    "poker_last_claim": {},
+    "favor": {}
 }
 
 def load_data():
-    global data, poker_money, poker_last_claim
+    global data, poker_money, poker_last_claim, favor
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -45,8 +46,10 @@ def load_data():
 
         data["poker_money"] = loaded.get("poker_money", {})
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
+        data["favor"] = loaded.get("favor", {})
 
     poker_money = data["poker_money"]
+    favor = data["favor"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -56,10 +59,14 @@ def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
     data["poker_money"] = poker_money
+    data["favor"] = favor
     data["poker_last_claim"] = {
         uid: value.isoformat()
         for uid, value in poker_last_claim.items()
     }
+
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=4)
 
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
@@ -80,7 +87,9 @@ def add_favor(user_id, amount):
     uid = str(user_id)
     favor[uid] = favor.get(uid, 0) + amount
     favor[uid] = max(-100, min(100, favor[uid]))
-
+    
+    save_data()
+    
 ANGRY_WORDS = [
     "시발", "씨발", "ㅅㅂ", "ㅗ",
     "꺼져", "닥쳐", "죽어", "좆까",
@@ -1495,9 +1504,12 @@ async def poker_my_hand(ctx):
         await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
 
 @bot.command(name="호감도")
-async def favor_command(ctx):
-    love = get_favor(ctx.author.id)
-    await ctx.reply(f"{ctx.author.mention}의 현재 호감도는 **{love}**야!")
+async def favor_check(ctx):
+    value = get_favor(ctx.author.id)
+
+    await ctx.reply(
+        f"{ctx.author.display_name}의 푸리나 호감도: **{value}**"
+    )
     
 print(get_time_key())
 print(datetime.now())
