@@ -907,6 +907,7 @@ FURINA_BIRTHDAY_NOTICE = """오늘은 이 슈퍼스타의 생일이야! 아침�
 그러니 생일 케이크 커팅하는 건 네게 맡길게, 내 팬 1호님!"""
 
 NOTICE_CHANNEL_ID = 1510686602567876789
+TEST_CHANNEL_ID = 1511351100480163910
 
 @tasks.loop(minutes=1)
 async def birthday_check():
@@ -1935,7 +1936,7 @@ async def memory_check(ctx):
 @bot.command(name="푸리나생일테스트")
 @commands.has_permissions(administrator=True)
 async def furina_birthday_test(ctx):
-    channel = bot.get_channel(NOTICE_CHANNEL_ID)
+    channel = bot.get_channel(TEST_CHANNEL_ID)
 
     if channel is None:
         await ctx.send("공지 채널을 찾지 못했어. 채널 ID를 확인해줘!")
