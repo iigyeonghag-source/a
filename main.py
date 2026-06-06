@@ -20,6 +20,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 favor = {}
+user_memory = {}
 last_response_key = {}
 last_topic = {}
 
@@ -32,11 +33,12 @@ DATA_FILE = "/data/data.json"
 data = {
     "poker_money": {},
     "poker_last_claim": {},
-    "favor": {}
+    "favor": {},
+    "memory": {}
 }
 
 def load_data():
-    global data, poker_money, poker_last_claim, favor
+    global data, poker_money, poker_last_claim, favor, user_memory
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -47,9 +49,11 @@ def load_data():
         data["poker_money"] = loaded.get("poker_money", {})
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
         data["favor"] = loaded.get("favor", {})
+        data["memory"] = loaded.get("memory", {})
 
     poker_money = data["poker_money"]
     favor = data["favor"]
+    user_memory = data["memory"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -60,6 +64,7 @@ def save_data():
 
     data["poker_money"] = poker_money
     data["favor"] = favor
+    data["memory"] = user_memory
     data["poker_last_claim"] = {
         uid: value.isoformat()
         for uid, value in poker_last_claim.items()
@@ -68,13 +73,12 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=4)
 load_data()
 
 poker_rooms = {}
 poker_money = {}
 poker_last_claim = {}
+user_memory = {}
 
 load_data()
 
@@ -89,7 +93,35 @@ def add_favor(user_id, amount):
     favor[uid] = max(-100, min(100, favor[uid]))
     
     save_data()
-    
+
+def get_favor_stage(user_id):
+    value = get_favor(user_id)
+
+    if value >= 50:
+        return "love"
+    if value >= 10:
+        return "friendly"
+    if value <= -30:
+        return "cold"
+    return None
+
+def add_favor_mood_prefix(user_id, response):
+    stage = get_favor_stage(user_id)
+
+    if stage and random.random() < 0.3:
+        return random.choice(FAVOR_STAGE_RESPONSES[stage]) + "\n" + response
+
+    return response
+
+def remember_user_value(user_id, key, value):
+    uid = str(user_id)
+    user_memory.setdefault(uid, {})
+    user_memory[uid][key] = value
+    save_data()
+
+def get_user_memory(user_id, key, default=None):
+    return user_memory.get(str(user_id), {}).get(key, default)
+
 ANGRY_WORDS = [
     "시발", "씨발", "ㅅㅂ", "ㅗ",
     "꺼져", "닥쳐", "죽어", "좆까",
@@ -835,6 +867,32 @@ async def on_message(message):
     lower = text.lower()
     uid = str(message.author.id)
 
+    # 간단 기억 시스템
+    if lower.startswith("내 이름은 ") or lower.startswith("내이름은 "):
+        name = text.replace("내 이름은", "", 1).replace("내이름은", "", 1).strip()
+        if name:
+            remember_user_value(uid, "name", name)
+            add_favor(message.author.id, 2)
+            await message.reply(f"좋아, 기억해둘게! 네 이름은 **{name}**! 후후, 이제 잊어버리면 내가 바보지!")
+            return
+
+    if any(q in lower for q in ["내 이름 뭐", "내이름 뭐", "내 이름이 뭐", "내이름이 뭐"]):
+        name = get_user_memory(uid, "name")
+        if name:
+            await message.reply(f"{name}잖아! 설마 내가 잊었을 거라고 생각한 거야?")
+        else:
+            await message.reply("아직 네 이름을 들은 적 없는걸? `푸리나 내 이름은 민이야` 이런 식으로 알려줘!")
+        return
+
+    if any(q in lower for q in ["기억 삭제", "기억 지워", "내 이름 잊어", "내이름 잊어"]):
+        if uid in user_memory:
+            user_memory.pop(uid)
+            save_data()
+            await message.reply("알겠어. 네 기억은 지워둘게. ...조금 아쉽지만!")
+        else:
+            await message.reply("지울 기억이 아직 없어!")
+        return
+
     if any(word in lower for word in DIRTY_WORDS):
         add_favor(message.author.id, -3)
         await message.reply(random.choice(DIRTY_RESPONSES))
@@ -866,6 +924,7 @@ async def on_message(message):
             last_topic[uid] = combo_name
 
             response = random.choice(responses).format(user=message.author.mention)
+            response = add_favor_mood_prefix(message.author.id, response)
 
             first_key = combo_key[0]
             if first_key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
@@ -889,7 +948,13 @@ async def on_message(message):
                 break
 
     if selected_key:
-        add_favor(message.author.id, 1)
+        favor_bonus = 1
+        if selected_key in ["귀여워", "고마워", "좋아해", "사랑해", "최고", "천재"]:
+            favor_bonus = 2
+        elif selected_key == "미안":
+            favor_bonus = 3
+
+        add_favor(message.author.id, favor_bonus)
 
         last_response_key[uid] = selected_key
         last_topic[uid] = selected_key
@@ -900,6 +965,13 @@ async def on_message(message):
             candidates += TIME_GREETING_RESPONSES[get_time_key()]
 
         response = random.choice(candidates).format(user=message.author.mention)
+        response = add_favor_mood_prefix(message.author.id, response)
+
+        # 아주 가끔 푸리나가 용돈을 줌
+        if random.random() < 0.03:
+            bonus = random.choice([10, 20, 30])
+            add_poker_money(uid, bonus)
+            response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}원** 줄게! 현재 돈: **{get_poker_money(uid)}원**"
 
         if selected_key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
             response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[selected_key])
@@ -1503,12 +1575,87 @@ async def poker_my_hand(ctx):
     except discord.Forbidden:
         await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
 
+
+@bot.command(name="포커랭킹")
+async def poker_ranking(ctx):
+    if not poker_money:
+        await ctx.reply("아직 포커 돈 기록이 없어!")
+        return
+
+    ranking = sorted(
+        poker_money.items(),
+        key=lambda item: item[1],
+        reverse=True
+    )[:10]
+
+    lines = []
+    for i, (uid, money) in enumerate(ranking, start=1):
+        lines.append(f"{i}위. **{poker_name(ctx, uid)}** - {money}원")
+
+    await ctx.reply("포커 랭킹!\n" + "\n".join(lines))
+
+@bot.command(name="올인")
+async def poker_all_in(ctx):
+    room = get_room(ctx)
+    uid = str(ctx.author.id)
+
+    if not room or not room["started"]:
+        await ctx.reply("진행 중인 포커가 없어!")
+        return
+
+    if current_player(room) != uid:
+        await ctx.reply("지금 네 턴이 아니야!")
+        return
+
+    money = get_poker_money(uid)
+    if money <= 0:
+        await ctx.reply("올인할 돈이 없어!")
+        return
+
+    need_to_call = room["current_bet"] - room["bets"].get(uid, 0)
+    if money < need_to_call:
+        await ctx.reply(
+            f"현재 구조상 콜 금액보다 적은 올인은 아직 안 돼! 필요한 돈: **{need_to_call}원**, 가진 돈: **{money}원**"
+        )
+        return
+
+    new_total_bet = room["bets"].get(uid, 0) + money
+
+    add_poker_money(uid, -money)
+    room["bets"][uid] = new_total_bet
+    room["pot"] += money
+    room["acted"] = {uid}
+
+    if new_total_bet > room["current_bet"]:
+        room["current_bet"] = new_total_bet
+        await ctx.reply(f"올인! **{money}원** 전부 밀어넣었다! 현재 베팅: **{new_total_bet}원**")
+    else:
+        await ctx.reply(f"올인 콜! **{money}원** 전부 넣었다!")
+
+    await after_action(ctx, room)
+
+@bot.command(name="기억")
+async def memory_check(ctx):
+    mem = user_memory.get(str(ctx.author.id), {})
+
+    if not mem:
+        await ctx.reply("아직 기억해둔 게 없어!")
+        return
+
+    name = mem.get("name")
+    if name:
+        await ctx.reply(f"내가 기억하는 네 이름은 **{name}**이야!")
+    else:
+        await ctx.reply("기억은 있는데 보여줄 만한 항목이 아직 없어!")
+
 @bot.command(name="호감도")
 async def favor_check(ctx):
     value = get_favor(ctx.author.id)
 
+    stage = get_favor_stage(ctx.author.id) or "normal"
+
     await ctx.reply(
-        f"{ctx.author.display_name}의 푸리나 호감도: **{value}**"
+        f"{ctx.author.display_name}의 푸리나 호감도: **{value}** / 단계: **{stage}**"
     )
     
 print(get_time_key())
