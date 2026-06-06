@@ -972,7 +972,7 @@ async def on_message(message):
         if random.random() < 0.03:
             bonus = random.choice([10, 20, 30])
             add_poker_money(uid, bonus)
-            response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}원** 줄게! 현재 돈: **{get_poker_money(uid)}원**"
+            response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}모라** 줄게! 현재 돈: **{get_poker_money(uid)}원**"
 
         if selected_key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
             response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[selected_key])
@@ -1152,9 +1152,9 @@ POKER_REACTION = {
         "푸리나: 이건 불길해... 괜히 돈 버리지 않겠어. **폴드!**"
     ],
     "furina_call": [
-        "푸리나: 좋아, 받아주겠어. **콜 {need}원!**",
-        "푸리나: 후후, 그 정도 압박으론 날 못 밀어내. **콜 {need}원!**",
-        "푸리나: 여기서 물러나면 주연 실격이지. **콜 {need}원!**"
+        "푸리나: 좋아, 받아주겠어. **콜 {need}모라!**",
+        "푸리나: 후후, 그 정도 압박으론 날 못 밀어내. **콜 {need}모라!**",
+        "푸리나: 여기서 물러나면 주연 실격이지. **콜 {need}모라!**"
     ],
     "furina_allin_call": [
         "푸리나: 네 올인? 좋아... 나도 전부 걸어주지! **올인 콜!**",
@@ -1167,19 +1167,19 @@ POKER_REACTION = {
         "푸리나: 아직 막이 오르기 전이야. **체크.**"
     ],
     "furina_raise": [
-        "푸리나: 후후... 분위기를 올려볼까? **레이즈 {amount}원!**",
-        "푸리나: 주연은 판을 흔드는 법이지! **레이즈 {amount}원!**",
-        "푸리나: 이 정도는 감당할 수 있겠지? **레이즈 {amount}원!**"
+        "푸리나: 후후... 분위기를 올려볼까? **레이즈 {amount}모라!**",
+        "푸리나: 주연은 판을 흔드는 법이지! **레이즈 {amount}모라!**",
+        "푸리나: 이 정도는 감당할 수 있겠지? **레이즈 {amount}모라!**"
     ],
     "furina_allin_raise": [
-        "푸리나: 후후후... 지금이야말로 최고의 장면이지! **올인 {amount}원!**",
-        "푸리나: 이 패라면 망설일 필요 없어! 전부 걸겠어! **올인 {amount}원!**",
-        "푸리나: 물의 신의 배짱을 보여주지! **올인 {amount}원!**"
+        "푸리나: 후후후... 지금이야말로 최고의 장면이지! **올인 {amount}모라!**",
+        "푸리나: 이 패라면 망설일 필요 없어! 전부 걸겠어! **올인 {amount}모라!**",
+        "푸리나: 물의 신의 배짱을 보여주지! **올인 {amount}모라!**"
     ],
     "furina_bluff": [
-        "푸리나: 후후... 떨고 있는 건 아니겠지? **레이즈 {amount}원!**",
-        "푸리나: 내 패가 궁금해? 그럼 돈을 더 내봐! **레이즈 {amount}원!**",
-        "푸리나: 이건 연기일까, 진심일까? **레이즈 {amount}원!**"
+        "푸리나: 후후... 떨고 있는 건 아니겠지? **레이즈 {amount}모라!**",
+        "푸리나: 내 패가 궁금해? 그럼 돈을 더 내봐! **레이즈 {amount}모라!**",
+        "푸리나: 이건 연기일까, 진심일까? **레이즈 {amount}모라!**"
     ]
 }
 
@@ -1349,7 +1349,7 @@ def all_called(room):
 
 def stage_text(room):
     cards = card_text(room["community"]) if room["community"] else "아직 없음"
-    return f"공개 카드: **{cards}**\n판돈: **{room['pot']}원**"
+    return f"공개 카드: **{cards}**\n판돈: **{room['pot']}모라**"
 
 async def advance_stage(ctx, room):
     room["acted"].clear()
@@ -1412,7 +1412,7 @@ async def showdown(ctx, room):
         f"쇼다운!\n\n"
         f"{stage_text(room)}\n\n"
         + "\n".join(result_lines)
-        + f"\n\n승자: **{winner_names}** / 획득: **{prize}원**"
+        + f"\n\n승자: **{winner_names}** / 획득: **{prize}모라**"
     )
 
 async def furina_auto(ctx, room):
@@ -1492,7 +1492,7 @@ async def win_by_fold(ctx, room):
     await ctx.send(
         f"모두 폴드!\n"
         f"승자: **{poker_name(ctx, winner)}**\n"
-        f"획득: **{room['pot']}원**"
+        f"획득: **{room['pot']}모라**"
     )
 
     room["dealer_index"] = (room["dealer_index"] + 1) % len(room["players"])
@@ -1515,7 +1515,7 @@ async def after_action(ctx, room):
 
 @bot.command(name="돈")
 async def poker_money_command(ctx):
-    await ctx.reply(f"{ctx.author.mention}의 포커 돈: **{get_poker_money(ctx.author.id)}원**")
+    await ctx.reply(f"{ctx.author.mention}의 포커 돈: **{get_poker_money(ctx.author.id)}모라**")
 
 @bot.command(name="돈받기")
 async def poker_claim(ctx):
@@ -1533,7 +1533,7 @@ async def poker_claim(ctx):
     poker_last_claim[uid] = now
     save_data()
     money = add_poker_money(uid, 100)
-    await ctx.reply(f"100원 지급 완료! 현재 돈: **{money}원**")
+    await ctx.reply(f"100모라 지급 완료! 현재 돈: **{money}모라**")
 
 @bot.command(name="포커")
 async def poker_lobby(ctx):
@@ -1634,9 +1634,9 @@ async def poker_start(ctx):
     msg = (
         f"포커 시작!\n"
         f"딜러: **{poker_name(ctx, players[dealer])}**\n"
-        f"스몰 블라인드: **{poker_name(ctx, small)} {SMALL_BLIND}원**\n"
-        f"빅 블라인드: **{poker_name(ctx, big)} {BIG_BLIND}원**\n\n"
-        f"현재 판돈: **{room['pot']}원**\n"
+        f"스몰 블라인드: **{poker_name(ctx, small)} {SMALL_BLIND}모라**\n"
+        f"빅 블라인드: **{poker_name(ctx, big)} {BIG_BLIND}모라**\n\n"
+        f"현재 판돈: **{room['pot']}모라**\n"
         f"현재 턴: **{poker_name(ctx, current_player(room))}**"
     )
 
@@ -1701,7 +1701,7 @@ async def poker_call(ctx):
     room["pot"] += need
     room["acted"].add(uid)
 
-    await ctx.reply(f"콜! **{need}원** 지불.\n" + random.choice(POKER_REACTION["call"]))
+    await ctx.reply(f"콜! **{need}모라** 지불.\n" + random.choice(POKER_REACTION["call"]))
 
     await after_action(ctx, room)
 
@@ -1719,7 +1719,7 @@ async def poker_raise(ctx, amount: int = 10):
         return
 
     if amount <= room["current_bet"]:
-        await ctx.reply(f"레이즈는 현재 베팅 **{room['current_bet']}원**보다 커야 해!")
+        await ctx.reply(f"레이즈는 현재 베팅 **{room['current_bet']}모라**보다 커야 해!")
         return
 
     need = amount - room["bets"].get(uid, 0)
@@ -1734,7 +1734,7 @@ async def poker_raise(ctx, amount: int = 10):
     room["pot"] += need
     room["acted"] = {uid}
 
-    await ctx.reply(f"레이즈! 현재 베팅 **{amount}원** / 판돈 **{room['pot']}원**\n" + random.choice(POKER_REACTION["raise_big" if amount >= 50 else "raise_small"]))
+    await ctx.reply(f"레이즈! 현재 베팅 **{amount}모라** / 판돈 **{room['pot']}모라**\n" + random.choice(POKER_REACTION["raise_big" if amount >= 50 else "raise_small"]))
 
     await after_action(ctx, room)
 
@@ -1812,7 +1812,7 @@ async def poker_ranking(ctx):
 
     lines = []
     for i, (uid, money) in enumerate(ranking, start=1):
-        lines.append(f"{i}위. **{poker_name(ctx, uid)}** - {money}원")
+        lines.append(f"{i}위. **{poker_name(ctx, uid)}** - {money}모라")
 
     await ctx.reply("포커 랭킹!\n" + "\n".join(lines))
 
@@ -1845,9 +1845,9 @@ async def poker_all_in(ctx):
 
     if new_total_bet > room["current_bet"]:
         room["current_bet"] = new_total_bet
-        await ctx.reply(f"올인! **{money}원** 전부 밀어넣었다! 현재 베팅: **{new_total_bet}원**\n" + random.choice(POKER_REACTION["allin"]))
+        await ctx.reply(f"올인! **{money}모라** 전부 밀어넣었다! 현재 베팅: **{new_total_bet}모라**\n" + random.choice(POKER_REACTION["allin"]))
     else:
-        await ctx.reply(f"올인 콜! **{money}원** 전부 넣었다!\n" + random.choice(POKER_REACTION["allin"]))
+        await ctx.reply(f"올인 콜! **{money}모라** 전부 넣었다!\n" + random.choice(POKER_REACTION["allin"]))
 
     await after_action(ctx, room)
 
