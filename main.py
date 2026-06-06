@@ -1912,4 +1912,8 @@ async def on_member_update(before, after):
 print(get_time_key())
 print(datetime.now())
 
+@bot.event
+async def on_ready():
+    print(f"로그인됨: {bot.user}")
+    
 bot.run(TOKEN)
