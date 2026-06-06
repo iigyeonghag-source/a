@@ -1937,7 +1937,7 @@ async def memory_check(ctx):
 @bot.command(name="푸리나생일테스트")
 @commands.has_permissions(administrator=True)
 async def furina_birthday_test(ctx):
-    channel = bot.get_channel(공지채널ID)
+    channel = bot.get_channel(1511351100480163910)
 
     if channel is None:
         await ctx.send("공지 채널을 찾지 못했어. 채널 ID 확인해줘!")
