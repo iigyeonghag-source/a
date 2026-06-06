@@ -1875,12 +1875,15 @@ async def favor_check(ctx):
         f"{ctx.author.display_name}의 푸리나 호감도: **{value}** / 단계: **{stage}**"
     )
 
-role = discord.utils.get(member.guild.roles, name=role_name)
+async def send_role_message(member, role_name, channel):
+    role = discord.utils.get(member.guild.roles, name=role_name)
+    if role is None:
+        return
 
-msg = ROLE_MESSAGES[role_name].format(
-    user=member.mention,
-    role=role.mention
-)
+    msg = ROLE_MESSAGES[role_name].format(
+        user=member.mention,
+        role=role.mention
+    )
 
     await channel.send(msg)
 
