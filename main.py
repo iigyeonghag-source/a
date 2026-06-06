@@ -1933,7 +1933,7 @@ async def memory_check(ctx):
         await ctx.reply(f"내가 기억하는 네 이름은 **{name}**이야!")
     else:
         await ctx.reply("기억은 있는데 보여줄 만한 항목이 아직 없어!")
-
+        
 @bot.command(name="푸리나생일테스트")
 @commands.has_permissions(administrator=True)
 async def furina_birthday_test(ctx):
@@ -1944,8 +1944,8 @@ async def furina_birthday_test(ctx):
         return
 
     await channel.send(random.choice(FURINA_BIRTHDAY_MESSAGES))
-    await ctx.send("푸리나 생일 공지 테스트 완료!"
-                   
+    await ctx.send("푸리나 생일 공지 테스트 완료!")  
+    
 @bot.command(name="호감도")
 async def favor_check(ctx):
     value = get_favor(ctx.author.id)
