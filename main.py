@@ -884,9 +884,9 @@ async def on_message(message):
     if any(q in lower for q in ["내 이름 뭐", "내이름 뭐", "내 이름이 뭐", "내이름이 뭐"]):
         name = get_user_memory(uid, "name")
         if name:
-            await message.reply(f"{name}잖아! 설마 내가 잊었을 거라고 생각한 거야?")
+            await message.reply(f"{name}(이)잖아! 설마 내가 잊었을 거라고 생각한 거야?")
         else:
-            await message.reply("아직 네 이름을 들은 적 없는걸? `푸리나 내 이름은 민이야` 이런 식으로 알려줘!")
+            await message.reply("아직 네 이름을 들은 적 없는걸? `푸리나 내 이름은 (닉네임)` 이런 식으로 알려줘!")
         return
 
     if any(q in lower for q in ["기억 삭제", "기억 지워", "내 이름 잊어", "내이름 잊어"]):
