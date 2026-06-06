@@ -1882,7 +1882,7 @@ msg = ROLE_MESSAGES[role_name].format(
     role=role.mention
 )
 
-await channel.send(msg)
+    await channel.send(msg)
 
 SERVER_ID = 1510681614919794868
 CHANNEL_ID = 1512642190302777415
