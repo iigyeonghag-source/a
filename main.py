@@ -1105,6 +1105,158 @@ def add_poker_money(user_id, amount):
 def best_score(cards):
     return max(hand_score(list(combo)) for combo in combinations(cards, 5))
 
+
+POKER_REACTION = {
+    "check": [
+        "푸리나: 체크라... 후후, 조용히 지나가 보자는 거지?",
+        "푸리나: 음? 너무 얌전한데? 수상해...",
+        "푸리나: 좋아, 이번엔 분위기를 좀 봐주지."
+    ],
+    "call": [
+        "푸리나: 콜이라... 배짱은 있네?",
+        "푸리나: 후후, 따라오는구나. 좋아, 무대는 계속된다!",
+        "푸리나: 물러서지 않는 태도, 나쁘지 않아!"
+    ],
+    "raise_small": [
+        "푸리나: 오? 살짝 올렸네? 간 보는 거야?",
+        "푸리나: 그 정도 레이즈라면 귀엽게 봐줄 수 있지!",
+        "푸리나: 후후, 조금씩 불을 붙이는구나?"
+    ],
+    "raise_big": [
+        "푸리나: 뭐야, 갑자기 세게 나오네?!",
+        "푸리나: 흐음... 허세인지 진짜인지 한번 봐야겠는데?",
+        "푸리나: 대담하네. 무대가 재밌어졌어!"
+    ],
+    "allin": [
+        "푸리나: 올인?! 지금 여기서 전부 건다고?!",
+        "푸리나: 후후... 좋아. 네 각오만큼은 인정해줄게!",
+        "푸리나: 갑자기 판을 뒤집으려 하다니, 제법인데?"
+    ],
+    "fold_user": [
+        "푸리나: 도망치는 것도 전략이지. 후후, 오늘은 봐줄게!",
+        "푸리나: 폴드? 현명한 판단일지도 모르지!",
+        "푸리나: 어라? 벌써 물러나는 거야?"
+    ],
+    "furina_fold_weak": [
+        "푸리나: ...이건 무대에 올릴 패가 아니네. **폴드!**",
+        "푸리나: 흥, 지금은 물러나 주지. 다음 막을 기대하라고! **폴드!**",
+        "푸리나: 이건 불길해... 괜히 돈 버리지 않겠어. **폴드!**"
+    ],
+    "furina_call": [
+        "푸리나: 좋아, 받아주겠어. **콜 {need}원!**",
+        "푸리나: 후후, 그 정도 압박으론 날 못 밀어내. **콜 {need}원!**",
+        "푸리나: 여기서 물러나면 주연 실격이지. **콜 {need}원!**"
+    ],
+    "furina_allin_call": [
+        "푸리나: 네 올인? 좋아... 나도 전부 걸어주지! **올인 콜!**",
+        "푸리나: 후후후... 이 패라면 도망칠 이유가 없지! **나도 올인!**",
+        "푸리나: 무대의 클라이맥스다! 받아주겠어, **올인 콜!**"
+    ],
+    "furina_check": [
+        "푸리나: 체크. ...뭔가 수상하지?",
+        "푸리나: 이번엔 조용히 가볼까? **체크.**",
+        "푸리나: 아직 막이 오르기 전이야. **체크.**"
+    ],
+    "furina_raise": [
+        "푸리나: 후후... 분위기를 올려볼까? **레이즈 {amount}원!**",
+        "푸리나: 주연은 판을 흔드는 법이지! **레이즈 {amount}원!**",
+        "푸리나: 이 정도는 감당할 수 있겠지? **레이즈 {amount}원!**"
+    ],
+    "furina_allin_raise": [
+        "푸리나: 후후후... 지금이야말로 최고의 장면이지! **올인 {amount}원!**",
+        "푸리나: 이 패라면 망설일 필요 없어! 전부 걸겠어! **올인 {amount}원!**",
+        "푸리나: 물의 신의 배짱을 보여주지! **올인 {amount}원!**"
+    ],
+    "furina_bluff": [
+        "푸리나: 후후... 떨고 있는 건 아니겠지? **레이즈 {amount}원!**",
+        "푸리나: 내 패가 궁금해? 그럼 돈을 더 내봐! **레이즈 {amount}원!**",
+        "푸리나: 이건 연기일까, 진심일까? **레이즈 {amount}원!**"
+    ]
+}
+
+FURINA_POKER_BANKROLL = 300
+FURINA_MAX_RAISE = 80
+
+def furina_say(kind, **kwargs):
+    text = random.choice(POKER_REACTION[kind])
+    return text.format(**kwargs)
+
+def preflop_strength(cards):
+    """공개 카드가 없을 때 푸리나가 자기 패를 대충 평가하는 값. 0.0~1.0"""
+    ranks = [r for r, s in cards]
+    suits = [s for r, s in cards]
+    values = sorted([RANK_VALUE[r] for r in ranks], reverse=True)
+
+    high, low = values[0], values[1]
+    strength = (high + low) / 28
+
+    if ranks[0] == ranks[1]:
+        strength += 0.32 + (high / 100)
+    if suits[0] == suits[1]:
+        strength += 0.08
+    if abs(high - low) == 1:
+        strength += 0.07
+    elif abs(high - low) == 2:
+        strength += 0.04
+    if high >= 13:
+        strength += 0.08
+    if low <= 5 and high < 11:
+        strength -= 0.12
+
+    return max(0.0, min(1.0, strength))
+
+def made_hand_strength(cards):
+    """공개 카드가 있을 때 현재 족보 기반으로 0.0~1.0 평가."""
+    score = best_score(cards)
+    rank_type = score[0]
+    high = max(score[1]) if score[1] else 2
+
+    base = {
+        0: 0.18,
+        1: 0.34,
+        2: 0.52,
+        3: 0.66,
+        4: 0.74,
+        5: 0.78,
+        6: 0.86,
+        7: 0.94,
+        8: 1.0,
+    }.get(rank_type, 0.2)
+
+    return max(0.0, min(1.0, base + (high - 2) / 100))
+
+def furina_hand_strength(room):
+    cards = room["hands"].get(FURINA_ID, [])
+    community = room.get("community", [])
+
+    if len(community) < 3:
+        return preflop_strength(cards)
+
+    return made_hand_strength(cards + community)
+
+def choose_furina_raise_amount(room, strength, all_in=False):
+    current = room["current_bet"]
+
+    if all_in:
+        return max(current + 1, FURINA_POKER_BANKROLL)
+
+    if strength >= 0.86:
+        bump = random.choice([30, 40, 50, 70])
+    elif strength >= 0.66:
+        bump = random.choice([15, 20, 25, 30])
+    else:
+        bump = random.choice([8, 10, 15, 20])
+
+    amount = max(current + 5, current + bump)
+    return min(amount, FURINA_MAX_RAISE)
+
+def is_big_pressure(room, need):
+    if need >= 50:
+        return True
+    if room["pot"] > 0 and need >= room["pot"] * 0.7:
+        return True
+    return False
+
 def poker_name(ctx, user_id):
     if user_id == FURINA_ID:
         return "푸리나"
@@ -1230,27 +1382,76 @@ async def furina_auto(ctx, room):
             return
 
         need = room["current_bet"] - room["bets"].get(FURINA_ID, 0)
+        strength = furina_hand_strength(room)
+        pressure = is_big_pressure(room, need)
 
         if need > 0:
-            if random.random() < 0.18:
+            # 상대가 레이즈/올인을 걸었을 때: 패가 약하면 폴드, 좋으면 콜/역올인
+            fold_chance = 0.08
+            if strength < 0.28:
+                fold_chance = 0.72 if pressure else 0.48
+            elif strength < 0.45:
+                fold_chance = 0.38 if pressure else 0.18
+            elif strength < 0.62:
+                fold_chance = 0.16 if pressure else 0.06
+            else:
+                fold_chance = 0.02
+
+            if random.random() < fold_chance:
                 room["folded"].add(FURINA_ID)
-                await ctx.send("푸리나: 으... 이번 판은 물러나 주지! **폴드!**")
+                await ctx.send(furina_say("furina_fold_weak"))
             else:
-                room["pot"] += need
-                room["bets"][FURINA_ID] += need
-                room["acted"].add(FURINA_ID)
-                await ctx.send(f"푸리나: 후후, 받아주겠어. **콜 {need}원!**")
+                # 패가 좋고 상대가 크게 걸면 같이 올인하거나 강하게 받아침
+                if strength >= 0.78 and pressure and random.random() < 0.55:
+                    allin_amount = max(room["current_bet"], FURINA_POKER_BANKROLL)
+                    pay = allin_amount - room["bets"].get(FURINA_ID, 0)
+                    room["current_bet"] = allin_amount
+                    room["bets"][FURINA_ID] = allin_amount
+                    room["pot"] += pay
+                    room["acted"] = {FURINA_ID}
+                    await ctx.send(furina_say("furina_allin_call"))
+                elif strength >= 0.88 and random.random() < 0.35:
+                    amount = choose_furina_raise_amount(room, strength, all_in=True)
+                    pay = amount - room["bets"].get(FURINA_ID, 0)
+                    room["current_bet"] = amount
+                    room["bets"][FURINA_ID] = amount
+                    room["pot"] += pay
+                    room["acted"] = {FURINA_ID}
+                    await ctx.send(furina_say("furina_allin_raise", amount=amount))
+                else:
+                    room["pot"] += need
+                    room["bets"][FURINA_ID] += need
+                    room["acted"].add(FURINA_ID)
+                    await ctx.send(furina_say("furina_call", need=need))
         else:
-            if random.random() < 0.25:
-                amount = random.choice([5, 10, 15])
+            # 아무도 안 올렸을 때: 패가 좋으면 레이즈/올인, 가끔 약패로 허세 레이즈
+            if strength >= 0.90 and random.random() < 0.35:
+                amount = choose_furina_raise_amount(room, strength, all_in=True)
+                pay = amount - room["bets"].get(FURINA_ID, 0)
                 room["current_bet"] = amount
-                room["bets"][FURINA_ID] += amount
-                room["pot"] += amount
-                room["acted"].add(FURINA_ID)
-                await ctx.send(f"푸리나: 후후... 그럼 **레이즈 {amount}원!**")
+                room["bets"][FURINA_ID] = amount
+                room["pot"] += pay
+                room["acted"] = {FURINA_ID}
+                await ctx.send(furina_say("furina_allin_raise", amount=amount))
+            elif strength >= 0.62 and random.random() < 0.62:
+                amount = choose_furina_raise_amount(room, strength)
+                pay = amount - room["bets"].get(FURINA_ID, 0)
+                room["current_bet"] = amount
+                room["bets"][FURINA_ID] = amount
+                room["pot"] += pay
+                room["acted"] = {FURINA_ID}
+                await ctx.send(furina_say("furina_raise", amount=amount))
+            elif strength < 0.32 and random.random() < 0.16:
+                amount = choose_furina_raise_amount(room, strength)
+                pay = amount - room["bets"].get(FURINA_ID, 0)
+                room["current_bet"] = amount
+                room["bets"][FURINA_ID] = amount
+                room["pot"] += pay
+                room["acted"] = {FURINA_ID}
+                await ctx.send(furina_say("furina_bluff", amount=amount))
             else:
                 room["acted"].add(FURINA_ID)
-                await ctx.send("푸리나: 체크. ...뭔가 수상하지?")
+                await ctx.send(furina_say("furina_check"))
 
         if len(active_players(room)) == 1:
             await win_by_fold(ctx, room)
@@ -1445,7 +1646,7 @@ async def poker_check(ctx):
         return
 
     room["acted"].add(uid)
-    await ctx.reply("체크!")
+    await ctx.reply("체크!\n" + random.choice(POKER_REACTION["check"]))
 
     await after_action(ctx, room)
 
@@ -1479,7 +1680,7 @@ async def poker_call(ctx):
     room["pot"] += need
     room["acted"].add(uid)
 
-    await ctx.reply(f"콜! **{need}원** 지불.")
+    await ctx.reply(f"콜! **{need}원** 지불.\n" + random.choice(POKER_REACTION["call"]))
 
     await after_action(ctx, room)
 
@@ -1512,7 +1713,7 @@ async def poker_raise(ctx, amount: int = 10):
     room["pot"] += need
     room["acted"] = {uid}
 
-    await ctx.reply(f"레이즈! 현재 베팅 **{amount}원** / 판돈 **{room['pot']}원**")
+    await ctx.reply(f"레이즈! 현재 베팅 **{amount}원** / 판돈 **{room['pot']}원**\n" + random.choice(POKER_REACTION["raise_big" if amount >= 50 else "raise_small"]))
 
     await after_action(ctx, room)
 
@@ -1532,7 +1733,7 @@ async def poker_fold(ctx):
     room["folded"].add(uid)
     room["acted"].add(uid)
 
-    await ctx.reply("폴드!")
+    await ctx.reply("폴드!\n" + random.choice(POKER_REACTION["fold_user"]))
 
     await after_action(ctx, room)
 
@@ -1628,9 +1829,9 @@ async def poker_all_in(ctx):
 
     if new_total_bet > room["current_bet"]:
         room["current_bet"] = new_total_bet
-        await ctx.reply(f"올인! **{money}원** 전부 밀어넣었다! 현재 베팅: **{new_total_bet}원**")
+        await ctx.reply(f"올인! **{money}원** 전부 밀어넣었다! 현재 베팅: **{new_total_bet}원**\n" + random.choice(POKER_REACTION["allin"]))
     else:
-        await ctx.reply(f"올인 콜! **{money}원** 전부 넣었다!")
+        await ctx.reply(f"올인 콜! **{money}원** 전부 넣었다!\n" + random.choice(POKER_REACTION["allin"]))
 
     await after_action(ctx, room)
 
