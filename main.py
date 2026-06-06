@@ -1934,6 +1934,18 @@ async def memory_check(ctx):
     else:
         await ctx.reply("기억은 있는데 보여줄 만한 항목이 아직 없어!")
 
+@bot.command(name="푸리나생일테스트")
+@commands.has_permissions(administrator=True)
+async def furina_birthday_test(ctx):
+    channel = bot.get_channel(공지채널ID)
+
+    if channel is None:
+        await ctx.send("공지 채널을 찾지 못했어. 채널 ID 확인해줘!")
+        return
+
+    await channel.send(random.choice(FURINA_BIRTHDAY_MESSAGES))
+    await ctx.send("푸리나 생일 공지 테스트 완료!"
+                   
 @bot.command(name="호감도")
 async def favor_check(ctx):
     value = get_favor(ctx.author.id)
