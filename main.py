@@ -1924,7 +1924,10 @@ async def on_member_update(before, after):
                     print("채널 못 찾음")
                     return
 
-                msg = ROLE_MESSAGES[role.name].format(user=after.mention)
+                msg = ROLE_MESSAGES[role.name].format(
+                    user=after.mention,
+                    role=role.mention
+                )
                 await channel.send(msg)
 print(get_time_key())
 print(datetime.now())
