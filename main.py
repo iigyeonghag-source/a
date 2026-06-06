@@ -975,7 +975,7 @@ async def on_message(message):
         if random.random() < 0.03:
             bonus = random.choice([10, 20, 30])
             add_poker_money(uid, bonus)
-            response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}모라** 줄게! 현재 돈: **{get_poker_money(uid)}원**"
+            response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}모라** 줄게! 현재 돈: **{get_poker_money(uid)}모라**"
 
         if selected_key in FOLLOW_UP_QUESTIONS and random.random() < 0.45:
             response += "\n" + random.choice(FOLLOW_UP_QUESTIONS[selected_key])
