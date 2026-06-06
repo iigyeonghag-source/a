@@ -1937,14 +1937,14 @@ async def memory_check(ctx):
 @bot.command(name="푸리나생일테스트")
 @commands.has_permissions(administrator=True)
 async def furina_birthday_test(ctx):
-    channel = bot.get_channel(1511351100480163910)
+    channel = bot.get_channel(NOTICE_CHANNEL_ID)
 
     if channel is None:
-        await ctx.send("공지 채널을 찾지 못했어. 채널 ID 확인해줘!")
+        await ctx.send("공지 채널을 찾지 못했어. 채널 ID를 확인해줘!")
         return
 
-    await channel.send(random.choice(FURINA_BIRTHDAY_MESSAGES))
-    await ctx.send("푸리나 생일 공지 테스트 완료!")  
+    await channel.send(FURINA_BIRTHDAY_NOTICE)
+    await ctx.send("푸리나 생일 자동 공지 테스트 완료!")
     
 @bot.command(name="호감도")
 async def favor_check(ctx):
