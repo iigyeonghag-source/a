@@ -1873,7 +1873,35 @@ async def favor_check(ctx):
     await ctx.reply(
         f"{ctx.author.display_name}의 푸리나 호감도: **{value}** / 단계: **{stage}**"
     )
-    
+
+
+SERVER_ID =  1510681614919794868
+CHANNEL_ID =  1512642190302777415
+
+ROLE_MESSAGES = {
+    "오타쿠": "🎉 축하해! {user} 너도 이제 오타쿠가 되었구나!",
+    "씹덕": "🎉 축하해! {user}이/가 씹덕의 길에 입문했어!",
+    "개씹덕": "🎉 축하해! 이제 {user}은/는 되돌릴 수 없는 단계에 도달했어!",
+    "디창": "🎉 축하해! 우리 {user}이는 이제는 아예 디스코드에 영혼을 바쳤구나!"
+}
+
+@bot.event
+async def on_member_update(before, after):
+    if after.guild.id != SERVER_ID:
+        return
+
+    before_roles = {role.id for role in before.roles}
+
+    for role in after.roles:
+        if role.id not in before_roles and role.name in ROLE_MESSAGES:
+            channel = bot.get_channel(CHANNEL_ID)
+
+            if channel:
+                await channel.send(
+                    f"{after.mention}\n{ROLE_MESSAGES[role.name]}"
+                )
+
+
 print(get_time_key())
 print(datetime.now())
 
