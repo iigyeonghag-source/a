@@ -1718,7 +1718,7 @@ async def poker_claim(ctx):
 
     poker_last_claim[uid] = now
     save_data()
-    money = add_poker_money(uid, 100)
+    money = add_poker_money(uid, 1500)
     await ctx.reply(f"100모라 지급 완료! 현재 돈: **{money}모라**")
 
 @bot.command(name="포커")
@@ -2132,7 +2132,7 @@ async def on_member_update(before, after):
 print(get_time_key())
 print(datetime.now())
 
-CHARACTER_GACHA_COST = 160
+CHARACTER_GACHA_COST = 300
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 
 @bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
