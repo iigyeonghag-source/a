@@ -1062,7 +1062,7 @@ async def on_message(message):
 
     await message.reply(random.choice(DEFAULT_RESPONSES))
 
-GENSHIN_CHARACTERS.update({
+GENSHIN_CHARACTERS = ({
     "푸리나": {"rarity": 5, "dialogue": "자, 박수! 오늘의 무대에 오른 건 바로 이 푸리나님이야!"},
     "느비예트": {"rarity": 5, "dialogue": "물은 모든 것을 기억한다. 그러니 거짓은 오래 숨지 못하지."},
     "아를레키노": {"rarity": 5, "dialogue": "가족을 건드린 대가는, 네가 감당해야 할 것이다."},
