@@ -8,7 +8,8 @@ from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
 from discord import app_commands
 import asyncio
-
+from difflib import SequenceMatcher
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -170,7 +171,100 @@ DIRTY_RESPONSES = [
     "뭐?! 으 징그러! 다신 그런 말 하지마!"
 ]
 
+furina_talk_history = {}
+furina_spam_state = {}
 
+SIMILAR_LIMIT = 0.78
+SPAM_WINDOW = timedelta(seconds=60)
+SPAM_MAX_COUNT = 7
+REPEAT_PENALTY_COOLDOWN = timedelta(seconds=20)
+
+REPEAT_ANNOYED_RESPONSES = [
+    "또 그 말이야? 으으... 나를 시험하는 거야?",
+    "방금이랑 비슷한 말 아니야? 조금 성의가 부족한걸.",
+    "후훗... 계속 같은 말만 하면 나도 삐질 수 있다고?",
+    "그 주제는 방금 했잖아! 다른 이야기도 해보자고!",
+    "으음, 슬슬 질리는데... 물의 신도 반복 대사는 싫어한다고!"
+]
+
+SPAM_ANNOYED_RESPONSES = [
+    "잠깐잠깐! 너무 많이 부르는 거 아니야?!",
+    "나도 숨 좀 쉬자! 계속 말 걸면 곤란하다고!",
+    "으으... 관심은 고맙지만 너무 몰아치면 부담스럽거든?",
+    "푸리나님 호출권 남발 금지야! 흥!",
+    "조금만 천천히 말해! 무대에도 쉬는 시간이 필요하다고!"
+]
+
+def normalize_furina_text(text):
+    return " ".join(text.lower().strip().split())
+
+def is_similar_text(a, b):
+    if not a or not b:
+        return False
+
+    if a == b:
+        return True
+
+    if a in b or b in a:
+        return True
+
+    return SequenceMatcher(None, a, b).ratio() >= SIMILAR_LIMIT
+
+def check_furina_repeat_or_spam(user_id, text):
+    uid = str(user_id)
+    now = datetime.now(KST)
+    clean = normalize_furina_text(text)
+
+    furina_talk_history.setdefault(uid, [])
+    furina_spam_state.setdefault(uid, {
+        "times": [],
+        "last_penalty": None
+    })
+
+    history = furina_talk_history[uid]
+    spam = furina_spam_state[uid]
+
+    # 오래된 호출 기록 제거
+    spam["times"] = [
+        t for t in spam["times"]
+        if now - t <= SPAM_WINDOW
+    ]
+    spam["times"].append(now)
+
+    last_penalty = spam.get("last_penalty")
+    can_penalize = (
+        last_penalty is None
+        or now - last_penalty >= REPEAT_PENALTY_COOLDOWN
+    )
+
+    # 너무 자주 말 걸기
+    if len(spam["times"]) >= SPAM_MAX_COUNT:
+        if can_penalize:
+            add_favor(user_id, -2)
+            spam["last_penalty"] = now
+
+        history.append(clean)
+        furina_talk_history[uid] = history[-5:]
+
+        return random.choice(SPAM_ANNOYED_RESPONSES)
+
+    # 최근 말과 비슷한지 검사
+    recent_history = history[-3:]
+    if any(is_similar_text(clean, old) for old in recent_history):
+        if can_penalize:
+            add_favor(user_id, -2)
+            spam["last_penalty"] = now
+
+        history.append(clean)
+        furina_talk_history[uid] = history[-5:]
+
+        return random.choice(REPEAT_ANNOYED_RESPONSES)
+
+    history.append(clean)
+    furina_talk_history[uid] = history[-5:]
+
+    return None
+    
 RESPONSES = {
     "안녕": [
         "오! 드디어 왔구나? 후후, 기다리고 있었다고!",
@@ -948,6 +1042,11 @@ async def on_message(message):
     lower = text.lower()
     uid = str(message.author.id)
 
+    annoyed_response = check_furina_repeat_or_spam(message.author.id, text)
+    if annoyed_response:
+        await message.reply(annoyed_response)
+        return
+    
     # 간단 기억 시스템
     if lower.startswith("내 이름은 ") or lower.startswith("내이름은 "):
         name = text.replace("내 이름은", "", 1).replace("내이름은", "", 1).strip()
