@@ -2476,7 +2476,7 @@ class CharacterDexView(discord.ui.View):
         )
         self.refresh_items()
 
-    def refresh_items(self):
+       def refresh_items(self):
         self.clear_items()
 
         start = self.page * CHARACTER_DEX_PAGE_SIZE
@@ -2488,6 +2488,7 @@ class CharacterDexView(discord.ui.View):
         self.add_item(CharacterDexPrevButton(self))
         self.add_item(CharacterDexJumpButton(self))
         self.add_item(CharacterDexNextButton(self))
+        self.add_item(CharacterDexCloseButton(self))
 
     def render(self):
         user_chars = characters.get(self.user_id, {})
@@ -2591,6 +2592,18 @@ class CharacterDexView(discord.ui.View):
         )
 
         return embed
+
+class CharacterDexCloseButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(
+            label="도감 닫기",
+            emoji="❌",
+            style=discord.ButtonStyle.red
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+
+        await interaction.message.delete()
         
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
 async def character_dex(interaction: discord.Interaction):
