@@ -2112,12 +2112,12 @@ print(datetime.now())
 CHARACTER_GACHA_COST = 160
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 
-@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
+@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
 @app_commands.describe(횟수="1 또는 10")
 async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
-    uid = str(interaction.user.id)    
-    current_money = get_poker_money(uid)
-    
+
+    uid = str(interaction.user.id)
+
     if 횟수 not in [1, 10]:
         await interaction.response.send_message(
             "❌ 1회 또는 10회만 가능해.",
@@ -2128,76 +2128,158 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
     cost = CHARACTER_GACHA_COST * 횟수
 
     if get_poker_money(uid) < cost:
+        embed = discord.Embed(
+            title="❌ 모라 부족",
+            description=(
+                f"필요 모라: **{cost:,}**\n"
+                f"보유 모라: **{get_poker_money(uid):,}**"
+            ),
+            color=discord.Color.red()
+        )
+
         await interaction.response.send_message(
-            f"❌ 모라가 부족해!\n필요 모라: **{cost}**\n보유 모라: **{get_poker_money(uid)}**",
+            embed=embed,
             ephemeral=True
         )
         return
 
     add_poker_money(uid, -cost)
+
     user_chars = get_user_characters(uid)
 
-    await interaction.response.send_message(
-        "✨ 하늘에 별빛이 모이기 시작한다..."
+    embed = discord.Embed(
+        title="🌠 기원 진행 중",
+        description="별빛이 하늘을 가르기 시작한다...",
+        color=discord.Color.blue()
     )
+
+    await interaction.response.send_message(embed=embed)
 
     msg = await interaction.original_response()
 
     await asyncio.sleep(1)
-    await msg.edit(content="🌌 운명의 문이 열리는 중...")
+
+    embed.description = "🌌 운명의 문이 열리고 있다..."
+    await msg.edit(embed=embed)
+
     await asyncio.sleep(1)
-    await msg.edit(content="💫 빛이 강하게 폭발한다!")
+
+    embed.description = "💫 눈부신 빛이 폭발한다!"
+    await msg.edit(embed=embed)
+
     await asyncio.sleep(1)
 
     results = []
     reward_lines = []
 
+    highest_rarity = 4
+
     for i in range(횟수):
+
         name = draw_character()
         info = GENSHIN_CHARACTERS[name]
+
+        highest_rarity = max(
+            highest_rarity,
+            info["rarity"]
+        )
+
         is_new = name not in user_chars
 
         if is_new:
-            user_chars[name] = {"favor_exp": 0}
-            results.append(f"{i+1}. 🎉 신규 {'⭐' * info['rarity']} **{name}**")
+
+            user_chars[name] = {
+                "favor_exp": 0
+            }
+
+            results.append(
+                f"🎉 {'⭐'*info['rarity']} **{name}** (신규)"
+            )
+
         else:
-            old_level = get_character_level(user_chars[name]["favor_exp"])
+
+            old_level = get_character_level(
+                user_chars[name]["favor_exp"]
+            )
 
             if old_level < 3:
                 user_chars[name]["favor_exp"] += 1
 
-            new_level = get_character_level(user_chars[name]["favor_exp"])
+            new_level = get_character_level(
+                user_chars[name]["favor_exp"]
+            )
 
-            results.append(f"{i+1}. ✨ 중복 {'⭐' * info['rarity']} **{name}** | 호감도 Lv.{new_level}/3")
+            results.append(
+                f"✨ {'⭐'*info['rarity']} **{name}** (중복)"
+            )
 
             if old_level != new_level:
-                reward = 300 if new_level == 2 else 700
+
+                reward = (
+                    300
+                    if new_level == 2
+                    else 700
+                )
+
                 add_poker_money(uid, reward)
 
                 reward_lines.append(
-                    f"💖 **{name}** 호감도 Lv.{old_level} → Lv.{new_level} / 보상 **{reward}모라**"
+                    f"💖 {name} Lv.{old_level} → Lv.{new_level}\n"
+                    f"💰 {reward:,} 모라"
                 )
-
-                if new_level >= 2:
-                    reward_lines.append(f"💬 **{name}의 대사**: {info['dialogue']}")
 
     save_data()
 
-    result_text = "\n".join(results)
-    reward_text = "\n".join(reward_lines) if reward_lines else "없음"
-
     current_money = get_poker_money(uid)
 
-    await msg.edit(
-        content=(
-            f"🎊 **캐릭터 뽑기 결과!**\n"
-            f"소모 모라: **{cost}**\n\n"
-            f"{result_text}\n\n"
-            f"🎁 **호감도 보상**\n"
-            f"{reward_text}\n\n"
-            f"💰 현재 모라: **{current_money}**"
-        )
+    color = (
+        discord.Color.gold()
+        if highest_rarity == 5
+        else discord.Color.purple()
     )
+
+    title = (
+        "🌟 5성 등장!"
+        if highest_rarity == 5
+        else "💜 기원 결과"
+    )
+
+    embed = discord.Embed(
+        title=title,
+        color=color
+    )
+
+    embed.add_field(
+        name="🎊 획득 결과",
+        value="\n".join(results),
+        inline=False
+    )
+
+    embed.add_field(
+        name="🎁 호감도 보상",
+        value="\n".join(reward_lines)
+        if reward_lines
+        else "없음",
+        inline=False
+    )
+
+    embed.add_field(
+        name="💰 모라",
+        value=f"{current_money:,}",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🎲 뽑기 횟수",
+        value=f"{횟수}회",
+        inline=True
+    )
+
+    embed.set_footer(
+        text=f"{interaction.user.display_name}의 기원 결과"
+    )
+
+    await msg.edit(embed=embed)
 
 # =========================
 # 원신 캐릭터 도감 UI
@@ -2442,12 +2524,57 @@ class CharacterDexView(discord.ui.View):
         return text
 
 
+def make_dex_embed(self):
+
+    owned = characters.get(
+        str(self.user_id),
+        {}
+    )
+
+    start = self.page * 5
+    end = start + 5
+
+    embed = discord.Embed(
+        title="📖 원신 캐릭터 도감",
+        description=f"페이지 {self.page+1}/{self.max_page}",
+        color=discord.Color.blurple()
+    )
+
+    for char_name in self.character_list[start:end]:
+
+        char = GENSHIN_CHARACTERS[char_name]
+
+        if char_name in owned:
+
+            level = get_character_level(
+                owned[char_name]["favor_exp"]
+            )
+
+            embed.add_field(
+                name=f"✅ {char_name}",
+                value=(
+                    f"{'⭐'*char['rarity']}\n"
+                    f"호감도 Lv.{level}/3"
+                ),
+                inline=False
+            )
+
+        else:
+
+            embed.add_field(
+                name="❌ ???",
+                value=f"{'⭐'*char['rarity']}",
+                inline=False
+            )
+
+    return embed
+    
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
 async def character_dex(interaction: discord.Interaction):
     view = CharacterDexView(interaction.user.id)
 
     await interaction.response.send_message(
-        content=view.render(),
+        embed=view.make_dex_embed(),
         view=view
     )
     
