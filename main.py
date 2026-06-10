@@ -3402,7 +3402,6 @@ async def money_remove(
         f"💸 {대상.mention}에게서 **{removed:,}모라** 차감 완료!\n"
         f"현재 보유 모라: **{get_poker_money(uid):,}모라**"
     )
-)
 
 @bot.event
 async def on_ready():
