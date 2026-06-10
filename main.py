@@ -2368,7 +2368,8 @@ class CharacterDexPrevButton(discord.ui.Button):
         self.dex_view.refresh_items()
 
         await interaction.response.edit_message(
-            content=self.dex_view.render(),
+            content=None,
+            embed=self.dex_view.make_dex_embed(),
             view=self.dex_view
         )
 
@@ -2395,7 +2396,8 @@ class CharacterDexNextButton(discord.ui.Button):
         self.dex_view.refresh_items()
 
         await interaction.response.edit_message(
-            content=self.dex_view.render(),
+            content=None,
+            embed=self.dex_view.make_dex_embed(),
             view=self.dex_view
         )
 
