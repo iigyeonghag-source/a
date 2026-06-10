@@ -2588,6 +2588,8 @@ class CharacterDexView(discord.ui.View):
         super().__init__(timeout=180)
         self.user_id = str(user_id)
         self.page = 0
+        self.search_keyword = None
+        
         self.character_list = sorted(
             GENSHIN_CHARACTERS.keys(),
             key=lambda name: (-GENSHIN_CHARACTERS[name]["rarity"], name)
@@ -2610,6 +2612,11 @@ class CharacterDexView(discord.ui.View):
         self.add_item(CharacterDexPrevButton(self))
         self.add_item(CharacterDexJumpButton(self))
         self.add_item(CharacterDexNextButton(self))
+        self.add_item(CharacterDexSearchButton(self))
+
+        if self.search_keyword:
+            self.add_item(CharacterDexResetButton(self))
+
         self.add_item(CharacterDexCloseButton(self))
 
     def render(self):
@@ -2669,7 +2676,16 @@ class CharacterDexView(discord.ui.View):
             ),
             color=discord.Color.blurple()
         )
+        
+        desc = (
+            "수집한 캐릭터와 호감도를 확인할 수 있어.\n"
+            f"**도감 진행도:** `{owned_count}/{total}` · **{percent}%**\n"
+            f"**페이지:** `{self.page + 1}/{self.max_page}`"
+        )
 
+        if self.search_keyword:
+            desc += f"\n🔍 검색어: `{self.search_keyword}`"
+    
         for char_name in page_chars:
             char = GENSHIN_CHARACTERS[char_name]
             rarity = char["rarity"]
@@ -2736,6 +2752,104 @@ class CharacterDexCloseButton(discord.ui.Button):
             content="📕 도감을 닫았어.",
             embed=None,
             view=None
+        )
+
+
+class CharacterDexSearchButton(discord.ui.Button):
+    def __init__(self, dex_view):
+        super().__init__(
+            label="검색",
+            emoji="🔍",
+            style=discord.ButtonStyle.primary,
+            row=1
+        )
+        self.dex_view = dex_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message("❌ 니 도감 아님.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(CharacterDexSearchModal(self.dex_view))
+
+
+class CharacterDexSearchModal(discord.ui.Modal, title="캐릭터 이름 검색"):
+    keyword = discord.ui.TextInput(
+        label="검색할 캐릭터 이름",
+        placeholder="예: 푸리나, 느비, 라이덴",
+        required=True,
+        max_length=20
+    )
+
+    def __init__(self, dex_view):
+        super().__init__()
+        self.dex_view = dex_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        word = str(self.keyword.value).strip().lower()
+
+        all_chars = sorted(
+            GENSHIN_CHARACTERS.keys(),
+            key=lambda name: (-GENSHIN_CHARACTERS[name]["rarity"], name)
+        )
+
+        result = [
+            name for name in all_chars
+            if word in name.lower()
+        ]
+
+        if not result:
+            await interaction.response.send_message(
+                f"❌ `{self.keyword.value}` 검색 결과 없음.",
+                ephemeral=True
+            )
+            return
+
+        self.dex_view.search_keyword = str(self.keyword.value).strip()
+        self.dex_view.character_list = result
+        self.dex_view.page = 0
+        self.dex_view.max_page = max(
+            1,
+            (len(self.dex_view.character_list) + CHARACTER_DEX_PAGE_SIZE - 1) // CHARACTER_DEX_PAGE_SIZE
+        )
+        self.dex_view.refresh_items()
+
+        await interaction.response.edit_message(
+            embed=self.dex_view.make_dex_embed(),
+            view=self.dex_view
+        )
+
+
+class CharacterDexResetButton(discord.ui.Button):
+    def __init__(self, dex_view):
+        super().__init__(
+            label="검색 초기화",
+            emoji="↩️",
+            style=discord.ButtonStyle.secondary,
+            row=1
+        )
+        self.dex_view = dex_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message("❌ 니 도감 아님.", ephemeral=True)
+            return
+
+        self.dex_view.search_keyword = None
+        self.dex_view.character_list = sorted(
+            GENSHIN_CHARACTERS.keys(),
+            key=lambda name: (-GENSHIN_CHARACTERS[name]["rarity"], name)
+        )
+        self.dex_view.page = 0
+        self.dex_view.max_page = max(
+            1,
+            (len(self.dex_view.character_list) + CHARACTER_DEX_PAGE_SIZE - 1) // CHARACTER_DEX_PAGE_SIZE
+        )
+        self.dex_view.refresh_items()
+
+        await interaction.response.edit_message(
+            embed=self.dex_view.make_dex_embed(),
+            view=self.dex_view
         )
         
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
