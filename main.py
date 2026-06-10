@@ -6,6 +6,7 @@ import discord
 from discord.ext import commands, tasks
 from dotenv import load_dotenv
 from zoneinfo import ZoneInfo
+from discord import app_commands
 
 
 load_dotenv()
@@ -36,11 +37,15 @@ data = {
     "poker_money": {},
     "poker_last_claim": {},
     "favor": {},
-    "memory": {}
+    "memory": {},
+    "characters": {}
 }
 
+characters = {}
+
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory
+    global data, poker_money, poker_last_claim, favor, user_memory, characters
+
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -52,10 +57,12 @@ def load_data():
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
         data["favor"] = loaded.get("favor", {})
         data["memory"] = loaded.get("memory", {})
+        data["characters"] = loaded.get("characters", {})
 
     poker_money = data["poker_money"]
     favor = data["favor"]
     user_memory = data["memory"]
+    characters = data["characters"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -67,6 +74,7 @@ def save_data():
     data["poker_money"] = poker_money
     data["favor"] = favor
     data["memory"] = user_memory
+    data["characters"] = characters
     data["poker_last_claim"] = {
         uid: value.isoformat()
         for uid, value in poker_last_claim.items()
@@ -727,7 +735,7 @@ KEYWORDS = {
     "싫어": ["싫어", "싫다", "싫음", "하기 싫", "안 할래", "별로야", "미워"],
     "심심": ["심심", "노잼", "재미없", "할 거 없"],
     "배고파": ["배고파", "배고픔", "출출", "밥", "먹을 거", "간식"],
-    "잘자": ["잘자", "잘 자", "굿나잇", "good night", "자러감"],
+    "잘자": ["잘자", "잘 자", "굿나잇", "good night", "자러감", "꿈꿔"],
     "고마워": ["고마워", "감사", "ㄱㅅ", "땡큐", "thanks", "thank you"],
     "미안": ["미안", "죄송", "사과", "잘못했"],
     "이름": ["이름", "누구야", "정체", "너 뭐야"],
@@ -1050,6 +1058,88 @@ async def on_message(message):
 
     await message.reply(random.choice(DEFAULT_RESPONSES))
 
+    "푸리나": {
+        "rarity": 5,
+        "dialogue": "후후, 드디어 날 제대로 알아보는구나? 이 푸리나님과 함께라면 지루할 틈은 없을 거야!"
+    },
+    "느비예트": {
+        "rarity": 5,
+        "dialogue": "질서는 물처럼 흘러야 한다. 그러나 때로는 그 흐름을 바로잡아야 하지."
+    },
+    "아를레키노": {
+        "rarity": 5,
+        "dialogue": "흥미롭군. 네 선택이 어디까지 이어질지 지켜보겠다."
+    },
+    "라이덴 쇼군": {
+        "rarity": 5,
+        "dialogue": "영원은 쉽게 흔들리지 않는다."
+    },
+    "나히다": {
+        "rarity": 5,
+        "dialogue": "작은 씨앗도 언젠가 커다란 나무가 될 수 있어."
+    },
+    "종려": {
+        "rarity": 5,
+        "dialogue": "계약은 맺어진 순간부터 의미를 가진다."
+    },
+    "벤티": {
+        "rarity": 5,
+        "dialogue": "바람이 부는 곳이라면 어디든 노래가 있지!"
+    },
+    "클로린드": {
+        "rarity": 5,
+        "dialogue": "결투라면 피하지 않겠다."
+    },
+    "리니": {
+        "rarity": 5,
+        "dialogue": "자, 눈 깜빡하지 마. 진짜 마술은 지금부터니까!"
+    },
+    "리넷": {
+        "rarity": 4,
+        "dialogue": "명령 확인. 수행할게."
+    },
+    "향릉": {
+        "rarity": 4,
+        "dialogue": "새로운 식재료 발견! 이건 꼭 요리해봐야 해!"
+    },
+    "베넷": {
+        "rarity": 4,
+        "dialogue": "불운해도 괜찮아! 모험은 계속되는 거니까!"
+    },
+    "피슬": {
+        "rarity": 4,
+        "dialogue": "단죄의 황녀가 그대의 부름에 응답하였노라!"
+    },
+    "행추": {
+        "rarity": 4,
+        "dialogue": "책 속의 지혜와 검술은 의외로 닮은 점이 많지."
+    },
+    "노엘": {
+        "rarity": 4,
+        "dialogue": "무엇이든 맡겨주세요. 제가 도와드릴게요!"
+    }
+}
+
+def get_user_characters(user_id):
+    uid = str(user_id)
+    characters.setdefault(uid, {})
+    return characters[uid]
+
+def get_character_level(exp):
+    if exp >= 2:
+        return 3
+    if exp >= 1:
+        return 2
+    return 1
+
+def draw_character():
+    five_stars = [name for name, info in GENSHIN_CHARACTERS.items() if info["rarity"] == 5]
+    four_stars = [name for name, info in GENSHIN_CHARACTERS.items() if info["rarity"] == 4]
+
+    if random.random() < 0.08:
+        return random.choice(five_stars)
+    return random.choice(four_stars)
+    
 SUITS = ["♠", "♥", "♦", "♣"]
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
 RANK_VALUE = {r: i for i, r in enumerate(RANKS, start=2)}
@@ -2017,6 +2107,92 @@ print(datetime.now())
 @bot.event
 async def on_ready():
     birthday_check.start()
+    await bot.tree.sync()
     print(f"로그인됨: {bot.user}")
+
+@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
+async def character_gacha(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user_chars = get_user_characters(uid)
+
+    name = draw_character()
+    info = GENSHIN_CHARACTERS[name]
+
+    is_new = name not in user_chars
+
+    reward_text = ""
+
+    if is_new:
+        user_chars[name] = {
+            "favor_exp": 0
+        }
+        result_text = f"🎉 신규 캐릭터 획득!"
+    else:
+        old_level = get_character_level(user_chars[name]["favor_exp"])
+
+        if old_level < 3:
+            user_chars[name]["favor_exp"] += 1
+
+        new_level = get_character_level(user_chars[name]["favor_exp"])
+
+        result_text = f"✨ 중복 캐릭터! **{name}**의 호감도가 올랐어!"
+
+        if old_level != new_level:
+            reward = 300 if new_level == 2 else 700
+            add_poker_money(uid, reward)
+
+            reward_text = (
+                f"\n\n💖 호감도 레벨 상승! **Lv.{old_level} → Lv.{new_level}**"
+                f"\n💰 보상: **{reward}모라**"
+                f"\n현재 모라: **{get_poker_money(uid)}모라**"
+            )
+
+            if new_level >= 2:
+                reward_text += f"\n\n💬 **{name}의 대사**\n> {info['dialogue']}"
+
+    save_data()
+
+    level = get_character_level(user_chars[name]["favor_exp"])
+    star = "⭐" * info["rarity"]
+
+    await interaction.response.send_message(
+        f"{result_text}\n\n"
+        f"{star}\n"
+        f"획득 캐릭터: **{name}**\n"
+        f"호감도: **Lv.{level} / 3**"
+        f"{reward_text}"
+    )
+
+
+@bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다")
+async def character_dex(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user_chars = get_user_characters(uid)
+
+    if not user_chars:
+        await interaction.response.send_message(
+            "아직 뽑은 캐릭터가 없어!\n`/캐릭터뽑기`부터 해봐."
+        )
+        return
+
+    lines = []
+
+    for name in sorted(GENSHIN_CHARACTERS.keys()):
+        info = GENSHIN_CHARACTERS[name]
+
+        if name in user_chars:
+            level = get_character_level(user_chars[name]["favor_exp"])
+            line = f"✅ **{name}** {'⭐' * info['rarity']} | 호감도 Lv.{level}/3"
+
+            if level >= 2:
+                line += f"\n> 💬 {info['dialogue']}"
+        else:
+            line = f"❌ ??? {'⭐' * info['rarity']}"
+
+        lines.append(line)
+
+    await interaction.response.send_message(
+        "📖 **캐릭터 도감**\n\n" + "\n\n".join(lines)
+    )
     
 bot.run(TOKEN)
