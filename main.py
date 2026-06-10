@@ -3340,7 +3340,7 @@ async def mora_receive(interaction: discord.Interaction):
 
 
 @bot.tree.command(
-    name="돈주",
+    name="돈주기",
     description="유저에게 모라를 지급한다",
     guild=GUILD
 )
