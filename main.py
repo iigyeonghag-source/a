@@ -2108,60 +2108,95 @@ async def on_member_update(before, after):
 print(get_time_key())
 print(datetime.now())
 
-@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
-async def character_gacha(interaction: discord.Interaction):
+CHARACTER_GACHA_COST = 160
+CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
+current_money = get_poker_money(uid)
+
+@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
+@app_commands.describe(횟수="1 또는 10")
+async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
     uid = str(interaction.user.id)
+
+    if 횟수 not in [1, 10]:
+        await interaction.response.send_message(
+            "❌ 1회 또는 10회만 가능해.",
+            ephemeral=True
+        )
+        return
+
+    cost = CHARACTER_GACHA_COST * 횟수
+
+    if get_poker_money(uid) < cost:
+        await interaction.response.send_message(
+            f"❌ 모라가 부족해!\n필요 모라: **{cost}**\n보유 모라: **{get_poker_money(uid)}**",
+            ephemeral=True
+        )
+        return
+
+    add_poker_money(uid, -cost)
     user_chars = get_user_characters(uid)
 
-    name = draw_character()
-    info = GENSHIN_CHARACTERS[name]
+    await interaction.response.send_message(
+        "✨ 하늘에 별빛이 모이기 시작한다..."
+    )
 
-    is_new = name not in user_chars
+    msg = await interaction.original_response()
 
-    reward_text = ""
+    await asyncio.sleep(1)
+    await msg.edit(content="🌌 운명의 문이 열리는 중...")
+    await asyncio.sleep(1)
+    await msg.edit(content="💫 빛이 강하게 폭발한다!")
+    await asyncio.sleep(1)
 
-    if is_new:
-        user_chars[name] = {
-            "favor_exp": 0
-        }
-        result_text = f"🎉 신규 캐릭터 획득!"
-    else:
-        old_level = get_character_level(user_chars[name]["favor_exp"])
+    results = []
+    reward_lines = []
 
-        if old_level < 3:
-            user_chars[name]["favor_exp"] += 1
+    for i in range(횟수):
+        name = draw_character()
+        info = GENSHIN_CHARACTERS[name]
+        is_new = name not in user_chars
 
-        new_level = get_character_level(user_chars[name]["favor_exp"])
+        if is_new:
+            user_chars[name] = {"favor_exp": 0}
+            results.append(f"{i+1}. 🎉 신규 {'⭐' * info['rarity']} **{name}**")
+        else:
+            old_level = get_character_level(user_chars[name]["favor_exp"])
 
-        result_text = f"✨ 중복 캐릭터! **{name}**의 호감도가 올랐어!"
+            if old_level < 3:
+                user_chars[name]["favor_exp"] += 1
 
-        if old_level != new_level:
-            reward = 300 if new_level == 2 else 700
-            add_poker_money(uid, reward)
+            new_level = get_character_level(user_chars[name]["favor_exp"])
 
-            reward_text = (
-                f"\n\n💖 호감도 레벨 상승! **Lv.{old_level} → Lv.{new_level}**"
-                f"\n💰 보상: **{reward}모라**"
-                f"\n현재 모라: **{get_poker_money(uid)}모라**"
-            )
+            results.append(f"{i+1}. ✨ 중복 {'⭐' * info['rarity']} **{name}** | 호감도 Lv.{new_level}/3")
 
-            if new_level >= 2:
-                reward_text += f"\n\n💬 **{name}의 대사**\n> {info['dialogue']}"
+            if old_level != new_level:
+                reward = 300 if new_level == 2 else 700
+                add_poker_money(uid, reward)
+
+                reward_lines.append(
+                    f"💖 **{name}** 호감도 Lv.{old_level} → Lv.{new_level} / 보상 **{reward}모라**"
+                )
+
+                if new_level >= 2:
+                    reward_lines.append(f"💬 **{name}의 대사**: {info['dialogue']}")
 
     save_data()
 
-    level = get_character_level(user_chars[name]["favor_exp"])
-    star = "⭐" * info["rarity"]
+    result_text = "\n".join(results)
+    reward_text = "\n".join(reward_lines) if reward_lines else "없음"
 
-    await interaction.response.send_message(
-        f"{result_text}\n\n"
-        f"{star}\n"
-        f"획득 캐릭터: **{name}**\n"
-        f"호감도: **Lv.{level} / 3**"
-        f"{reward_text}"
+    current_money = get_poker_money(uid)
+
+    await msg.edit(
+        content=(
+            f"🎊 **캐릭터 뽑기 결과!**\n"
+            f"소모 모라: **{cost}**\n\n"
+            f"{result_text}\n\n"
+            f"🎁 **호감도 보상**\n"
+            f"{reward_text}\n\n"
+            f"💰 현재 모라: **{current_money}**"
+        )
     )
-
-
 
 # =========================
 # 원신 캐릭터 도감 UI
