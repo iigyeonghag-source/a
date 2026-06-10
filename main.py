@@ -2594,16 +2594,27 @@ class CharacterDexView(discord.ui.View):
         return embed
 
 class CharacterDexCloseButton(discord.ui.Button):
-    def __init__(self):
+    def __init__(self, dex_view):
         super().__init__(
-            label="도감 닫기",
+            label="닫기",
             emoji="❌",
             style=discord.ButtonStyle.red
         )
+        self.dex_view = dex_view
 
     async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != int(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 니 도감 아님.",
+                ephemeral=True
+            )
+            return
 
-        await interaction.message.delete()
+        await interaction.response.edit_message(
+            content="📕 도감을 닫았어.",
+            embed=None,
+            view=None
+        )
         
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
 async def character_dex(interaction: discord.Interaction):
