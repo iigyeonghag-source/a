@@ -2112,7 +2112,7 @@ print(datetime.now())
 CHARACTER_GACHA_COST = 160
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 
-@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
+@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
 @app_commands.describe(횟수="1 또는 10")
 async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
 
