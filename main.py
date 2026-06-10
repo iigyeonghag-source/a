@@ -1058,6 +1058,7 @@ async def on_message(message):
 
     await message.reply(random.choice(DEFAULT_RESPONSES))
 
+GENSHIN_CHARACTERS = {
     "푸리나": {
         "rarity": 5,
         "dialogue": "후후, 드디어 날 제대로 알아보는구나? 이 푸리나님과 함께라면 지루할 틈은 없을 거야!"
@@ -2164,35 +2165,257 @@ async def character_gacha(interaction: discord.Interaction):
     )
 
 
+
+# =========================
+# 원신 캐릭터 도감 UI
+# =========================
+
+CHARACTER_DEX_PAGE_SIZE = 5
+
+
+class CharacterDexButton(discord.ui.Button):
+    def __init__(self, dex_view, char_name: str):
+        uid = str(dex_view.user_id)
+        owned = characters.get(uid, {})
+        is_owned = char_name in owned
+
+        label = char_name if is_owned else "???"
+        style = discord.ButtonStyle.success if is_owned else discord.ButtonStyle.secondary
+
+        super().__init__(
+            label=label,
+            style=style,
+            row=0
+        )
+
+        self.dex_view = dex_view
+        self.char_name = char_name
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 남의 도감 버튼 누르지 마!",
+                ephemeral=True
+            )
+            return
+
+        uid = str(interaction.user.id)
+        user_chars = get_user_characters(uid)
+
+        if self.char_name not in user_chars:
+            await interaction.response.send_message(
+                "❌ 아직 획득하지 못한 캐릭터야.",
+                ephemeral=True
+            )
+            return
+
+        info = GENSHIN_CHARACTERS[self.char_name]
+        favor_exp = int(user_chars[self.char_name].get("favor_exp", 0))
+        level = get_character_level(favor_exp)
+
+        text = (
+            f"{'⭐' * info['rarity']}\n"
+            f"**{self.char_name}**\n\n"
+            f"💖 호감도: **Lv.{level}/3**\n"
+            f"중복 획득 횟수: **{favor_exp}회**"
+        )
+
+        if level >= 2:
+            text += f"\n\n💬 **해금 대사**\n> {info['dialogue']}"
+        else:
+            text += "\n\n🔒 호감도 Lv.2부터 대사가 해금돼."
+
+        await interaction.response.send_message(
+            text,
+            ephemeral=True
+        )
+
+
+class CharacterDexPrevButton(discord.ui.Button):
+    def __init__(self, dex_view):
+        super().__init__(
+            label="◀",
+            style=discord.ButtonStyle.primary,
+            row=1,
+            disabled=(dex_view.page <= 0)
+        )
+        self.dex_view = dex_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 남의 도감 버튼 누르지 마!",
+                ephemeral=True
+            )
+            return
+
+        self.dex_view.page = max(0, self.dex_view.page - 1)
+        self.dex_view.refresh_items()
+
+        await interaction.response.edit_message(
+            content=self.dex_view.render(),
+            view=self.dex_view
+        )
+
+
+class CharacterDexNextButton(discord.ui.Button):
+    def __init__(self, dex_view):
+        super().__init__(
+            label="▶",
+            style=discord.ButtonStyle.primary,
+            row=1,
+            disabled=(dex_view.page >= dex_view.max_page - 1)
+        )
+        self.dex_view = dex_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 남의 도감 버튼 누르지 마!",
+                ephemeral=True
+            )
+            return
+
+        self.dex_view.page = min(self.dex_view.max_page - 1, self.dex_view.page + 1)
+        self.dex_view.refresh_items()
+
+        await interaction.response.edit_message(
+            content=self.dex_view.render(),
+            view=self.dex_view
+        )
+
+
+class CharacterDexJumpButton(discord.ui.Button):
+    def __init__(self, dex_view):
+        super().__init__(
+            label="페이지 이동",
+            style=discord.ButtonStyle.secondary,
+            row=1
+        )
+        self.dex_view = dex_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 남의 도감 버튼 누르지 마!",
+                ephemeral=True
+            )
+            return
+
+        await interaction.response.send_modal(CharacterDexJumpModal(self.dex_view))
+
+
+class CharacterDexJumpModal(discord.ui.Modal, title="캐릭터 도감 페이지 이동"):
+    page = discord.ui.TextInput(
+        label="이동할 페이지 번호",
+        placeholder="예: 2",
+        required=True,
+        max_length=4
+    )
+
+    def __init__(self, dex_view):
+        super().__init__()
+        self.dex_view = dex_view
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != str(self.dex_view.user_id):
+            await interaction.response.send_message(
+                "❌ 남의 도감 건드리지 마!",
+                ephemeral=True
+            )
+            return
+
+        try:
+            page_num = int(str(self.page.value).strip())
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ 숫자로 입력해야 해.",
+                ephemeral=True
+            )
+            return
+
+        page_num = max(1, min(self.dex_view.max_page, page_num))
+        self.dex_view.page = page_num - 1
+        self.dex_view.refresh_items()
+
+        await interaction.response.edit_message(
+            content=self.dex_view.render(),
+            view=self.dex_view
+        )
+
+
+class CharacterDexView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+        self.page = 0
+        self.character_list = sorted(
+            GENSHIN_CHARACTERS.keys(),
+            key=lambda name: (-GENSHIN_CHARACTERS[name]["rarity"], name)
+        )
+        self.max_page = max(
+            1,
+            (len(self.character_list) + CHARACTER_DEX_PAGE_SIZE - 1) // CHARACTER_DEX_PAGE_SIZE
+        )
+        self.refresh_items()
+
+    def refresh_items(self):
+        self.clear_items()
+
+        start = self.page * CHARACTER_DEX_PAGE_SIZE
+        end = start + CHARACTER_DEX_PAGE_SIZE
+
+        for char_name in self.character_list[start:end]:
+            self.add_item(CharacterDexButton(self, char_name))
+
+        self.add_item(CharacterDexPrevButton(self))
+        self.add_item(CharacterDexJumpButton(self))
+        self.add_item(CharacterDexNextButton(self))
+
+    def render(self):
+        user_chars = characters.get(self.user_id, {})
+        total = len(self.character_list)
+        owned_count = sum(1 for name in self.character_list if name in user_chars)
+
+        start = self.page * CHARACTER_DEX_PAGE_SIZE
+        end = start + CHARACTER_DEX_PAGE_SIZE
+
+        text = (
+            "📖 **원신 캐릭터 도감**\n\n"
+            f"수집률: **{owned_count}/{total}**\n"
+            f"페이지: **{self.page + 1}/{self.max_page}**\n\n"
+        )
+
+        for char_name in self.character_list[start:end]:
+            info = GENSHIN_CHARACTERS[char_name]
+            stars = "⭐" * info["rarity"]
+
+            if char_name in user_chars:
+                favor_exp = int(user_chars[char_name].get("favor_exp", 0))
+                level = get_character_level(favor_exp)
+                dialogue_state = "💬 대사 해금" if level >= 2 else "🔒 대사 잠김"
+
+                text += (
+                    f"✅ **{char_name}** {stars}\n"
+                    f"호감도 Lv.{level}/3 | 중복 {favor_exp}회 | {dialogue_state}\n\n"
+                )
+            else:
+                text += (
+                    f"❌ **???** {stars}\n"
+                    f"미획득\n\n"
+                )
+
+        text += "아래 버튼을 누르면 캐릭터 상세 정보를 볼 수 있어."
+        return text
+
+
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다")
 async def character_dex(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    user_chars = get_user_characters(uid)
-
-    if not user_chars:
-        await interaction.response.send_message(
-            "아직 뽑은 캐릭터가 없어!\n`/캐릭터뽑기`부터 해봐."
-        )
-        return
-
-    lines = []
-
-    for name in sorted(GENSHIN_CHARACTERS.keys()):
-        info = GENSHIN_CHARACTERS[name]
-
-        if name in user_chars:
-            level = get_character_level(user_chars[name]["favor_exp"])
-            line = f"✅ **{name}** {'⭐' * info['rarity']} | 호감도 Lv.{level}/3"
-
-            if level >= 2:
-                line += f"\n> 💬 {info['dialogue']}"
-        else:
-            line = f"❌ ??? {'⭐' * info['rarity']}"
-
-        lines.append(line)
+    view = CharacterDexView(interaction.user.id)
 
     await interaction.response.send_message(
-        "📖 **캐릭터 도감**\n\n" + "\n\n".join(lines)
+        content=view.render(),
+        view=view
     )
-    
+
 bot.run(TOKEN)
