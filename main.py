@@ -11,6 +11,9 @@ from discord import app_commands
 
 load_dotenv()
 
+GUILD_ID = 1510681614919794868
+GUILD = discord.Object(id=GUILD_ID)
+
 TOKEN = os.getenv("TOKEN")
 
 if TOKEN is None:
