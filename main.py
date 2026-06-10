@@ -2417,7 +2417,6 @@ async def character_dex(interaction: discord.Interaction):
     
 @bot.event
 async def on_ready():
-    async def on_ready():
     if not birthday_check.is_running():
         birthday_check.start()
         
