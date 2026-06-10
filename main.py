@@ -2647,7 +2647,566 @@ async def character_dex(interaction: discord.Interaction):
         embed=view.make_dex_embed(),
         view=view
     )
-    
+
+
+# =========================
+# 🏴 선택지 연계형 기지 털기
+# =========================
+
+active_raids = {}
+
+RAID_BASES = {
+    "보물사냥단 야영지": {"cost": 100, "start_danger": 10, "max_turn": 5},
+    "우인단 보급기지": {"cost": 500, "start_danger": 25, "max_turn": 5},
+    "밀수업자 창고": {"cost": 1000, "start_danger": 35, "max_turn": 5},
+    "심연 교단 거점": {"cost": 3000, "start_danger": 55, "max_turn": 5},
+    "북국은행 비밀금고": {"cost": 5000, "start_danger": 70, "max_turn": 6},
+}
+
+
+def choice(label, success, reward=0, danger=0, next_tags=None, flag=None, end=False):
+    return {
+        "label": label,
+        "success": success,
+        "reward": reward,
+        "danger": danger,
+        "next_tags": next_tags or [],
+        "flag": flag,
+        "end": end
+    }
+
+
+RAID_RANDOM_CHOICES = {
+    "보물사냥단 야영지": [
+        choice("술통을 굴린다", 70, 180, 10, ["창고", "탈출"]),
+        choice("코고는 단원 주머니를 턴다", 65, 250, 15, ["텐트", "탈출"]),
+        choice("냄비를 훔친다", 90, 70, 0, ["텐트", "창고"]),
+        choice("이상한 지도를 챙긴다", 75, 100, 0, ["창고"], "map"),
+        choice("고등어를 발견했다", 8, 5000, -10, ["탈출"]),
+    ],
+    "우인단 보급기지": [
+        choice("보급 수레에 숨는다", 75, 400, 5, ["창고", "탈출"]),
+        choice("장교 주머니를 턴다", 50, 900, 25, ["지휘실", "탈출"]),
+        choice("우인단 제복을 훔친다", 70, 200, 0, ["지휘실"], "uniform"),
+        choice("수상한 버튼을 누른다", 35, 1500, 35, ["탈출"]),
+        choice("푸리나 흉내를 낸다", 45, 777, 20, ["창고", "탈출"]),
+    ],
+    "밀수업자 창고": [
+        choice("거래 장부를 훔친다", 65, 800, 10, ["금고", "탈출"], "ledger"),
+        choice("수상한 상자를 연다", 55, 1200, 20, ["창고", "탈출"]),
+        choice("지하 통로로 내려간다", 70, 400, 10, ["지하", "금고"]),
+        choice("폭발물을 설치한다", 45, 2000, 35, ["탈출"]),
+        choice("관리인에게 사기친다", 60, 900, 15, ["금고"]),
+    ],
+    "심연 교단 거점": [
+        choice("마법서를 훔친다", 55, 1800, 25, ["제단", "탈출"]),
+        choice("제단을 건드린다", 40, 3000, 45, ["심연문", "탈출"]),
+        choice("심연 문양을 베껴간다", 65, 1000, 15, ["제단"], "rune"),
+        choice("어둠 속 목소리를 따라간다", 45, 2500, 35, ["심연문"]),
+        choice("고등어를 제물로 바친다", 12, 12000, -20, ["탈출"]),
+    ],
+    "북국은행 비밀금고": [
+        choice("비밀 문서를 챙긴다", 55, 2500, 20, ["금고", "탈출"], "document"),
+        choice("경보 장치를 해킹한다", 50, 1500, -20, ["금고"], "alarm_off"),
+        choice("은행원인 척한다", 60, 2000, 15, ["금고"]),
+        choice("금고 벽을 뜯는다", 35, 6000, 45, ["탈출"]),
+        choice("타르탈리아 이름을 팔아본다", 40, 7000, 50, ["탈출"]),
+    ],
+}
+
+
+RAID_SCENES = {
+    "보물사냥단 야영지": {
+        "입구": [
+            {
+                "text": "보물사냥단 야영지 입구에 도착했다. 경비 하나가 졸고 있다.",
+                "fixed": [
+                    choice("몰래 지나간다", 85, 80, 0, ["텐트", "창고"]),
+                    choice("돌멩이를 던져 유인한다", 70, 120, 5, ["텐트"]),
+                    choice("정면으로 당당히 걷는다", 45, 250, 20, ["창고", "탈출"]),
+                ]
+            }
+        ],
+        "텐트": [
+            {
+                "text": "텐트 안에서 코고는 소리가 들린다.",
+                "fixed": [
+                    choice("텐트를 뒤진다", 75, 300, 10, ["창고"]),
+                    choice("자는 척 섞인다", 65, 150, 0, ["창고", "탈출"]),
+                    choice("단원을 깨워서 속인다", 50, 400, 20, ["창고"]),
+                ]
+            }
+        ],
+        "창고": [
+            {
+                "text": "상자 더미가 쌓인 작은 창고를 발견했다.",
+                "fixed": [
+                    choice("가벼운 상자만 턴다", 90, 250, 0, ["탈출"]),
+                    choice("큰 상자를 연다", 65, 600, 15, ["탈출"]),
+                    choice("창고를 싹 턴다", 45, 1200, 35, ["탈출"]),
+                ]
+            }
+        ],
+        "탈출": [
+            {
+                "text": "이제 야영지에서 빠져나갈 시간이다.",
+                "fixed": [
+                    choice("숲길로 도망친다", 85, 0, 0, end=True),
+                    choice("말을 훔쳐 달린다", 65, 300, 15, end=True),
+                    choice("연막을 터뜨린다", 75, 100, 5, end=True),
+                ]
+            }
+        ],
+    },
+
+    "우인단 보급기지": {
+        "입구": [
+            {
+                "text": "우인단 보급기지 앞이다. 경비 둘이 검문 중이다.",
+                "fixed": [
+                    choice("제복 입은 척한다", 70, 300, 5, ["창고", "지휘실"]),
+                    choice("뒷문을 찾는다", 80, 100, 0, ["창고"]),
+                    choice("경비를 매수한다", 90, -200, 0, ["지휘실"]),
+                ]
+            }
+        ],
+        "창고": [
+            {
+                "text": "보급 창고에 들어왔다. 모라 상자와 식량 상자가 보인다.",
+                "fixed": [
+                    choice("모라 상자를 턴다", 65, 1200, 20, ["탈출"]),
+                    choice("보급품을 챙긴다", 75, 800, 10, ["지휘실", "탈출"]),
+                    choice("창고 문을 잠근다", 80, 300, -10, ["탈출"]),
+                ]
+            }
+        ],
+        "지휘실": [
+            {
+                "text": "지휘실에 들어왔다. 책상 위에 열쇠와 작전 문서가 있다.",
+                "fixed": [
+                    choice("열쇠를 훔친다", 70, 500, 5, ["창고"], "key"),
+                    choice("문서를 훔친다", 65, 900, 10, ["탈출"]),
+                    choice("책상을 통째로 뒤진다", 45, 1800, 30, ["탈출"]),
+                ]
+            }
+        ],
+        "탈출": [
+            {
+                "text": "기지 안쪽에서 발소리가 가까워진다. 탈출해야 한다.",
+                "fixed": [
+                    choice("보급 수레에 숨어 나간다", 80, 200, 0, end=True),
+                    choice("정문으로 돌파한다", 55, 700, 25, end=True),
+                    choice("담장을 넘는다", 70, 300, 10, end=True),
+                ]
+            }
+        ],
+    },
+
+    "밀수업자 창고": {
+        "입구": [
+            {
+                "text": "항구 근처 밀수업자 창고에 도착했다. 문이 잠겨 있다.",
+                "fixed": [
+                    choice("자물쇠를 딴다", 75, 200, 5, ["창고"]),
+                    choice("창문으로 들어간다", 65, 300, 10, ["창고"]),
+                    choice("지하 입구를 찾는다", 70, 100, 0, ["지하"]),
+                ]
+            }
+        ],
+        "창고": [
+            {
+                "text": "창고 안에는 정체불명의 상자들이 가득하다.",
+                "fixed": [
+                    choice("작은 상자를 연다", 85, 700, 0, ["금고", "탈출"]),
+                    choice("수상한 상자를 연다", 55, 1800, 25, ["탈출"]),
+                    choice("상자 표시를 해독한다", 70, 500, -5, ["금고"], "code"),
+                ]
+            }
+        ],
+        "지하": [
+            {
+                "text": "지하 통로에서 밀수품 거래 흔적을 발견했다.",
+                "fixed": [
+                    choice("거래품을 훔친다", 65, 1600, 20, ["금고"]),
+                    choice("조용히 지나간다", 90, 300, 0, ["금고"]),
+                    choice("벽장을 열어본다", 60, 1100, 15, ["탈출"]),
+                ]
+            }
+        ],
+        "금고": [
+            {
+                "text": "숨겨진 금고를 발견했다.",
+                "fixed": [
+                    choice("암호를 맞춘다", 60, 2500, 15, ["탈출"]),
+                    choice("강제로 연다", 45, 4000, 35, ["탈출"]),
+                    choice("금고 위치만 기록한다", 95, 800, 0, ["탈출"]),
+                ]
+            }
+        ],
+        "탈출": [
+            {
+                "text": "창고 밖에서 인기척이 들린다.",
+                "fixed": [
+                    choice("뒷문으로 나간다", 80, 0, 0, end=True),
+                    choice("배에 숨어 도망친다", 65, 900, 15, end=True),
+                    choice("상자를 방패로 삼는다", 60, 1200, 20, end=True),
+                ]
+            }
+        ],
+    },
+
+    "심연 교단 거점": {
+        "입구": [
+            {
+                "text": "심연 교단 거점 앞이다. 공기가 심상치 않다.",
+                "fixed": [
+                    choice("조용히 진입한다", 75, 600, 10, ["제단"]),
+                    choice("문양을 조사한다", 65, 1000, 15, ["제단"], "rune"),
+                    choice("정면의 문을 연다", 45, 2200, 35, ["심연문"]),
+                ]
+            }
+        ],
+        "제단": [
+            {
+                "text": "이상한 제단이 희미하게 빛나고 있다.",
+                "fixed": [
+                    choice("제단 주변을 뒤진다", 70, 1800, 20, ["심연문", "탈출"]),
+                    choice("제단을 부순다", 50, 3500, 45, ["탈출"]),
+                    choice("기도하는 척한다", 60, 1200, 10, ["심연문"]),
+                ]
+            }
+        ],
+        "심연문": [
+            {
+                "text": "거대한 심연의 문이 눈앞에 나타났다.",
+                "fixed": [
+                    choice("틈새로 들어간다", 55, 3500, 35, ["탈출"]),
+                    choice("문 옆 보관함을 턴다", 65, 2500, 25, ["탈출"]),
+                    choice("그냥 도망칠 준비를 한다", 90, 500, -10, ["탈출"]),
+                ]
+            }
+        ],
+        "탈출": [
+            {
+                "text": "뒤에서 알 수 없는 목소리가 들린다. 빨리 빠져나가야 한다.",
+                "fixed": [
+                    choice("빛이 보이는 곳으로 뛴다", 75, 0, 0, end=True),
+                    choice("심연 포탈로 뛰어든다", 45, 5000, 40, end=True),
+                    choice("왔던 길로 되돌아간다", 85, 300, 5, end=True),
+                ]
+            }
+        ],
+    },
+
+    "북국은행 비밀금고": {
+        "입구": [
+            {
+                "text": "북국은행 비밀금고 구역에 잠입했다. 감시 장치가 돌아가고 있다.",
+                "fixed": [
+                    choice("감시 장치를 피한다", 70, 1000, 10, ["금고"]),
+                    choice("은행원인 척한다", 60, 1800, 20, ["문서실"]),
+                    choice("경보선을 자른다", 50, 2500, 35, ["금고"], "alarm_off"),
+                ]
+            }
+        ],
+        "문서실": [
+            {
+                "text": "문서실에 들어왔다. 고급 계약서들이 잔뜩 꽂혀 있다.",
+                "fixed": [
+                    choice("계약서를 훔친다", 65, 3000, 25, ["금고"]),
+                    choice("장부를 조작한다", 55, 4500, 35, ["탈출"]),
+                    choice("도장만 챙긴다", 80, 1500, 5, ["금고"], "stamp"),
+                ]
+            }
+        ],
+        "금고": [
+            {
+                "text": "마침내 비밀금고 앞에 도착했다.",
+                "fixed": [
+                    choice("암호를 해독한다", 55, 7000, 30, ["탈출"]),
+                    choice("도장으로 승인 처리한다", 70, 4000, 10, ["탈출"]),
+                    choice("금고를 강제로 뜯는다", 35, 12000, 55, ["탈출"]),
+                ]
+            }
+        ],
+        "탈출": [
+            {
+                "text": "은행 전체가 소란스러워졌다. 탈출 루트를 골라야 한다.",
+                "fixed": [
+                    choice("직원 출입구로 나간다", 70, 1000, 10, end=True),
+                    choice("창문으로 뛰어내린다", 55, 3000, 30, end=True),
+                    choice("손님인 척 걸어나간다", 65, 2000, 20, end=True),
+                ]
+            }
+        ],
+    },
+}
+
+
+def pick_raid_scene(base_name, tags):
+    tag = random.choice(tags)
+    scene = random.choice(RAID_SCENES[base_name][tag])
+    return tag, scene
+
+
+def make_raid_choices(base_name, scene):
+    fixed = scene["fixed"][:]
+    random_pool = RAID_RANDOM_CHOICES[base_name]
+    random_choices = random.sample(random_pool, 2)
+    result = fixed + random_choices
+    random.shuffle(result)
+    return result
+
+
+class RaidView(discord.ui.View):
+    def __init__(self, user_id, base_name, state):
+        super().__init__(timeout=120)
+        self.user_id = str(user_id)
+        self.base_name = base_name
+        self.state = state
+
+        for i, c in enumerate(state["choices"]):
+            self.add_item(RaidButton(i, c["label"]))
+
+    async def interaction_check(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 레이드 아님.", ephemeral=True)
+            return False
+        return True
+
+
+class RaidButton(discord.ui.Button):
+    def __init__(self, index, label):
+        super().__init__(
+            label=label,
+            style=discord.ButtonStyle.secondary
+        )
+        self.index = index
+
+    async def callback(self, interaction: discord.Interaction):
+        uid = str(interaction.user.id)
+        state = active_raids.get(uid)
+
+        if not state:
+            await interaction.response.edit_message(
+                content="❌ 이미 끝난 레이드야.",
+                embed=None,
+                view=None
+            )
+            return
+
+        base_name = state["base"]
+        selected = state["choices"][self.index]
+
+        success_rate = selected["success"]
+
+        if "map" in state["flags"]:
+            success_rate += 5
+        if "uniform" in state["flags"] and base_name == "우인단 보급기지":
+            success_rate += 10
+        if "alarm_off" in state["flags"]:
+            success_rate += 10
+
+        success_rate -= max(0, state["danger"] // 10)
+        success_rate = max(5, min(95, success_rate))
+
+        success = random.randint(1, 100) <= success_rate
+
+        result_lines = [
+            f"선택: **{selected['label']}**",
+            f"성공률: **{success_rate}%**"
+        ]
+
+        if success:
+            reward = selected["reward"]
+
+            if reward < 0:
+                state["reward"] += reward
+                result_lines.append(f"💸 비용 발생: **{abs(reward):,}모라**")
+            else:
+                state["reward"] += reward
+                result_lines.append(f"✅ 성공! **{reward:,}모라** 확보!")
+
+            state["danger"] += selected["danger"]
+
+            if selected.get("flag"):
+                state["flags"].add(selected["flag"])
+                result_lines.append(f"✨ 상태 획득: `{selected['flag']}`")
+
+        else:
+            penalty = random.randint(100, 500)
+            state["danger"] += selected["danger"] + 20
+            state["reward"] -= penalty
+            result_lines.append(f"❌ 실패! 도주 과정에서 **{penalty:,}모라** 손실!")
+            result_lines.append("⚠️ 위험도 +20")
+
+        state["danger"] = max(0, state["danger"])
+        state["turn"] += 1
+
+        should_end = (
+            selected.get("end")
+            or state["turn"] >= state["max_turn"]
+            or state["danger"] >= 100
+        )
+
+        if should_end:
+            final_reward = state["reward"]
+
+            if state["danger"] >= 100:
+                loss = random.randint(500, 1500)
+                final_reward -= loss
+                result_lines.append(f"🚨 위험도가 100을 넘었다! 추가 손실 **{loss:,}모라**!")
+
+            if final_reward > 0 and random.random() < 0.1:
+                bonus = random.randint(500, 3000)
+                final_reward += bonus
+                result_lines.append(f"🌟 대성공! 숨겨진 금고 발견! **+{bonus:,}모라**")
+
+            add_poker_money(uid, final_reward)
+            active_raids.pop(uid, None)
+
+            embed = discord.Embed(
+                title=f"🏴 {base_name} 레이드 종료",
+                description="\n".join(result_lines),
+                color=discord.Color.gold() if final_reward >= 0 else discord.Color.red()
+            )
+
+            embed.add_field(
+                name="최종 정산",
+                value=f"{final_reward:+,} 모라",
+                inline=True
+            )
+            embed.add_field(
+                name="현재 모라",
+                value=f"{get_poker_money(uid):,} 모라",
+                inline=True
+            )
+            embed.add_field(
+                name="최종 위험도",
+                value=f"{state['danger']}%",
+                inline=True
+            )
+
+            await interaction.response.edit_message(embed=embed, view=None)
+            return
+
+        next_tags = selected["next_tags"] or ["탈출"]
+        tag, scene = pick_raid_scene(base_name, next_tags)
+        state["scene_tag"] = tag
+        state["scene_text"] = scene["text"]
+        state["choices"] = make_raid_choices(base_name, scene)
+
+        embed = make_raid_embed(base_name, state, result_lines)
+        view = RaidView(uid, base_name, state)
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+def make_raid_embed(base_name, state, result_lines=None):
+    desc = ""
+
+    if result_lines:
+        desc += "\n".join(result_lines)
+        desc += "\n\n"
+
+    desc += f"**{state['scene_text']}**"
+
+    embed = discord.Embed(
+        title=f"🏴 {base_name} 털기",
+        description=desc,
+        color=discord.Color.dark_gold()
+    )
+
+    embed.add_field(
+        name="진행도",
+        value=f"{state['turn']}/{state['max_turn']}",
+        inline=True
+    )
+    embed.add_field(
+        name="확보한 모라",
+        value=f"{state['reward']:,}",
+        inline=True
+    )
+    embed.add_field(
+        name="위험도",
+        value=f"{state['danger']}%",
+        inline=True
+    )
+
+    flags = ", ".join(state["flags"]) if state["flags"] else "없음"
+
+    embed.add_field(
+        name="상태",
+        value=flags,
+        inline=False
+    )
+
+    embed.set_footer(text="버튼 선택지 5개 = 고정 3개 + 랜덤 2개")
+    return embed
+
+
+@bot.tree.command(name="기지털기", description="적 기지를 털어서 모라를 불린다", guild=GUILD)
+@app_commands.describe(기지="털 기지 이름")
+@app_commands.choices(
+    기지=[
+        app_commands.Choice(name="보물사냥단 야영지", value="보물사냥단 야영지"),
+        app_commands.Choice(name="우인단 보급기지", value="우인단 보급기지"),
+        app_commands.Choice(name="밀수업자 창고", value="밀수업자 창고"),
+        app_commands.Choice(name="심연 교단 거점", value="심연 교단 거점"),
+        app_commands.Choice(name="북국은행 비밀금고", value="북국은행 비밀금고"),
+    ]
+)
+async def raid_base(interaction: discord.Interaction, 기지: app_commands.Choice[str]):
+    uid = str(interaction.user.id)
+    base_name = 기지.value
+    base = RAID_BASES[base_name]
+
+    if uid in active_raids:
+        await interaction.response.send_message(
+            "❌ 이미 진행 중인 기지 털기가 있어!",
+            ephemeral=True
+        )
+        return
+
+    money = get_poker_money(uid)
+
+    if money < base["cost"]:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{base['cost']:,}모라**\n보유: **{money:,}모라**",
+            ephemeral=True
+        )
+        return
+
+    add_poker_money(uid, -base["cost"])
+
+    tag, scene = pick_raid_scene(base_name, ["입구"])
+
+    state = {
+        "base": base_name,
+        "turn": 0,
+        "max_turn": base["max_turn"],
+        "danger": base["start_danger"],
+        "reward": 0,
+        "flags": set(),
+        "scene_tag": tag,
+        "scene_text": scene["text"],
+        "choices": make_raid_choices(base_name, scene),
+    }
+
+    active_raids[uid] = state
+
+    embed = make_raid_embed(base_name, state)
+    embed.add_field(
+        name="입장 비용",
+        value=f"-{base['cost']:,} 모라",
+        inline=True
+    )
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=RaidView(uid, base_name, state)
+    )
+
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
