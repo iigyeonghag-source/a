@@ -1146,7 +1146,7 @@ GENSHIN_CHARACTERS = ({
     "샤를로트": {"rarity": 4, "dialogue": "잠깐만요! 이건 특종이에요, 사진 한 장만요!"},
     "프레미네": {"rarity": 4, "dialogue": "물속은 조용해서 좋아. 말하지 않아도 되니까."},
     "슈브르즈": {"rarity": 4, "dialogue": "규칙을 어겼다면 변명보다 협조가 먼저야."}
-)
+})
 
 def get_user_characters(user_id):
     uid = str(user_id)
