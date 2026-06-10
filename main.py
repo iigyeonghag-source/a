@@ -48,6 +48,15 @@ data = {
 
 characters = {}
 
+def remove_poker_money(user_id, amount):
+    uid = str(user_id)
+
+    poker_money[uid] = max(
+        0,
+        poker_money.get(uid, 0) - int(amount)
+    )
+
+    save_data()
 def load_data():
     global data, poker_money, poker_last_claim, favor, user_memory, characters
 
