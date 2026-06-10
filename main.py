@@ -2524,51 +2524,72 @@ class CharacterDexView(discord.ui.View):
         return text
 
 
-def make_dex_embed(self):
+    def make_dex_embed(self):
+        owned = characters.get(str(self.user_id), {})
 
-    owned = characters.get(
-        str(self.user_id),
-        {}
-    )
+        start = self.page * 5
+        end = start + 5
+        page_chars = self.character_list[start:end]
 
-    start = self.page * 5
-    end = start + 5
+        total = len(self.character_list)
+        owned_count = len(owned)
+        percent = int((owned_count / total) * 100) if total else 0
 
-    embed = discord.Embed(
-        title="📖 원신 캐릭터 도감",
-        description=f"페이지 {self.page+1}/{self.max_page}",
-        color=discord.Color.blurple()
-    )
+        embed = discord.Embed(
+            title="📖✨ 티바트 캐릭터 도감",
+            description=(
+                "수집한 캐릭터와 호감도를 확인할 수 있어.\n"
+                f"**도감 진행도:** `{owned_count}/{total}` · **{percent}%**\n"
+                f"**페이지:** `{self.page + 1}/{self.max_page}`"
+            ),
+            color=discord.Color.blurple()
+        )
 
-    for char_name in self.character_list[start:end]:
+        for char_name in page_chars:
+            char = GENSHIN_CHARACTERS[char_name]
+            rarity = char["rarity"]
+            stars = "⭐" * rarity
 
-        char = GENSHIN_CHARACTERS[char_name]
+            if char_name in owned:
+                level = get_character_level(owned[char_name]["favor_exp"])
 
-        if char_name in owned:
+                if level >= 3:
+                    heart = "💖💖💖"
+                    status = "최대 호감도"
+                elif level == 2:
+                    heart = "💖💖🤍"
+                    status = "대사 해금"
+                else:
+                    heart = "💖🤍🤍"
+                    status = "보유 중"
 
-            level = get_character_level(
-                owned[char_name]["favor_exp"]
-            )
+                dialogue_status = "✅ 대사 열림" if level >= 2 else "🔒 Lv.2에 대사 해금"
 
-            embed.add_field(
-                name=f"✅ {char_name}",
-                value=(
-                    f"{'⭐'*char['rarity']}\n"
-                    f"호감도 Lv.{level}/3"
-                ),
-                inline=False
-            )
+                embed.add_field(
+                    name=f"✅ {char_name}  {stars}",
+                    value=(
+                        f"호감도: **Lv.{level}/3**  {heart}\n"
+                        f"상태: **{status}**\n"
+                        f"{dialogue_status}"
+                    ),
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name=f"❌ 미획득 캐릭터  {stars}",
+                    value=(
+                        "이 캐릭터는 아직 도감에 등록되지 않았어.\n"
+                        "`/캐릭터뽑기`로 획득 가능"
+                    ),
+                    inline=False
+                )
 
-        else:
+        embed.set_footer(
+            text="캐릭터 버튼을 누르면 상세 정보를 볼 수 있어 · ◀ 이동 ▶"
+        )
 
-            embed.add_field(
-                name="❌ ???",
-                value=f"{'⭐'*char['rarity']}",
-                inline=False
-            )
-
-    return embed
-    
+        return embed
+        
 @bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
 async def character_dex(interaction: discord.Interaction):
     view = CharacterDexView(interaction.user.id)
