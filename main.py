@@ -2105,13 +2105,7 @@ async def on_member_update(before, after):
 print(get_time_key())
 print(datetime.now())
 
-@bot.event
-async def on_ready():
-    birthday_check.start()
-    await bot.tree.sync()
-    print(f"로그인됨: {bot.user}")
-
-@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
+@bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
 async def character_gacha(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     user_chars = get_user_characters(uid)
@@ -2409,7 +2403,7 @@ class CharacterDexView(discord.ui.View):
         return text
 
 
-@bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다")
+@bot.tree.command(name="캐릭터도감", description="내가 뽑은 원신 캐릭터 도감을 본다", guild=GUILD)
 async def character_dex(interaction: discord.Interaction):
     view = CharacterDexView(interaction.user.id)
 
@@ -2417,5 +2411,14 @@ async def character_dex(interaction: discord.Interaction):
         content=view.render(),
         view=view
     )
+    
+@bot.event
+async def on_ready():
+    if not birthday_check.is_running():
+        birthday_check.start()
 
+    synced = await bot.tree.sync(guild=GUILD)
+    print(f"로그인됨: {bot.user}")
+    print(f"동기화된 명령어 수: {len(synced)}")
+    
 bot.run(TOKEN)
