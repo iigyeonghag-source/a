@@ -2417,6 +2417,10 @@ async def character_dex(interaction: discord.Interaction):
     
 @bot.event
 async def on_ready():
+    async def on_ready():
+    if not birthday_check.is_running():
+        birthday_check.start()
+        
     synced = await bot.tree.sync(guild=GUILD)
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
