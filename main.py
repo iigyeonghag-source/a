@@ -3337,7 +3337,73 @@ async def mora_receive(interaction: discord.Interaction):
         f"✅ {mora:,}모라 수령 완료!\n"
         f"현재 보유 모라: {get_poker_money(uid):,}모라"
     )
-    
+
+
+@bot.tree.command(
+    name="돈주",
+    description="유저에게 모라를 지급한다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    대상="지급할 유저",
+    금액="지급할 모라"
+)
+async def money_give(
+    interaction: discord.Interaction,
+    대상: discord.Member,
+    금액: int
+):
+    if 금액 <= 0:
+        await interaction.response.send_message(
+            "❌ 1 이상 입력해야 함.",
+            ephemeral=True
+        )
+        return
+
+    add_poker_money(대상.id, 금액)
+
+    await interaction.response.send_message(
+        f"✅ {대상.mention}에게 **{금액:,}모라** 지급 완료!\n"
+        f"현재 보유 모라: **{get_poker_money(대상.id):,}모라**"
+    )
+
+@bot.tree.command(
+    name="돈차감",
+    description="유저의 모라를 차감한다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    대상="차감할 유저",
+    금액="차감할 모라"
+)
+async def money_remove(
+    interaction: discord.Interaction,
+    대상: discord.Member,
+    금액: int
+):
+    if 금액 <= 0:
+        await interaction.response.send_message(
+            "❌ 1 이상 입력해야 함.",
+            ephemeral=True
+        )
+        return
+
+    uid = str(대상.id)
+
+    current = get_poker_money(uid)
+    removed = min(current, 금액)
+
+    poker_money[uid] = current - removed
+    save_data()
+
+    await interaction.response.send_message(
+        f"💸 {대상.mention}에게서 **{removed:,}모라** 차감 완료!\n"
+        f"현재 보유 모라: **{get_poker_money(uid):,}모라**"
+    )
+)
+
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
