@@ -1390,10 +1390,15 @@ FURINA_ID = "FURINA_BOT"
 
 def get_poker_money(user_id):
     return poker_money.get(str(user_id), 100)
-
+    
 def add_poker_money(user_id, amount):
     uid = str(user_id)
-    poker_money[uid] = get_poker_money(uid) + amount
+
+    poker_money[uid] = max(
+        0,
+        get_poker_money(uid) + int(amount)
+    )
+
     save_data()
     return poker_money[uid]
 
