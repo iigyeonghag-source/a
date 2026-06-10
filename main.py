@@ -1809,7 +1809,7 @@ async def after_action(ctx, room):
 
 @bot.command(name="돈")
 async def poker_money_command(ctx):
-    await ctx.reply(f"{ctx.author.mention}의 잔액: **{get_poker_money(ctx.author.id)}모라**")
+    await ctx.reply(f"{ctx.author.mention}의 잔액: **{get_poker_money(ctx.author.id):,} 모라**"
 
 @bot.command(name="돈받기")
 async def poker_claim(ctx):
