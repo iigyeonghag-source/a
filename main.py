@@ -2110,7 +2110,6 @@ print(datetime.now())
 
 CHARACTER_GACHA_COST = 160
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
-current_money = get_poker_money(uid)
 
 @bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
 @app_commands.describe(횟수="1 또는 10")
