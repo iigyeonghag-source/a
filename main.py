@@ -3484,6 +3484,57 @@ async def money_remove(
         f"현재 보유 모라: **{get_poker_money(uid):,}모라**"
     )
 
+@bot.tree.command(name="기부", description="다른 유저에게 모라를 보낸다", guild=GUILD)
+@app_commands.describe(
+    대상="돈을 받을 사람",
+    금액="보낼 금액"
+)
+async def donate(
+    interaction: discord.Interaction,
+    대상: discord.Member,
+    금액: int
+):
+    sender_id = str(interaction.user.id)
+    target_id = str(대상.id)
+
+    if 대상.bot:
+        await interaction.response.send_message(
+            "❌ 봇에게는 기부할 수 없음.",
+            ephemeral=True
+        )
+        return
+
+    if 대상.id == interaction.user.id:
+        await interaction.response.send_message(
+            "❌ 자기 자신에게는 보낼 수 없음.",
+            ephemeral=True
+        )
+        return
+
+    if 금액 <= 0:
+        await interaction.response.send_message(
+            "❌ 1모라 이상 입력해야 함.",
+            ephemeral=True
+        )
+        return
+
+    current_money = get_poker_money(sender_id)
+
+    if current_money < 금액:
+        await interaction.response.send_message(
+            f"❌ 돈 부족!\n현재 보유: **{current_money:,} 모라**",
+            ephemeral=True
+        )
+        return
+
+    remove_poker_money(sender_id, 금액)
+    add_poker_money(target_id, 금액)
+
+    await interaction.response.send_message(
+        f"💸 **{interaction.user.mention}** → **{대상.mention}**\n"
+        f"**{금액:,} 모라** 기부 완료!"
+    )
+    
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
