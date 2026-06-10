@@ -2476,7 +2476,7 @@ class CharacterDexView(discord.ui.View):
         )
         self.refresh_items()
 
-       def refresh_items(self):
+    def refresh_items(self):
         self.clear_items()
 
         start = self.page * CHARACTER_DEX_PAGE_SIZE
