@@ -2114,8 +2114,9 @@ CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 @bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다")
 @app_commands.describe(횟수="1 또는 10")
 async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
-    uid = str(interaction.user.id)
-
+    uid = str(interaction.user.id)    
+    current_money = get_poker_money(uid)
+    
     if 횟수 not in [1, 10]:
         await interaction.response.send_message(
             "❌ 1회 또는 10회만 가능해.",
