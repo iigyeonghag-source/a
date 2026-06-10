@@ -1818,7 +1818,7 @@ async def poker_claim(ctx):
     poker_last_claim[uid] = now
     save_data()
     money = add_poker_money(uid, 1500)
-    await ctx.reply(f"100모라 지급 완료! 현재 돈: **{money}모라**")
+    await ctx.reply(f"1500모라 지급 완료! 현재 돈: **{money}모라**")
 
 @bot.command(name="포커")
 async def poker_lobby(ctx):
