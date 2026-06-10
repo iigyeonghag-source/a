@@ -3307,39 +3307,6 @@ async def raid_base(interaction: discord.Interaction, 기지: app_commands.Choic
     )
 
 @bot.tree.command(
-    name="모라수령",
-    description="오브에서 환전한 모라 수령",
-    guild=GUILD
-)
-async def mora_receive(interaction: discord.Interaction):
-
-    uid = str(interaction.user.id)
-
-    path = f"/data/mora_exchange/{uid}.json"
-
-    if not os.path.exists(path):
-        await interaction.response.send_message(
-            "❌ 받을 모라가 없음.",
-            ephemeral=True
-        )
-        return
-
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-
-    mora = int(data["mora"])
-
-    add_poker_money(uid, mora)
-
-    os.remove(path)
-
-    await interaction.response.send_message(
-        f"✅ {mora:,}모라 수령 완료!\n"
-        f"현재 보유 모라: {get_poker_money(uid):,}모라"
-    )
-
-
-@bot.tree.command(
     name="돈주기",
     description="유저에게 모라를 지급한다",
     guild=GUILD
