@@ -3656,19 +3656,54 @@ async def donate(
         f"**{금액:,} 모라** 기부 완료!"
     )
 
-voice_inactive = {}
-voice_warned = {}
+voice_inactive = {}   # {user_id: 시작 시간}
+voice_warned = {}     # {user_id: DM 보낸 시간}
+voice_snooze = {}     # {user_id: 유예 종료 시간}
 
 VOICE_LIMIT = timedelta(hours=1)
 WARNING_TIME = timedelta(minutes=10)
+SNOOZE_TIME = timedelta(hours=5)
 
 def is_headset_off(state):
-    return (
-        state.self_deaf
-        or state.deaf
-        or state.self_mute
-        or state.mute
-    )
+    # 마이크 꺼짐은 제외. 듣기 꺼짐만 잠수 처리
+    return state.self_deaf or state.deaf
+
+
+class VoiceWarningView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+
+    @discord.ui.button(label="✅ 확인하고 5시간 유예", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있음.", ephemeral=True)
+            return
+
+        until = datetime.now(KST) + SNOOZE_TIME
+        voice_snooze[self.user_id] = until
+        voice_warned.pop(self.user_id, None)
+
+        await interaction.response.edit_message(
+            content=f"✅ 확인 완료!\n앞으로 **5시간 동안 경고가 오지 않음.**\n유예 종료: **{until.strftime('%H:%M')}**",
+            view=None
+        )
+
+    @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
+    async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있음.", ephemeral=True)
+            return
+
+        voice_inactive.pop(self.user_id, None)
+        voice_warned.pop(self.user_id, None)
+        voice_snooze.pop(self.user_id, None)
+
+        await interaction.response.edit_message(
+            content="🛑 음성 잠수 감시 종료됨.",
+            view=None
+        )
+
 
 @bot.event
 async def on_voice_state_update(member, before, after):
@@ -3677,9 +3712,11 @@ async def on_voice_state_update(member, before, after):
 
     uid = member.id
 
+    # 음성채널 나가면 전부 종료
     if after.channel is None:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
+        voice_snooze.pop(uid, None)
         return
 
     if is_headset_off(after):
@@ -3687,6 +3724,8 @@ async def on_voice_state_update(member, before, after):
     else:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
+        voice_snooze.pop(uid, None)
+
 
 @tasks.loop(minutes=1)
 async def voice_kick_check():
@@ -3702,36 +3741,57 @@ async def voice_kick_check():
                 if state is None:
                     continue
 
+                uid = member.id
+
                 if not is_headset_off(state):
-                    voice_inactive.pop(member.id, None)
-                    voice_warned.pop(member.id, None)
+                    voice_inactive.pop(uid, None)
+                    voice_warned.pop(uid, None)
+                    voice_snooze.pop(uid, None)
                     continue
 
-                started = voice_inactive.setdefault(member.id, now)
+                # 5시간 유예 중이면 카운트만 유지하고 경고/퇴장 안 함
+                snooze_until = voice_snooze.get(uid)
+                if snooze_until:
+                    if now < snooze_until:
+                        continue
+                    else:
+                        voice_snooze.pop(uid, None)
+                        voice_warned.pop(uid, None)
+                        voice_inactive[uid] = now
+                        continue
+
+                started = voice_inactive.setdefault(uid, now)
 
                 if now - started >= VOICE_LIMIT:
-                    if member.id not in voice_warned:
+                    warned_at = voice_warned.get(uid)
+
+                    if warned_at is None:
                         try:
                             await member.send(
-                                "⚠️ 현재 음성채널에서 1시간 이상 헤드셋을 끈 상태로 유지 중입니다.\n"
-                                "10분 이내에 헤드셋을 켜거나 활동하지 않을 경우 자동으로 음성채널에서 퇴장됩니다."
+                                "⚠️ 현재 음성채널에서 **1시간 이상 듣기 끔 상태**로 유지 중입니다.\n"
+                                "아래 버튼으로 확인하면 **5시간 동안 경고가 오지 않습니다.**\n"
+                                "버튼을 누르지 않으면 **10분 뒤 자동 퇴장**됩니다.\n\n"
+                                "남은 시간: **10분**",
+                                view=VoiceWarningView(uid)
                             )
                         except discord.Forbidden:
                             pass
 
-                        voice_warned[member.id] = now
+                        voice_warned[uid] = now
                         continue
 
-                    if now - voice_warned[member.id] >= WARNING_TIME:
+                    remaining = WARNING_TIME - (now - warned_at)
+
+                    if remaining <= timedelta(seconds=0):
                         try:
                             await member.move_to(None)
                         except discord.Forbidden:
-                            print(f"권한 부족: {member}")
-                        except discord.HTTPException as e:
-                            print(f"음성채팅 끊기 실패: {member} / {e}")
-                        finally:
-                            voice_inactive.pop(member.id, None)
-                            voice_warned.pop(member.id, None)
+                            pass
+
+                        voice_inactive.pop(uid, None)
+                        voice_warned.pop(uid, None)
+                        voice_snooze.pop(uid, None)
+                        
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
