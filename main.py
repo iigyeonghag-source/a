@@ -3657,7 +3657,7 @@ async def donate(
     )
 
 voice_inactive = {}
-voice_warned = {}  # {user_id: 경고 보낸 시각}
+voice_warned = {}
 
 VOICE_LIMIT = timedelta(hours=1)
 WARNING_TIME = timedelta(minutes=10)
@@ -3677,69 +3677,61 @@ async def on_voice_state_update(member, before, after):
 
     uid = member.id
 
-    # 음성채널 나감
-    if after.channel is None:
-        voice_inactive.pop(uid, None)
-        return
-
-    # 헤드셋 껐으면 시간 기록
-    if is_headset_off(after):
-        voice_inactive.setdefault(uid, datetime.now(KST))
-    else:
-        voice_inactive.pop(uid, None)
-
-if now - started >= VOICE_LIMIT:
-
-    # 아직 경고 안 보냈으면 DM 발송
-    if member.id not in voice_warned:
-        try:
-            await member.send(
-                "⚠️ 현재 음성채널에서 1시간 이상 헤드셋을 끈 상태로 유지 중입니다.\n"
-                "10분 이내에 헤드셋을 켜거나 활동하지 않을 경우 자동으로 음성채널에서 퇴장됩니다."
-            )
-            voice_warned[member.id] = now
-
-        except discord.Forbidden:
-            # DM 차단한 사람
-            voice_warned[member.id] = now
-
-        continue
-
-    # 경고 후 10분 경과
-    if now - voice_warned[member.id] >= WARNING_TIME:
-        try:
-            await member.move_to(None)
-
-        except discord.Forbidden:
-            print(f"권한 부족: {member}")
-
-        except discord.HTTPException as e:
-            print(f"음성채팅 끊기 실패: {member} / {e}")
-
-        finally:
-            voice_inactive.pop(member.id, None)
-            voice_warned.pop(member.id, None)
-
-@bot.event
-async def on_voice_state_update(member, before, after):
-    if member.bot:
-        return
-
-    uid = member.id
-
-    # 음성채널 나감
     if after.channel is None:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
         return
 
-    # 헤드셋 껐으면 시간 기록
     if is_headset_off(after):
         voice_inactive.setdefault(uid, datetime.now(KST))
     else:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
-        
+
+@tasks.loop(minutes=1)
+async def voice_kick_check():
+    now = datetime.now(KST)
+
+    for guild in bot.guilds:
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                if member.bot:
+                    continue
+
+                state = member.voice
+                if state is None:
+                    continue
+
+                if not is_headset_off(state):
+                    voice_inactive.pop(member.id, None)
+                    voice_warned.pop(member.id, None)
+                    continue
+
+                started = voice_inactive.setdefault(member.id, now)
+
+                if now - started >= VOICE_LIMIT:
+                    if member.id not in voice_warned:
+                        try:
+                            await member.send(
+                                "⚠️ 현재 음성채널에서 1시간 이상 헤드셋을 끈 상태로 유지 중입니다.\n"
+                                "10분 이내에 헤드셋을 켜거나 활동하지 않을 경우 자동으로 음성채널에서 퇴장됩니다."
+                            )
+                        except discord.Forbidden:
+                            pass
+
+                        voice_warned[member.id] = now
+                        continue
+
+                    if now - voice_warned[member.id] >= WARNING_TIME:
+                        try:
+                            await member.move_to(None)
+                        except discord.Forbidden:
+                            print(f"권한 부족: {member}")
+                        except discord.HTTPException as e:
+                            print(f"음성채팅 끊기 실패: {member} / {e}")
+                        finally:
+                            voice_inactive.pop(member.id, None)
+                            voice_warned.pop(member.id, None)
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
