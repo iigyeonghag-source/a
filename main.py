@@ -1730,7 +1730,77 @@ def all_called(room):
 
     return True
 
+async def advance_stage(ctx, room):
+    room["acted"].clear()
+    room["bets"] = {p: 0 for p in room["players"]}
+    room["current_bet"] = 0
 
+    if room["stage"] == "preflop":
+        room["community"] += [room["deck"].pop() for _ in range(3)]
+        room["stage"] = "flop"
+
+    elif room["stage"] == "flop":
+        room["community"].append(room["deck"].pop())
+        room["stage"] = "turn"
+
+    elif room["stage"] == "turn":
+        room["community"].append(room["deck"].pop())
+        room["stage"] = "river"
+
+    else:
+        await showdown(ctx, room)
+        return
+
+    room["turn_index"] = next_index(room, room["dealer_index"])
+
+    await ctx.send(
+        f"다음 라운드! 현재 단계: **{room['stage']}**\n"
+        f"{stage_text(room)}\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+
+    await furina_auto(ctx, room)
+
+
+async def showdown(ctx, room):
+    alive = active_players(room)
+
+    scores = {}
+    for p in alive:
+        scores[p] = best_score(room["hands"][p] + room["community"])
+
+    best = max(scores.values())
+    winners = [p for p, s in scores.items() if s == best]
+
+    prize = room["pot"] // len(winners)
+
+    for w in winners:
+        if w != FURINA_ID:
+            add_poker_money(w, prize)
+
+    result_lines = []
+
+    for p in room["players"]:
+        hand = card_text(room["hands"][p])
+
+        if p in room["folded"]:
+            result_lines.append(f"{poker_name(ctx, p)}: **폴드** / 패: {hand}")
+        else:
+            result_lines.append(f"{poker_name(ctx, p)}: **{scores[p][2]}** / 패: {hand}")
+
+    winner_names = ", ".join(poker_name(ctx, w) for w in winners)
+
+    room["dealer_index"] = (room["dealer_index"] + 1) % len(room["players"])
+    room["started"] = False
+    room["stage"] = "lobby"
+
+    await ctx.send(
+        f"쇼다운!\n\n"
+        f"{stage_text(room)}\n\n"
+        + "\n".join(result_lines)
+        + f"\n\n승자: **{winner_names}** / 획득: **{prize}모라**"
+    )
+    
 def stage_text(room):
     cards = card_text(room["community"]) if room["community"] else "아직 없음"
     return f"공개 카드: **{cards}**\n판돈: **{room['pot']}모라**"
