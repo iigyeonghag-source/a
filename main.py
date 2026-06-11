@@ -1696,6 +1696,44 @@ def new_poker_room(ctx):
 
 def get_room(ctx):
     return poker_rooms.get(str(ctx.channel.id))
+
+def active_players(room):
+    return [p for p in room["players"] if p not in room["folded"]]
+
+
+def next_index(room, start):
+    players = room["players"]
+
+    for i in range(1, len(players) + 1):
+        idx = (start + i) % len(players)
+
+        if players[idx] not in room["folded"]:
+            return idx
+
+    return start
+
+
+def current_player(room):
+    return room["players"][room["turn_index"]]
+
+
+def all_called(room):
+    for p in active_players(room):
+        if p in room.get("all_in", set()):
+            continue
+
+        if room["bets"].get(p, 0) != room["current_bet"]:
+            return False
+
+        if p not in room["acted"]:
+            return False
+
+    return True
+
+
+def stage_text(room):
+    cards = card_text(room["community"]) if room["community"] else "아직 없음"
+    return f"공개 카드: **{cards}**\n판돈: **{room['pot']}모라**"
     
 async def furina_auto(ctx, room):
     while room["started"] and current_player(room) == FURINA_ID:
