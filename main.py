@@ -1662,7 +1662,41 @@ def furina_decide_no_bet(strength):
 
     return "check"
 
+def poker_name(ctx, user_id):
+    if user_id == FURINA_ID:
+        return "푸리나"
 
+    member = ctx.guild.get_member(int(user_id))
+    return member.display_name if member else str(user_id)
+
+
+def new_poker_room(ctx):
+    cid = str(ctx.channel.id)
+
+    poker_rooms[cid] = {
+        "host": str(ctx.author.id),
+        "players": [FURINA_ID, str(ctx.author.id)],
+        "dealer_index": 0,
+        "started": False,
+        "deck": [],
+        "hands": {},
+        "community": [],
+        "pot": 0,
+        "current_bet": 0,
+        "bets": {},
+        "folded": set(),
+        "acted": set(),
+        "turn_index": 0,
+        "stage": "lobby",
+        "all_in": set()
+    }
+
+    return poker_rooms[cid]
+
+
+def get_room(ctx):
+    return poker_rooms.get(str(ctx.channel.id))
+    
 async def furina_auto(ctx, room):
     while room["started"] and current_player(room) == FURINA_ID:
         if FURINA_ID in room["folded"] or FURINA_ID in room.get("all_in", set()):
@@ -1775,6 +1809,7 @@ async def after_action(ctx, room):
 
     await ctx.send(f"현재 턴: **{poker_name(ctx, current_player(room))}**")
     await furina_auto(ctx, room)
+
 
 @bot.command(name="돈")
 async def poker_money_command(ctx):
