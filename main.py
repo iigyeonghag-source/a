@@ -3655,12 +3655,73 @@ async def donate(
         f"💸 **{interaction.user.mention}** → **{대상.mention}**\n"
         f"**{금액:,} 모라** 기부 완료!"
     )
-    
+
+voice_inactive = {}
+VOICE_LIMIT = timedelta(hours=1)
+
+def is_headset_off(state):
+    return (
+        state.self_deaf
+        or state.deaf
+        or state.self_mute
+        or state.mute
+    )
+
+@bot.event
+async def on_voice_state_update(member, before, after):
+    if member.bot:
+        return
+
+    uid = member.id
+
+    # 음성채널 나감
+    if after.channel is None:
+        voice_inactive.pop(uid, None)
+        return
+
+    # 헤드셋 껐으면 시간 기록
+    if is_headset_off(after):
+        voice_inactive.setdefault(uid, datetime.now(KST))
+    else:
+        voice_inactive.pop(uid, None)
+
+@tasks.loop(minutes=1)
+async def voice_kick_check():
+    now = datetime.now(KST)
+
+    for guild in bot.guilds:
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                if member.bot:
+                    continue
+
+                state = member.voice
+                if state is None:
+                    continue
+
+                if not is_headset_off(state):
+                    voice_inactive.pop(member.id, None)
+                    continue
+
+                started = voice_inactive.setdefault(member.id, now)
+
+                if now - started >= VOICE_LIMIT:
+                    try:
+                        await member.move_to(None)
+                        voice_inactive.pop(member.id, None)
+                    except discord.Forbidden:
+                        print(f"권한 부족: {member}")
+                    except discord.HTTPException as e:
+                        print(f"음성채팅 끊기 실패: {member} / {e}")
+                        
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
         birthday_check.start()
-        
+
+    if not voice_kick_check.is_running():
+    voice_kick_check.start()
+
     synced = await bot.tree.sync(guild=GUILD)
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
