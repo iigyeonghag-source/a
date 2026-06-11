@@ -3720,7 +3720,7 @@ async def on_ready():
         birthday_check.start()
 
     if not voice_kick_check.is_running():
-    voice_kick_check.start()
+        voice_kick_check.start()
 
     synced = await bot.tree.sync(guild=GUILD)
     print(f"로그인됨: {bot.user}")
