@@ -1929,7 +1929,7 @@ async def poker_claim(ctx):
     now = datetime.now(timezone.utc)
 
     last = poker_last_claim.get(uid)
-    if last and now - last < timedelta(hours=24):
+    if last and now - last < timedelta(hours=12):
         left = timedelta(hours=24) - (now - last)
         hours = int(left.total_seconds() // 3600)
         minutes = int((left.total_seconds() % 3600) // 60)
