@@ -3677,7 +3677,7 @@ class VoiceWarningView(discord.ui.View):
     @discord.ui.button(label="✅ 확인하고 5시간 유예", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 버튼은 본인만 누를 수 있음.", ephemeral=True)
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
             return
 
         until = datetime.now(KST) + SNOOZE_TIME
@@ -3685,14 +3685,14 @@ class VoiceWarningView(discord.ui.View):
         voice_warned.pop(self.user_id, None)
 
         await interaction.response.edit_message(
-            content=f"✅ 확인 완료!\n앞으로 **5시간 동안 경고가 오지 않음.**\n유예 종료: **{until.strftime('%H:%M')}**",
+            content=f"✅ 확인 완료!\n앞으로 **5시간 동안 경고가 오지 않아.**\n유예 종료: **{until.strftime('%H:%M')}**",
             view=None
         )
 
     @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 버튼은 본인만 누를 수 있음.", ephemeral=True)
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
             return
 
         voice_inactive.pop(self.user_id, None)
@@ -3700,7 +3700,7 @@ class VoiceWarningView(discord.ui.View):
         voice_snooze.pop(self.user_id, None)
 
         await interaction.response.edit_message(
-            content="🛑 음성 잠수 감시 종료됨.",
+            content="🛑 음성 잠수 감시 종료됐어.",
             view=None
         )
 
@@ -3768,9 +3768,9 @@ async def voice_kick_check():
                     if warned_at is None:
                         try:
                             await member.send(
-                                "⚠️ 현재 음성채널에서 **1시간 이상 듣기 끔 상태**로 유지 중입니다.\n"
-                                "아래 버튼으로 확인하면 **5시간 동안 경고가 오지 않습니다.**\n"
-                                "버튼을 누르지 않으면 **10분 뒤 자동 퇴장**됩니다.\n\n"
+                                "⚠️ 현재 음성채널에서 **1시간 이상 듣기 끔 상태**로 유지 중이야.\n"
+                                "아래 버튼으로 확인하면 **5시간 동안 경고가 오지 않을 거야.**\n"
+                                "버튼을 누르지 않으면 **10분 뒤 자동 퇴장** 시킬게.\n\n"
                                 "남은 시간: **10분**",
                                 view=VoiceWarningView(uid)
                             )
