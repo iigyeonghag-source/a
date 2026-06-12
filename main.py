@@ -1597,48 +1597,38 @@ def choose_furina_raise_amount(room, strength, all_in=False):
     amount = max(amount, current + 5)
     return min(amount, FURINA_MAX_RAISE)
 
-
 def furina_decide_vs_bet(strength, pressure, need):
-    # 상대가 많이 걸면 푸리나가 훨씬 쫄게 함
+    if strength < 0.25:
+        if random.random() < 0.30:
+            return "fold"
+    elif strength < 0.45:
+        if random.random() < 0.10:
+            return "fold"
 
     if need >= 100:
-        if strength < 0.86:
-            return "fold"
+        if strength >= 0.94 and random.random() < 0.25:
+            return "allin"
         return "call"
 
     if need >= 80:
-        if strength < 0.78:
-            return "fold"
         if strength >= 0.94 and random.random() < 0.25:
             return "allin"
         return "call"
 
     if need >= 50:
-        if strength < 0.68:
-            return "fold"
-        if strength < 0.78:
-            return "fold" if random.random() < 0.65 else "call"
         if strength >= 0.92 and random.random() < 0.25:
             return "allin"
         return "call"
 
     if need >= 25:
-        if strength < 0.48:
-            return "fold" if random.random() < 0.90 else "call"
-        if strength < 0.62:
-            return "fold" if random.random() < 0.55 else "call"
+        if strength >= 0.80 and random.random() < 0.15:
+            return "raise"
         return "call"
 
     if need >= 10:
-        if strength < 0.32:
-            return "fold" if random.random() < 0.75 else "call"
-        if strength < 0.45:
-            return "fold" if random.random() < 0.40 else "call"
+        if strength >= 0.75 and random.random() < 0.20:
+            return "raise"
         return "call"
-
-    # 소액 콜은 좀 허세 허용
-    if strength < 0.25:
-        return "fold" if random.random() < 0.55 else "call"
 
     if strength >= 0.93 and pressure and random.random() < 0.35:
         return "allin"
@@ -1656,12 +1646,11 @@ def furina_decide_no_bet(strength):
     if strength >= 0.64 and random.random() < 0.25:
         return "raise"
 
-    # 개허세 확률 대폭 감소
-    if strength < 0.34 and random.random() < 0.035:
+    if strength < 0.36 and random.random() < 0.10:
         return "bluff"
 
     return "check"
-
+    
 def poker_name(ctx, user_id):
     if user_id == FURINA_ID:
         return "푸리나"
