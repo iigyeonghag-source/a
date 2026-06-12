@@ -3664,8 +3664,9 @@ VOICE_LIMIT = timedelta(hours=1)
 WARNING_TIME = timedelta(minutes=10)
 SNOOZE_TIME = timedelta(hours=5)
 
+
 def is_headset_off(state):
-    # 마이크 꺼짐은 제외. 듣기 꺼짐만 잠수 처리
+    # 마이크 끔은 제외, 듣기 끔만 잠수 처리
     return state.self_deaf or state.deaf
 
 
@@ -3681,11 +3682,16 @@ class VoiceWarningView(discord.ui.View):
             return
 
         until = datetime.now(KST) + SNOOZE_TIME
+
         voice_snooze[self.user_id] = until
         voice_warned.pop(self.user_id, None)
 
         await interaction.response.edit_message(
-            content=f"✅ 확인 완료!\n앞으로 **5시간 동안 경고가 오지 않아.**\n유예 종료: **{until.strftime('%H:%M')}**",
+            content=(
+                "✅ 확인 완료!\n"
+                "앞으로 **5시간 동안 경고가 오지 않아.**\n"
+                f"유예 종료: **{until.strftime('%H:%M')}**"
+            ),
             view=None
         )
 
@@ -3700,7 +3706,7 @@ class VoiceWarningView(discord.ui.View):
         voice_snooze.pop(self.user_id, None)
 
         await interaction.response.edit_message(
-            content="🛑 음성 잠수 감시 종료됐어.",
+            content="🛑 음성 잠수 감시가 종료됐어.",
             view=None
         )
 
@@ -3711,17 +3717,20 @@ async def on_voice_state_update(member, before, after):
         return
 
     uid = member.id
+    now = datetime.now(KST)
 
-    # 음성채널 나가면 전부 종료
+    # 음성채널에서 나가면 전부 초기화
     if after.channel is None:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
         voice_snooze.pop(uid, None)
         return
 
+    # 듣기 끔 상태면 시작 시간 기록
     if is_headset_off(after):
-        voice_inactive.setdefault(uid, datetime.now(KST))
+        voice_inactive.setdefault(uid, now)
     else:
+        # 듣기 켜면 전부 초기화
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
         voice_snooze.pop(uid, None)
@@ -3743,28 +3752,32 @@ async def voice_kick_check():
 
                 uid = member.id
 
+                # 듣기 끔 아니면 초기화
                 if not is_headset_off(state):
                     voice_inactive.pop(uid, None)
                     voice_warned.pop(uid, None)
                     voice_snooze.pop(uid, None)
                     continue
 
-                # 5시간 유예 중이면 카운트만 유지하고 경고/퇴장 안 함
+                # 유예 중이면 경고/퇴장 안 함
                 snooze_until = voice_snooze.get(uid)
                 if snooze_until:
                     if now < snooze_until:
                         continue
-                    else:
-                        voice_snooze.pop(uid, None)
-                        voice_warned.pop(uid, None)
-                        voice_inactive[uid] = now
-                        continue
+
+                    # 유예 끝나면 다시 1시간 카운트 시작
+                    voice_snooze.pop(uid, None)
+                    voice_warned.pop(uid, None)
+                    voice_inactive[uid] = now
+                    continue
 
                 started = voice_inactive.setdefault(uid, now)
 
+                # 1시간 이상 듣기 끔 상태
                 if now - started >= VOICE_LIMIT:
                     warned_at = voice_warned.get(uid)
 
+                    # 아직 경고 안 보냈으면 DM 발송
                     if warned_at is None:
                         try:
                             await member.send(
@@ -3774,19 +3787,28 @@ async def voice_kick_check():
                                 "남은 시간: **10분**",
                                 view=VoiceWarningView(uid)
                             )
+                            print(f"[VoiceKick] {member} 에게 경고 DM 전송 완료")
+
                         except discord.Forbidden:
-                            pass
+                            print(f"[VoiceKick] {member} DM 전송 실패: DM 차단됨")
+
+                        except Exception as e:
+                            print(f"[VoiceKick] {member} DM 전송 중 오류: {e}")
 
                         voice_warned[uid] = now
                         continue
 
-                    remaining = WARNING_TIME - (now - warned_at)
-
-                    if remaining <= timedelta(seconds=0):
+                    # 경고 후 10분 지났으면 퇴장
+                    if now - warned_at >= WARNING_TIME:
                         try:
                             await member.move_to(None)
+                            print(f"[VoiceKick] {member} 자동 퇴장 완료")
+
                         except discord.Forbidden:
-                            pass
+                            print(f"[VoiceKick] {member} 퇴장 실패: 권한 부족")
+
+                        except Exception as e:
+                            print(f"[VoiceKick] {member} 퇴장 중 오류: {e}")
 
                         voice_inactive.pop(uid, None)
                         voice_warned.pop(uid, None)
