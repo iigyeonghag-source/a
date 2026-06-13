@@ -1390,7 +1390,17 @@ GENSHIN_CHARACTERS = ({
     "이안산": {"rarity": 4, "dialogue": "몸을 단련하는 건 배신하지 않아."},
     "바레사": {"rarity": 5, "dialogue": "강함은 증명하는 게 아니라 보여주는 거야."},
     "에스코피에": {"rarity": 5, "dialogue": "최고의 요리는 최고의 재료에서 시작되지."},
-    "스커크": {"rarity": 5, "dialogue": "강해지고 싶다면, 살아남아라."}
+    "스커크": {"rarity": 5, "dialogue": "강해지고 싶다면, 살아남아라."},
+    "여행자": {"rarity": 5, "dialogue": "이 세계의 끝까지, 반드시 답을 찾겠어."},
+    "북두": {"rarity": 4, "dialogue": "폭풍이 온다고? 하하, 그럼 더 재밌어지겠군!"},
+    "디오나": {"rarity": 4, "dialogue": "술은 싫지만 손님은 만족시켜야지!"},
+    "알로이": {"rarity": 5, "dialogue": "난 내 방식대로 살아남아 왔어."},
+    "타르탈리아": {"rarity": 5, "dialogue": "싸움이라면 언제든 환영이다. 전력을 다해 와라!"},
+    "한운": {"rarity": 5, "dialogue": "본 선인이 직접 나섰으니 걱정할 필요 없다."},
+    "가명": {"rarity": 4, "dialogue": "사자춤은 힘과 기세가 중요하지!"},
+
+# 나타
+"란 얀": {"rarity": 4, "dialogue": "강한 바람도 결국 지나가기 마련이야."}
 })
 
 def get_user_characters(user_id):
@@ -3950,6 +3960,8 @@ async def voice_kick_check():
 
 hunt_users = {}  # {uid: {"level": int, "exp": int, "weapon": str, "armor": str, "lives": int}}
 
+hunt_cooldowns = {}
+
 WEAPONS = {
     "무인검": {"price": 0, "bonus": 0},
     "은검": {"price": 500, "bonus": 4},
@@ -4071,8 +4083,21 @@ def give_hunt_exp(user, amount):
 
 @bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
 async def hunt(interaction: discord.Interaction):
+    
     uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
+
+    now = datetime.now(timezone.utc)
+
+    if uid in hunt_cooldowns:
+        left = (hunt_cooldowns[uid] - now).total_seconds()
+
+        if left > 0:
+            await interaction.response.send_message(
+                f"⏳ 사냥 쿨타임!\n"
+                f"남은 시간: **{left:.1f}초**",
+                ephemeral=True
+            )
+            return
 
     monster, monster_level = pick_monster(user["level"])
     win_chance = calc_win_chance(user, monster, monster_level)
