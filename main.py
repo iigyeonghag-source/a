@@ -1919,10 +1919,13 @@ async def poker_claim(ctx):
 
     last = poker_last_claim.get(uid)
     if last and now - last < timedelta(hours=12):
-        left = timedelta(hours=24) - (now - last)
+        left = timedelta(hours=12) - (now - last)
         hours = int(left.total_seconds() // 3600)
         minutes = int((left.total_seconds() % 3600) // 60)
-        await ctx.reply(f"아직 못 받아! 남은 시간: **{hours}시간 {minutes}분**")
+
+        await ctx.reply(
+            f"아직 못 받아! 남은 시간: **{hours}시간 {minutes}분**"
+        )
         return
 
     poker_last_claim[uid] = now
