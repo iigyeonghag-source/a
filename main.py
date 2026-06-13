@@ -58,9 +58,9 @@ def remove_poker_money(user_id, amount):
     )
 
     save_data()
+    
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters
-
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -73,27 +73,26 @@ def load_data():
         data["favor"] = loaded.get("favor", {})
         data["memory"] = loaded.get("memory", {})
         data["characters"] = loaded.get("characters", {})
+        data["hunt_users"] = loaded.get("hunt_users", {})
 
     poker_money = data["poker_money"]
     favor = data["favor"]
     user_memory = data["memory"]
     characters = data["characters"]
+    hunt_users = data["hunt_users"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
         poker_last_claim[uid] = datetime.fromisoformat(value)
-
-    data["hunt_users"] = loaded.get("hunt_users", {})
-    hunt_users = data["hunt_users"]
-
+        
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
-    
-    data["hunt_users"] = hunt_users
+
     data["poker_money"] = poker_money
     data["favor"] = favor
     data["memory"] = user_memory
     data["characters"] = characters
+    data["hunt_users"] = hunt_users
     data["poker_last_claim"] = {
         uid: value.isoformat()
         for uid, value in poker_last_claim.items()
