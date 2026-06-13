@@ -101,12 +101,14 @@ def save_data():
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=4)
 
-load_data()
-
 poker_rooms = {}
+
 poker_money = {}
 poker_last_claim = {}
 user_memory = {}
+favor = {}
+characters = {}
+hunt_users = {}
 
 load_data()
 
@@ -3956,8 +3958,6 @@ async def voice_kick_check():
 # =========================
 # 사냥 / 장비 시스템
 # =========================
-
-hunt_users = {}  # {uid: {"level": int, "exp": int, "weapon": str, "armor": str, "lives": int}}
 
 hunt_cooldowns = {}
 
