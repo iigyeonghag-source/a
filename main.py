@@ -2464,6 +2464,7 @@ ROLE_MESSAGES = {
 
 @bot.event
 async def on_member_update(before, after):
+    # 다른 서버면 무시
     if after.guild.id != SERVER_ID:
         return
 
@@ -2471,6 +2472,7 @@ async def on_member_update(before, after):
 
     for role in after.roles:
         if role.id not in before_roles:
+
             if role.name not in ROLE_MESSAGES:
                 continue
 
@@ -2479,28 +2481,40 @@ async def on_member_update(before, after):
                 print("채널 못 찾음")
                 return
 
-            # 멘션 제거용 텍스트
-            user_text = after.display_name
-            role_text = role.name
-
             desc = ROLE_MESSAGES[role.name].format(
-                user=f"**{user_text}**",
-                role=f"**{role_text}**"
+                user=after.mention,
+                role=f"**{role.name}**"
             )
 
             embed = discord.Embed(
-                title="🎉 역할 달성!",
+                title="🎉 역할 획득!",
                 description=desc,
                 color=role.color if role.color.value != 0 else discord.Color.gold()
             )
 
             embed.set_thumbnail(url=after.display_avatar.url)
-            embed.set_footer(text=f"{after.guild.name}")
+
+            embed.add_field(
+                name="획득한 역할",
+                value=f"🏷️ {role.name}",
+                inline=False
+            )
+
+            embed.set_footer(
+                text=f"{after.guild.name}",
+                icon_url=after.guild.icon.url if after.guild.icon else None
+            )
 
             await channel.send(
                 embed=embed,
-                allowed_mentions=discord.AllowedMentions.none()
+                allowed_mentions=discord.AllowedMentions(
+                    users=True,    # 장본인만 멘션
+                    roles=False,   # 역할 멘션 금지
+                    everyone=False # @everyone 금지
+                )
             )
+
+            print(f"{after} → {role.name} 역할 획득 알림 전송")
             
 print(get_time_key())
 print(datetime.now())
