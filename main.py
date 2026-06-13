@@ -2199,31 +2199,32 @@ async def poker_join(ctx):
 async def poker_start(ctx):
     room = get_room(ctx)
 
-    if not room:
-        await ctx.reply("포커방이 없어!")
+    if room is None:
+        await ctx.reply("❌ 먼저 `!포커`로 방을 만들어!")
         return
 
     if room["started"]:
-        await ctx.reply("이미 시작됐어!")
+        await ctx.reply("❌ 이미 게임이 진행 중이야!")
         return
 
+    # 초기화
     room["started"] = True
     room["stage"] = "preflop"
 
-    deck = create_deck()
-    random.shuffle(deck)
-
-    room["deck"] = deck
+    room["deck"] = make_deck()
     room["community"] = []
+
     room["folded"] = set()
-    room["all_in"] = set()
     room["acted"] = set()
+    room["all_in"] = set()
+
     room["pot"] = 0
-    room["current_bet"] = BIG_BLIND
+    room["current_bet"] = 0
 
     room["hands"] = {}
     room["bets"] = {}
 
+    # 카드 지급
     for p in room["players"]:
         room["hands"][p] = [
             room["deck"].pop(),
@@ -2238,10 +2239,27 @@ async def poker_start(ctx):
     )
 
     await ctx.send(
-        f"🃏 포커 시작!\n"
+        "🃏 **포커 게임 시작!**\n"
         f"현재 턴: **{poker_name(ctx, current_player(room))}**"
     )
-    
+
+    # 플레이어 카드 DM (선택)
+    for p in room["players"]:
+        if p == FURINA_ID:
+            continue
+
+        member = ctx.guild.get_member(int(p))
+        if member:
+            cards = card_text(room["hands"][p])
+
+            try:
+                await member.send(
+                    f"🂠 당신의 패: **{cards}**"
+                )
+            except:
+                pass
+
+    # 푸리나 차례면 자동 행동
     await furina_auto(ctx, room)
 
 @bot.command(name="체크")
