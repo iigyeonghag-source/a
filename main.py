@@ -2247,7 +2247,13 @@ async def poker_start(ctx):
         await ctx.reply("❌ 이미 게임이 진행 중이야!")
         return
 
-    # 초기화
+    if len(room["players"]) < 2:
+        await ctx.reply("❌ 플레이어가 부족해!")
+        return
+
+    # =====================
+    # 기본 초기화
+    # =====================
     room["started"] = True
     room["stage"] = "preflop"
 
@@ -2258,13 +2264,15 @@ async def poker_start(ctx):
     room["acted"] = set()
     room["all_in"] = set()
 
-    room["pot"] = 0
-    room["current_bet"] = 0
-
     room["hands"] = {}
     room["bets"] = {}
 
+    room["pot"] = 0
+    room["current_bet"] = 0
+
+    # =====================
     # 카드 지급
+    # =====================
     for p in room["players"]:
         room["hands"][p] = [
             room["deck"].pop(),
@@ -2272,34 +2280,68 @@ async def poker_start(ctx):
         ]
         room["bets"][p] = 0
 
-    # 선턴 설정
-    room["turn_index"] = next_index(
-        room,
-        room["dealer_index"]
-    )
+    # =====================
+    # 블라인드 설정
+    # 2인 기준:
+    # dealer = small blind
+    # 다음 사람 = big blind
+    # 첫 턴 = small blind
+    # =====================
+    sb = room["players"][room["dealer_index"]]
+    bb = room["players"][
+        (room["dealer_index"] + 1) % len(room["players"])
+    ]
 
-    await ctx.send(
-        "🃏 **포커 게임 시작!**\n"
-        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
-    )
+    sb_pay = min(SMALL_BLIND, poker_stack(sb))
+    bb_pay = min(BIG_BLIND, poker_stack(bb))
 
-    # 플레이어 카드 DM (선택)
+    room["bets"][sb] = sb_pay
+    room["bets"][bb] = bb_pay
+
+    room["pot"] = sb_pay + bb_pay
+    room["current_bet"] = bb_pay
+
+    if sb_pay >= poker_stack(sb):
+        room["all_in"].add(sb)
+
+    if bb_pay >= poker_stack(bb):
+        room["all_in"].add(bb)
+
+    # 첫 턴: 스몰 블라인드
+    room["turn_index"] = room["dealer_index"]
+
+    # =====================
+    # 유저 패 DM
+    # =====================
     for p in room["players"]:
         if p == FURINA_ID:
             continue
 
         member = ctx.guild.get_member(int(p))
-        if member:
-            cards = card_text(room["hands"][p])
+        if member is None:
+            continue
 
-            try:
-                await member.send(
-                    f"🂠 당신의 패: **{cards}**"
-                )
-            except:
-                pass
+        try:
+            await member.send(
+                f"🃏 포커 시작!\n"
+                f"네 패: **{card_text(room['hands'][p])}**"
+            )
+        except:
+            await ctx.send(
+                f"⚠️ {member.mention} DM을 보낼 수 없어. "
+                f"DM 설정을 확인해줘."
+            )
 
-    # 푸리나 차례면 자동 행동
+    await ctx.send(
+        "🃏 **포커 게임 시작!**\n"
+        f"스몰 블라인드: **{poker_name(ctx, sb)} {sb_pay}모라**\n"
+        f"빅 블라인드: **{poker_name(ctx, bb)} {bb_pay}모라**\n"
+        f"판돈: **{room['pot']}모라**\n"
+        f"현재 베팅: **{room['current_bet']}모라**\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+
+    # 푸리나가 선턴이면 자동 행동
     await furina_auto(ctx, room)
 
 @bot.command(name="체크")
