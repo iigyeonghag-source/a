@@ -43,7 +43,8 @@ data = {
     "poker_last_claim": {},
     "favor": {},
     "memory": {},
-    "characters": {}
+    "characters": {},
+    "hunt_users": {}
 }
 
 characters = {}
@@ -82,9 +83,13 @@ def load_data():
     for uid, value in data["poker_last_claim"].items():
         poker_last_claim[uid] = datetime.fromisoformat(value)
 
+    data["hunt_users"] = loaded.get("hunt_users", {})
+    hunt_users = data["hunt_users"]
+
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
-
+    
+    data["hunt_users"] = hunt_users
     data["poker_money"] = poker_money
     data["favor"] = favor
     data["memory"] = user_memory
@@ -3926,7 +3931,324 @@ async def voice_kick_check():
                         voice_inactive.pop(uid, None)
                         voice_warned.pop(uid, None)
                         voice_snooze.pop(uid, None)
-                        
+
+
+# =========================
+# 사냥 / 장비 시스템
+# =========================
+
+hunt_users = {}  # {uid: {"level": int, "exp": int, "weapon": str, "armor": str, "lives": int}}
+
+WEAPONS = {
+    "무인검": {"price": 0, "bonus": 0},
+    "은검": {"price": 500, "bonus": 4},
+    "비천어검": {"price": 1200, "bonus": 7},
+    "참암 프로토타입": {"price": 2500, "bonus": 11},
+    "제례검": {"price": 4500, "bonus": 15},
+    "페보니우스 검": {"price": 6500, "bonus": 19},
+    "칠흑검": {"price": 9000, "bonus": 24},
+    "천공의 검": {"price": 13000, "bonus": 30},
+    "안개를 가르는 회광": {"price": 18000, "bonus": 38},
+    "고요히 샘솟는 빛": {"price": 25000, "bonus": 48},
+}
+
+ARMORS = {
+    "모험가 세트": {"price": 0, "bonus": 0},
+    "행자의 마음": {"price": 500, "bonus": 3},
+    "전투광 세트": {"price": 1200, "bonus": 6},
+    "교관 세트": {"price": 2200, "bonus": 9},
+    "검투사의 피날레": {"price": 4000, "bonus": 13},
+    "대지를 유랑하는 악단": {"price": 6000, "bonus": 17},
+    "절연의 기치": {"price": 8500, "bonus": 22},
+    "몰락한 마음": {"price": 11000, "bonus": 27},
+    "그림자 사냥꾼": {"price": 15000, "bonus": 34},
+    "황금 극단": {"price": 20000, "bonus": 42},
+}
+
+MONSTERS = [
+    {"name": "슬라임", "min": 1, "max": 10, "penalty": 0},
+    {"name": "츄츄족", "min": 1, "max": 15, "penalty": 3},
+    {"name": "츄츄 폭도", "min": 5, "max": 20, "penalty": 6},
+    {"name": "보물 사냥단", "min": 8, "max": 25, "penalty": 8},
+    {"name": "심연 메이지", "min": 12, "max": 35, "penalty": 12},
+    {"name": "우인단 선발대", "min": 15, "max": 40, "penalty": 15},
+    {"name": "유적 가드", "min": 20, "max": 45, "penalty": 18},
+    {"name": "유적 헌터", "min": 25, "max": 50, "penalty": 22},
+    {"name": "거울의 여인", "min": 30, "max": 55, "penalty": 24},
+    {"name": "검귀", "min": 35, "max": 60, "penalty": 28},
+    {"name": "성해 짐승", "min": 40, "max": 70, "penalty": 32},
+    {"name": "유적 드레이크", "min": 45, "max": 75, "penalty": 35},
+    {"name": "심연 사도", "min": 50, "max": 85, "penalty": 38},
+    {"name": "심연 영창자", "min": 60, "max": 100, "penalty": 42},
+    {"name": "원해 짐승", "min": 65, "max": 110, "penalty": 45},
+    {"name": "자율 초정밀 태엽장치", "min": 70, "max": 120, "penalty": 48},
+]
+
+BOSS_MONSTERS = [
+    {"name": "시뇨라", "penalty": 55},
+    {"name": "라이덴 쇼군", "penalty": 60},
+    {"name": "나르발", "penalty": 65},
+    {"name": "아를레키노", "penalty": 70},
+    {"name": "아펩의 수호자", "penalty": 75},
+]
+
+def get_hunt_user(uid):
+    uid = str(uid)
+    if uid not in hunt_users:
+        hunt_users[uid] = {
+            "level": 1,
+            "exp": 0,
+            "weapon": "무인검",
+            "armor": "모험가 세트",
+            "lives": 3
+        }
+    return hunt_users[uid]
+
+
+def pick_monster(player_level):
+    if random.random() < 0.01:
+        target_level = player_level + 10
+    else:
+        target_level = random.randint(
+            max(1, player_level - 5),
+            player_level + 5
+        )
+
+    possible = [
+        m for m in MONSTERS
+        if m["min"] <= target_level <= m["max"]
+    ]
+
+    if not possible:
+        possible = MONSTERS
+
+    monster = random.choice(possible)
+    monster_level = random.randint(
+        max(monster["min"], target_level - 2),
+        min(monster["max"], target_level + 2)
+    )
+
+    return monster, monster_level
+
+
+def calc_win_chance(user, monster, monster_level):
+    player_level = user["level"]
+    weapon_bonus = WEAPONS[user["weapon"]]["bonus"]
+    armor_bonus = ARMORS[user["armor"]]["bonus"]
+
+    chance = 55
+    chance += (player_level - monster_level) * 4
+    chance += weapon_bonus
+    chance += armor_bonus
+    chance -= monster["penalty"]
+    chance -= monster_level * 0.4
+
+    return max(5, min(95, int(chance)))
+
+
+def give_hunt_exp(user, amount):
+    user["exp"] += amount
+    leveled = 0
+
+    while user["exp"] >= user["level"] * 100:
+        user["exp"] -= user["level"] * 100
+        user["level"] += 1
+        leveled += 1
+
+    return leveled
+
+
+@bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
+async def hunt(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    monster, monster_level = pick_monster(user["level"])
+    win_chance = calc_win_chance(user, monster, monster_level)
+
+    embed = discord.Embed(
+        title="⚔️ 사냥 시작",
+        description=(
+            f"**Lv.{monster_level} {monster['name']}** 등장!\n"
+            f"승률: **{win_chance}%**\n\n"
+            "전투 중..."
+        ),
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.send_message(embed=embed)
+    msg = await interaction.original_response()
+
+    await asyncio.sleep(1)
+
+    embed.description += "\n검을 휘두르는 중..."
+    await msg.edit(embed=embed)
+
+    await asyncio.sleep(1)
+
+    embed.description += "\n운명의 판정 중..."
+    await msg.edit(embed=embed)
+
+    await asyncio.sleep(1)
+
+    win = random.randint(1, 100) <= win_chance
+
+    if win:
+        reward = random.randint(80, 160) + monster_level * 20
+        exp = random.randint(30, 60) + monster_level * 5
+
+        add_poker_money(uid, reward)
+        leveled = give_hunt_exp(user, exp)
+
+        result = (
+            f"✅ 승리!\n"
+            f"획득 모라: **{reward:,}모라**\n"
+            f"획득 경험치: **{exp} EXP**\n"
+        )
+
+        if leveled:
+            result += f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**"
+
+        embed.color = discord.Color.green()
+
+    else:
+        user["lives"] -= 1
+
+        result = (
+            f"💀 패배...\n"
+            f"남은 목숨: **{user['lives']}/3**"
+        )
+
+        if user["lives"] <= 0:
+            money = get_poker_money(uid)
+            hospital_fee = int(money * 0.07)
+
+            remove_poker_money(uid, hospital_fee)
+            user["lives"] = 3
+
+            result += (
+                f"\n\n🏥 병원에서 깨어났다...\n"
+                f"치료비로 재산의 7%인 **{hospital_fee:,}모라**가 빠져나감."
+            )
+
+        embed.color = discord.Color.red()
+
+    save_data()
+
+    embed.title = "⚔️ 사냥 결과"
+    embed.description = (
+        f"상대: **Lv.{monster_level} {monster['name']}**\n"
+        f"승률: **{win_chance}%**\n\n"
+        f"{result}\n\n"
+        f"현재 레벨: **Lv.{user['level']}**\n"
+        f"EXP: **{user['exp']}/{user['level'] * 100}**\n"
+        f"보유 모라: **{get_poker_money(uid):,}모라**"
+    )
+
+    await msg.edit(embed=embed)
+
+
+@bot.tree.command(name="무기", description="무기를 구매하거나 확인한다", guild=GUILD)
+@app_commands.describe(이름="구매할 무기 이름")
+async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if 이름 is None:
+        lines = []
+        for name, info in WEAPONS.items():
+            owned = " ✅ 장착중" if user["weapon"] == name else ""
+            lines.append(
+                f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
+            )
+
+        await interaction.response.send_message(
+            "🗡️ **무기 상점**\n" + "\n".join(lines)
+        )
+        return
+
+    if 이름 not in WEAPONS:
+        await interaction.response.send_message("❌ 그런 무기는 없음.", ephemeral=True)
+        return
+
+    price = WEAPONS[이름]["price"]
+    money = get_poker_money(uid)
+
+    if money < price:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{price:,}모라**\n보유: **{money:,}모라**",
+            ephemeral=True
+        )
+        return
+
+    remove_poker_money(uid, price)
+    user["weapon"] = 이름
+    save_data()
+
+    await interaction.response.send_message(
+        f"🗡️ **{이름}** 구매 및 장착 완료!\n"
+        f"승률 보너스: **+{WEAPONS[이름]['bonus']}%**"
+    )
+
+
+@bot.tree.command(name="갑옷", description="갑옷을 구매하거나 확인한다", guild=GUILD)
+@app_commands.describe(이름="구매할 갑옷 이름")
+async def armor_shop(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if 이름 is None:
+        lines = []
+        for name, info in ARMORS.items():
+            owned = " ✅ 장착중" if user["armor"] == name else ""
+            lines.append(
+                f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
+            )
+
+        await interaction.response.send_message(
+            "🛡️ **갑옷 상점**\n" + "\n".join(lines)
+        )
+        return
+
+    if 이름 not in ARMORS:
+        await interaction.response.send_message("❌ 그런 갑옷은 없음.", ephemeral=True)
+        return
+
+    price = ARMORS[이름]["price"]
+    money = get_poker_money(uid)
+
+    if money < price:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{price:,}모라**\n보유: **{money:,}모라**",
+            ephemeral=True
+        )
+        return
+
+    remove_poker_money(uid, price)
+    user["armor"] = 이름
+    save_data()
+
+    await interaction.response.send_message(
+        f"🛡️ **{이름}** 구매 및 장착 완료!\n"
+        f"승률 보너스: **+{ARMORS[이름]['bonus']}%**"
+    )
+
+
+@bot.tree.command(name="내사냥정보", description="내 사냥 정보를 확인한다", guild=GUILD)
+async def hunt_status(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    await interaction.response.send_message(
+        f"📜 **{interaction.user.display_name}의 사냥 정보**\n"
+        f"레벨: **Lv.{user['level']}**\n"
+        f"EXP: **{user['exp']}/{user['level'] * 100}**\n"
+        f"목숨: **{user['lives']}/3**\n"
+        f"무기: **{user['weapon']}**\n"
+        f"갑옷: **{user['armor']}**\n"
+        f"모라: **{get_poker_money(uid):,}모라**"
+    )
+    
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
