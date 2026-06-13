@@ -2464,10 +2464,6 @@ ROLE_MESSAGES = {
 
 @bot.event
 async def on_member_update(before, after):
-    print("업데이트 감지")
-    print("서버 ID:", after.guild.id)
-    print("설정 SERVER_ID:", SERVER_ID)
-
     if after.guild.id != SERVER_ID:
         return
 
@@ -2475,20 +2471,37 @@ async def on_member_update(before, after):
 
     for role in after.roles:
         if role.id not in before_roles:
-            print("새 역할:", repr(role.name))
+            if role.name not in ROLE_MESSAGES:
+                continue
 
-            if role.name in ROLE_MESSAGES:
-                channel = after.guild.get_channel(CHANNEL_ID)
+            channel = after.guild.get_channel(CHANNEL_ID)
+            if channel is None:
+                print("채널 못 찾음")
+                return
 
-                if channel is None:
-                    print("채널 못 찾음")
-                    return
+            # 멘션 제거용 텍스트
+            user_text = after.display_name
+            role_text = role.name
 
-                msg = ROLE_MESSAGES[role.name].format(
-                    user=after.mention,
-                    role=role.mention
-                )
-                await channel.send(msg)
+            desc = ROLE_MESSAGES[role.name].format(
+                user=f"**{user_text}**",
+                role=f"**{role_text}**"
+            )
+
+            embed = discord.Embed(
+                title="🎉 역할 달성!",
+                description=desc,
+                color=role.color if role.color.value != 0 else discord.Color.gold()
+            )
+
+            embed.set_thumbnail(url=after.display_avatar.url)
+            embed.set_footer(text=f"{after.guild.name}")
+
+            await channel.send(
+                embed=embed,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+            
 print(get_time_key())
 print(datetime.now())
 
