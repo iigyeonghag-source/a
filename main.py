@@ -1390,7 +1390,7 @@ GENSHIN_CHARACTERS = ({
     "이안산": {"rarity": 4, "dialogue": "몸을 단련하는 건 배신하지 않아."},
     "바레사": {"rarity": 5, "dialogue": "강함은 증명하는 게 아니라 보여주는 거야."},
     "에스코피에": {"rarity": 5, "dialogue": "최고의 요리는 최고의 재료에서 시작되지."},
-    "스커크": {"rarity": 5, "dialogue": "강해지고 싶다면, 살아남아라."},
+    "스커크": {"rarity": 5, "dialogue": "강해지고 싶다면, 살아남아라."}
 })
 
 def get_user_characters(user_id):
