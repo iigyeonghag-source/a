@@ -1943,118 +1943,190 @@ def stage_text(room):
     return f"공개 카드: **{cards}**\n판돈: **{room['pot']}모라**"
     
 async def furina_auto(ctx, room):
-    while room["started"] and current_player(room) == FURINA_ID:
-        if FURINA_ID in room["folded"] or FURINA_ID in room.get("all_in", set()):
-            room["turn_index"] = next_index(room, room["turn_index"])
-            continue
+    try:
+        while room["started"] and current_player(room) == FURINA_ID:
 
-        need = room["current_bet"] - room["bets"].get(FURINA_ID, 0)
-        strength = furina_hand_strength(room)
-        pressure = is_big_pressure(room, need)
+            print("푸리나 턴 시작")
 
-        if need > 0:
-            decision = furina_decide_vs_bet(strength, pressure, need)
+            # 이미 폴드/올인 상태면 다음 턴
+            if (
+                FURINA_ID in room["folded"]
+                or FURINA_ID in room.get("all_in", set())
+            ):
+                room["turn_index"] = next_index(
+                    room,
+                    room["turn_index"]
+                )
+                continue
 
-            if decision == "fold":
-                room["folded"].add(FURINA_ID)
-                room["acted"].add(FURINA_ID)
-                await ctx.send(furina_say("furina_fold_weak"))
+            need = room["current_bet"] - room["bets"].get(FURINA_ID, 0)
 
-            elif decision == "allin":
-                amount = choose_furina_raise_amount(room, strength, all_in=True)
-                pay = max(0, amount - room["bets"].get(FURINA_ID, 0))
+            strength = furina_hand_strength(room)
+            pressure = is_big_pressure(room, need)
 
-                room["current_bet"] = amount
-                room["bets"][FURINA_ID] = amount
-                room["pot"] += pay
-                room["acted"] = {FURINA_ID}
-                room.setdefault("all_in", set()).add(FURINA_ID)
+            print(
+                f"need={need}, strength={strength:.2f}, pressure={pressure}"
+            )
 
-                await ctx.send(furina_say("furina_allin_call"))
-
-            else:
-                room["pot"] += need
-                room["bets"][FURINA_ID] += need
-                room["acted"].add(FURINA_ID)
-                await ctx.send(furina_say("furina_call", need=need))
-
-        else:
-            decision = furina_decide_no_bet(strength)
-
-            if decision == "allin":
-                amount = choose_furina_raise_amount(room, strength, all_in=True)
-                pay = max(0, amount - room["bets"].get(FURINA_ID, 0))
-
-                room["current_bet"] = amount
-                room["bets"][FURINA_ID] = amount
-                room["pot"] += pay
-                room["acted"] = {FURINA_ID}
-                room.setdefault("all_in", set()).add(FURINA_ID)
-
-                await ctx.send(furina_say("furina_allin_raise", amount=amount))
-
-            elif decision in ("raise", "bluff"):
-                amount = choose_furina_raise_amount(room, strength)
-                pay = max(0, amount - room["bets"].get(FURINA_ID, 0))
-
-                room["current_bet"] = amount
-                room["bets"][FURINA_ID] = amount
-                room["pot"] += pay
-                room["acted"] = {FURINA_ID}
-
-                await ctx.send(
-                    furina_say(
-                        "furina_bluff" if decision == "bluff" else "furina_raise",
-                        amount=amount
-                    )
+            # 상대가 이미 베팅한 경우
+            if need > 0:
+                decision = furina_decide_vs_bet(
+                    strength,
+                    pressure,
+                    need
                 )
 
+                print("결정:", decision)
+
+                if decision == "fold":
+                    room["folded"].add(FURINA_ID)
+                    room["acted"].add(FURINA_ID)
+
+                    await ctx.send(
+                        furina_say("furina_fold_weak")
+                    )
+
+                elif decision == "allin":
+                    amount = choose_furina_raise_amount(
+                        room,
+                        strength,
+                        all_in=True
+                    )
+
+                    pay = max(
+                        0,
+                        amount - room["bets"].get(FURINA_ID, 0)
+                    )
+
+                    room["current_bet"] = amount
+                    room["bets"][FURINA_ID] = amount
+                    room["pot"] += pay
+
+                    room["acted"] = {FURINA_ID}
+                    room.setdefault(
+                        "all_in",
+                        set()
+                    ).add(FURINA_ID)
+
+                    await ctx.send(
+                        furina_say(
+                            "furina_allin_call"
+                        )
+                    )
+
+                else:  # call
+                    room["pot"] += need
+                    room["bets"][FURINA_ID] += need
+                    room["acted"].add(FURINA_ID)
+
+                    await ctx.send(
+                        furina_say(
+                            "furina_call",
+                            need=need
+                        )
+                    )
+
+            # 체크 상황
             else:
-                room["acted"].add(FURINA_ID)
-                await ctx.send(furina_say("furina_check"))
+                decision = furina_decide_no_bet(
+                    strength
+                )
 
-        if len(active_players(room)) == 1:
-            await win_by_fold(ctx, room)
-            return
+                print("결정:", decision)
 
-        if all_called(room):
-            await advance_stage(ctx, room)
-            return
+                if decision == "allin":
+                    amount = choose_furina_raise_amount(
+                        room,
+                        strength,
+                        all_in=True
+                    )
 
-        room["turn_index"] = next_index(room, room["turn_index"])
-        await ctx.send(f"현재 턴: **{poker_name(ctx, current_player(room))}**")
-        return
+                    pay = max(
+                        0,
+                        amount - room["bets"].get(FURINA_ID, 0)
+                    )
 
-async def win_by_fold(ctx, room):
-    winner = active_players(room)[0]
+                    room["current_bet"] = amount
+                    room["bets"][FURINA_ID] = amount
+                    room["pot"] += pay
 
-    if winner != FURINA_ID:
-        add_poker_money(winner, room["pot"])
+                    room["acted"] = {FURINA_ID}
+                    room.setdefault(
+                        "all_in",
+                        set()
+                    ).add(FURINA_ID)
 
-    await ctx.send(
-        f"모두 폴드!\n"
-        f"승자: **{poker_name(ctx, winner)}**\n"
-        f"획득: **{room['pot']}모라**"
-    )
+                    await ctx.send(
+                        furina_say(
+                            "furina_allin_raise",
+                            amount=amount
+                        )
+                    )
 
-    room["dealer_index"] = (room["dealer_index"] + 1) % len(room["players"])
-    room["started"] = False
-    room["stage"] = "lobby"
+                elif decision in ("raise", "bluff"):
+                    amount = choose_furina_raise_amount(
+                        room,
+                        strength
+                    )
 
-async def after_action(ctx, room):
-    if len(active_players(room)) == 1:
-        await win_by_fold(ctx, room)
-        return
+                    pay = max(
+                        0,
+                        amount - room["bets"].get(FURINA_ID, 0)
+                    )
 
-    if all_called(room):
-        await advance_stage(ctx, room)
-        return
+                    room["current_bet"] = amount
+                    room["bets"][FURINA_ID] = amount
+                    room["pot"] += pay
 
-    room["turn_index"] = next_index(room, room["turn_index"])
+                    room["acted"] = {FURINA_ID}
 
-    await ctx.send(f"현재 턴: **{poker_name(ctx, current_player(room))}**")
-    await furina_auto(ctx, room)
+                    await ctx.send(
+                        furina_say(
+                            "furina_bluff"
+                            if decision == "bluff"
+                            else "furina_raise",
+                            amount=amount
+                        )
+                    )
 
+                else:  # check
+                    room["acted"].add(FURINA_ID)
+
+                    await ctx.send(
+                        furina_say("furina_check")
+                    )
+
+            # 승리 체크
+            if len(active_players(room)) == 1:
+                await win_by_fold(ctx, room)
+                return
+
+            # 라운드 종료
+            if all_called(room):
+                await advance_stage(ctx, room)
+                return
+
+            # 다음 턴
+            room["turn_index"] = next_index(
+                room,
+                room["turn_index"]
+            )
+
+            await ctx.send(
+                f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+            )
+
+            # 푸리나 턴이면 연속 진행
+            if current_player(room) != FURINA_ID:
+                return
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+
+        await ctx.send(
+            f"❌ 푸리나 AI 오류:\n```{e}```"
+        )
 
 @bot.command(name="돈")
 async def poker_money_command(ctx):
@@ -2128,71 +2200,48 @@ async def poker_start(ctx):
     room = get_room(ctx)
 
     if not room:
-        await ctx.reply("포커 방이 없어! `!포커`부터 해!")
+        await ctx.reply("포커방이 없어!")
         return
 
     if room["started"]:
-        await ctx.reply("이미 시작했어!")
+        await ctx.reply("이미 시작됐어!")
         return
 
-    if str(ctx.author.id) != room["host"]:
-        await ctx.reply("방장만 시작할 수 있어!")
-        return
+    room["started"] = True
+    room["stage"] = "preflop"
 
-    if len(room["players"]) < 2:
-        await ctx.reply("참가자가 부족해!")
-        return
+    deck = create_deck()
+    random.shuffle(deck)
 
-    deck = make_deck()
     room["deck"] = deck
-    room["hands"] = {p: [deck.pop(), deck.pop()] for p in room["players"]}
     room["community"] = []
+    room["folded"] = set()
+    room["all_in"] = set()
+    room["acted"] = set()
     room["pot"] = 0
     room["current_bet"] = BIG_BLIND
-    room["bets"] = {p: 0 for p in room["players"]}
-    room["folded"] = set()
-    room["acted"] = set()
-    room["all_in"] = set()
-    room["stage"] = "preflop"
-    room["started"] = True
 
-    players = room["players"]
-    dealer = room["dealer_index"]
+    room["hands"] = {}
+    room["bets"] = {}
 
-    small_idx = (dealer + 1) % len(players)
-    big_idx = (dealer + 2) % len(players)
+    for p in room["players"]:
+        room["hands"][p] = [
+            room["deck"].pop(),
+            room["deck"].pop()
+        ]
+        room["bets"][p] = 0
 
-    if len(players) == 2:
-        small_idx = dealer
-        big_idx = (dealer + 1) % len(players)
-
-    small = players[small_idx]
-    big = players[big_idx]
-
-    for p, blind in [(small, SMALL_BLIND), (big, BIG_BLIND)]:
-        room["bets"][p] += blind
-        room["pot"] += blind
-        if p != FURINA_ID:
-            add_poker_money(p, -blind)
-
-    room["turn_index"] = next_index(room, big_idx)
-
-    msg = (
-        f"포커 시작!\n"
-        f"딜러: **{poker_name(ctx, players[dealer])}**\n"
-        f"스몰 블라인드: **{poker_name(ctx, small)} {SMALL_BLIND}모라**\n"
-        f"빅 블라인드: **{poker_name(ctx, big)} {BIG_BLIND}모라**\n\n"
-        f"현재 판돈: **{room['pot']}모라**\n"
-        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    # 선턴 설정
+    room["turn_index"] = next_index(
+        room,
+        room["dealer_index"]
     )
 
-    await ctx.send(msg)
-
-    for p in players:
-        if p != FURINA_ID:
-            user = await bot.fetch_user(int(p))
-            await user.send(f"네 포커 패: **{card_text(room['hands'][p])}**")
-
+    await ctx.send(
+        f"🃏 포커 시작!\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+    
     await furina_auto(ctx, room)
 
 @bot.command(name="체크")
