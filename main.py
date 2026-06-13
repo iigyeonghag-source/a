@@ -1529,8 +1529,29 @@ def hand_name_detail(cards):
 
     high = max(values)
     return f"하이 카드, {value_to_rank[high]}"
+
+async def after_action(ctx, room):
+    if len(active_players(room)) == 1:
+        await win_by_fold(ctx, room)
+        return
+
+    if all_called(room):
+        await advance_stage(ctx, room)
+        return
+
+    room["turn_index"] = next_index(
+        room,
+        room["turn_index"]
+    )
+
+    await ctx.send(
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+
+    await furina_auto(ctx, room)
     
 from itertools import combinations
+
 
 SMALL_BLIND = 2
 BIG_BLIND = 5
