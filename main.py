@@ -1060,6 +1060,34 @@ TIME_GREETING_RESPONSES = {
     ]
 }
 
+TIME_MISMATCH_RESPONSES = {
+    ("아침", "점심"): [
+        "지금은 아침인데 점심이라니? 아직 이르다고!",
+        "아니야! 지금은 아침이잖아. 점심은 조금 더 기다려!",
+        "점심? 후후, 아직 아침 무대라고!"
+    ],
+    ("아침", "저녁"): [
+        "저녁이라니?! 지금은 아침이야!",
+        "아직 하루 시작인데 벌써 저녁 취급이야?"
+    ],
+    ("점심", "아침"): [
+        "아침은 벌써 지나갔어! 지금은 점심이야!",
+        "좋은 아침이라기엔 좀 늦지 않아? 점심이라구!"
+    ],
+    ("점심", "저녁"): [
+        "저녁은 아직이야! 지금은 점심 시간이라고!",
+        "벌써 저녁 먹을 생각이야? 아직 점심인데!"
+    ],
+    ("저녁", "아침"): [
+        "아침? 지금은 저녁이야! 시간 감각 괜찮아?",
+        "좋은 아침이라니, 지금은 저녁이라구!"
+    ],
+    ("저녁", "점심"): [
+        "점심은 지났어! 지금은 저녁이야.",
+        "점심이라고 하기엔 너무 늦었는걸?"
+    ],
+}
+
 FURINA_BIRTHDAY_MESSAGES = [
     "어머, 오늘이 10월 13일이라는 걸 잊은 건 아니겠지? 후훗! 바로 내 생일이란 말이야!",
     "후훗! 오늘은 이 푸리나님의 생일이야! 축하 인사는 얼마든지 받아주겠어!",
@@ -1172,6 +1200,24 @@ async def on_message(message):
         await message.reply(random.choice(responses).format(user=message.author.mention))
         return
 
+        # 시간대 인사 오류 체크
+    current_time_key = get_time_key()
+
+    said_time_keys = []
+    for time_key in ["아침", "점심", "저녁"]:
+        words = KEYWORDS.get(time_key, [])
+        if any(word.lower() in lower for word in words):
+            said_time_keys.append(time_key)
+
+    for said_time_key in said_time_keys:
+        if said_time_key != current_time_key:
+            responses = TIME_MISMATCH_RESPONSES.get(
+                (current_time_key, said_time_key),
+                [f"아니야! 지금은 {current_time_key}이야!"]
+            )
+            await message.reply(random.choice(responses))
+            return
+            
     matched_keys = set()
 
     for key, words in KEYWORDS.items():
@@ -1244,6 +1290,7 @@ async def on_message(message):
 
     await message.reply(random.choice(DEFAULT_RESPONSES))
 
+            
 GENSHIN_CHARACTERS = ({
     "푸리나": {"rarity": 5, "dialogue": "자, 박수! 오늘의 무대에 오른 건 바로 이 푸리나님이야!"},
     "느비예트": {"rarity": 5, "dialogue": "물은 모든 것을 기억한다. 그러니 거짓은 오래 숨지 못하지."},
