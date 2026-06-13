@@ -1480,6 +1480,25 @@ def hand_score(cards):
     if 2 in count_values:
         return (1, values, "원 페어")
     return (0, values, "하이 카드")
+
+async def win_by_fold(ctx, room):
+    winner = active_players(room)[0]
+
+    if winner != FURINA_ID:
+        add_poker_money(winner, room["pot"])
+
+    await ctx.send(
+        f"🏆 모두 폴드!\n"
+        f"승자: **{poker_name(ctx, winner)}**\n"
+        f"획득: **{room['pot']}모라**"
+    )
+
+    room["dealer_index"] = (
+        room["dealer_index"] + 1
+    ) % len(room["players"])
+
+    room["started"] = False
+    room["stage"] = "lobby"
     
 def hand_name_detail(cards):
     score = hand_score(cards)
