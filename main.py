@@ -4083,21 +4083,22 @@ def give_hunt_exp(user, amount):
 
 @bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
 async def hunt(interaction: discord.Interaction):
-    
     uid = str(interaction.user.id)
-
     now = datetime.now(timezone.utc)
 
+    # 쿨타임 체크
     if uid in hunt_cooldowns:
         left = (hunt_cooldowns[uid] - now).total_seconds()
 
         if left > 0:
             await interaction.response.send_message(
-                f"⏳ 사냥 쿨타임!\n"
-                f"남은 시간: **{left:.1f}초**",
+                f"⏳ 사냥 쿨타임!\n남은 시간: **{left:.1f}초**",
                 ephemeral=True
             )
             return
+
+    # 이 줄이 반드시 있어야 함
+    user = get_hunt_user(uid)
 
     monster, monster_level = pick_monster(user["level"])
     win_chance = calc_win_chance(user, monster, monster_level)
