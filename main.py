@@ -4087,17 +4087,19 @@ async def hunt(interaction: discord.Interaction):
     now = datetime.now(timezone.utc)
 
     # 쿨타임 체크
-    if uid in hunt_cooldowns:
-        left = (hunt_cooldowns[uid] - now).total_seconds()
+    cooldown_until = hunt_cooldowns.get(uid)
 
-        if left > 0:
-            await interaction.response.send_message(
-                f"⏳ 사냥 쿨타임!\n남은 시간: **{left:.1f}초**",
-                ephemeral=True
-            )
-            return
+    if cooldown_until and cooldown_until > now:
+        left = (cooldown_until - now).total_seconds()
+        await interaction.response.send_message(
+            f"⏳ 아직 사냥 못 해!\n남은 시간: **{left:.1f}초**",
+            ephemeral=True
+        )
+        return
 
-    # 이 줄이 반드시 있어야 함
+    # 여기서 바로 3초 쿨타임 걸기
+    hunt_cooldowns[uid] = now + timedelta(seconds=3)
+
     user = get_hunt_user(uid)
 
     monster, monster_level = pick_monster(user["level"])
