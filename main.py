@@ -3964,6 +3964,10 @@ class RaidButton(discord.ui.Button):
 
         await interaction.response.edit_message(embed=embed, view=view)
 
+def get_required_exp(level):
+    multiplier = ((level - 1) // 20) + 1
+    return level * 100 * multiplier
+    
 
 def make_raid_embed(base_name, state, result_lines=None):
     desc = ""
@@ -4480,8 +4484,8 @@ def give_hunt_exp(user, amount):
     user["exp"] += amount
     leveled = 0
 
-    while user["exp"] >= user["level"] * 100:
-        user["exp"] -= user["level"] * 100
+    while user["exp"] >= get_required_exp(user["level"]):
+        user["exp"] -= get_required_exp(user["level"])
         user["level"] += 1
         leveled += 1
 
