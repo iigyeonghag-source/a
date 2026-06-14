@@ -4419,8 +4419,8 @@ MONSTERS = [
     {"name": "철갑 용 도마뱀", "min": 120, "max": 180, "penalty": 70},
     {"name": "황금 늑대왕", "min": 135, "max": 200, "penalty": 76},
     {"name": "아펩의 수호자", "min": 150, "max": 220, "penalty": 82},
-    {"name": "주간보스 타르탈리아", "min": 170, "max": 250, "penalty": 90},
-    {"name": "주간보스 라이덴 쇼군", "min": 190, "max": 280, "penalty": 100},
+    {"name": "타르탈리아", "min": 170, "max": 250, "penalty": 90},
+    {"name": "라이덴 쇼군", "min": 190, "max": 280, "penalty": 100},
     {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 120}
 ]
 
