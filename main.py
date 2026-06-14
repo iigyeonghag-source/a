@@ -1,4 +1,4 @@
-import json
+    import json
 import os
 import random
 from datetime import datetime, timezone, timedelta
@@ -45,9 +45,11 @@ data = {
     "memory": {},
     "characters": {},
     "hunt_users": {}
+    "weapons": {}
 }
 
 characters = {}
+weapons = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -60,7 +62,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -74,12 +76,14 @@ def load_data():
         data["memory"] = loaded.get("memory", {})
         data["characters"] = loaded.get("characters", {})
         data["hunt_users"] = loaded.get("hunt_users", {})
+        data["weapons"] = loaded.get("weapons", {})
 
     poker_money = data["poker_money"]
     favor = data["favor"]
     user_memory = data["memory"]
     characters = data["characters"]
     hunt_users = data["hunt_users"]
+    weapons = data["weapons"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -88,6 +92,7 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["weapons"] = weapons
     data["poker_money"] = poker_money
     data["favor"] = favor
     data["memory"] = user_memory
@@ -1350,13 +1355,12 @@ GENSHIN_CHARACTERS = ({
     "쿠죠 사라": {"rarity": 4, "dialogue": "텐료 봉행의 이름으로, 흐트러짐 없이 임무를 수행한다."},
     "토마": {"rarity": 4, "dialogue": "곤란한 일 있으면 말해. 해결책은 늘 있는 법이니까."},
     "헤이조": {"rarity": 4, "dialogue": "단서는 이미 말하고 있어. 범인이 그걸 모를 뿐이지."},
-    "키라라": {"rarity": 4, "dialogue": "냐앗, 배송 완료! 상자는 흔들지 않았…을걸요?"},
     "알하이탐": {"rarity": 5, "dialogue": "쓸데없는 열정은 피곤하지. 필요한 만큼만 움직이면 돼."},
     "닐루": {"rarity": 5, "dialogue": "춤은 말보다 먼저 마음에 닿을 수 있어."},
     "사이노": {"rarity": 5, "dialogue": "심판은 엄격하게, 농담은… 더 엄격하게 하지."},
     "데히야": {"rarity": 5, "dialogue": "의뢰는 확실하게 처리해. 그게 사막의 방식이야."},
     "방랑자": {"rarity": 5, "dialogue": "또 기대하는 눈이군. 착각하지 마, 그냥 지나가는 길이야."},
-    "티나리": {"rarity": 5, "dialogue": "숲에서는 무지가 가장 위험해. 그러니 잘 듣고 따라와."},
+    "타이나리": {"rarity": 5, "dialogue": "숲에서는 무지가 가장 위험해. 그러니 잘 듣고 따라와."},
     "콜레이": {"rarity": 4, "dialogue": "아직 서툴지만… 이번엔 제대로 해낼 거야!"},
     "도리": {"rarity": 4, "dialogue": "모라만 있다면 뭐든 구해줄게! 할인은 별도지만~"},
     "캔디스": {"rarity": 4, "dialogue": "아루 마을의 평온은 내가 지킬 것이다."},
@@ -1372,9 +1376,7 @@ GENSHIN_CHARACTERS = ({
     "프레미네": {"rarity": 4, "dialogue": "물속은 조용해서 좋아. 말하지 않아도 되니까."},
     "슈브르즈": {"rarity": 4, "dialogue": "규칙을 어겼다면 변명보다 협조가 먼저야."},
     "리사": {"rarity": 4, "dialogue": "후훗, 착한 아이에겐 특별 수업을 해줄까?"},
-    "베도": {"rarity": 4, "dialogue": "상황 분석 완료. 이제 결과를 확인할 차례군."},
     "치치": {"rarity": 5, "dialogue": "치치... 코코넛 밀크 좋아해."},
-    "소운": {"rarity": 4, "dialogue": "음식은 정성과 불 조절이 중요해요."},
     "쿠키 시노부": {"rarity": 4, "dialogue": "문제 생기면 제가 처리할게요. 늘 그래왔으니까."},
     "고로": {"rarity": 4, "dialogue": "와타츠미의 동료들은 내가 지킨다!"},
     "키라기": {"rarity": 4, "dialogue": "오늘도 즐겁게 일해보자고!"},
@@ -1384,11 +1386,10 @@ GENSHIN_CHARACTERS = ({
     "카치나": {"rarity": 4, "dialogue": "절대 포기하지 않을 거야!"},
     "차스카": {"rarity": 5, "dialogue": "하늘에서 보는 풍경은 언제나 특별하지."},
     "시틀라리": {"rarity": 5, "dialogue": "별과 영혼은 생각보다 가까운 곳에 있어."},
-    "올로룬": {"rarity": 4, "dialogue": "조용히 움직이는 것이 사냥꾼의 방식이다."},
     "마비카": {"rarity": 5, "dialogue": "불꽃은 꺼지지 않는다. 내가 있는 한."},
     "실로넨": {"rarity": 5, "dialogue": "좋은 장비는 실력을 더욱 빛내주지."},
     "오로론": {"rarity": 4, "dialogue": "어둠 속에서도 길은 존재한다."},
-    "이안산": {"rarity": 4, "dialogue": "몸을 단련하는 건 배신하지 않아."},
+    "얀사": {"rarity": 4, "dialogue": "몸을 단련하는 건 배신하지 않아."},
     "바레사": {"rarity": 5, "dialogue": "강함은 증명하는 게 아니라 보여주는 거야."},
     "에스코피에": {"rarity": 5, "dialogue": "최고의 요리는 최고의 재료에서 시작되지."},
     "스커크": {"rarity": 5, "dialogue": "강해지고 싶다면, 살아남아라."},
@@ -1399,10 +1400,79 @@ GENSHIN_CHARACTERS = ({
     "타르탈리아": {"rarity": 5, "dialogue": "싸움이라면 언제든 환영이다. 전력을 다해 와라!"},
     "한운": {"rarity": 5, "dialogue": "본 선인이 직접 나섰으니 걱정할 필요 없다."},
     "가명": {"rarity": 4, "dialogue": "사자춤은 힘과 기세가 중요하지!"},
-
-# 나타
-"란 얀": {"rarity": 4, "dialogue": "강한 바람도 결국 지나가기 마련이야."}
+    "남연": {"rarity": 4, "dialogue": "강한 바람도 결국 지나가기 마련이야."}
 })
+
+SIGNATURE_WEAPON_OVERRIDES = {
+    "푸리나": "고요히 샘솟는 빛",
+    "느비예트": "영원히 샘솟는 법전",
+    "아를레키노": "붉은 달의 형상",
+    "라이덴 쇼군": "예초의 번개",
+    "나히다": "떠오르는 천일 밤의 꿈",
+    "종려": "관홍의 창",
+    "벤티": "종말 탄식의 노래",
+    "클로린드": "사면",
+    "리니": "최초의 대마술",
+    "타르탈리아": "극지의 별",
+
+    "진": "매의 검",
+    "다이루크": "늑대의 말로",
+    "클레": "사풍 원서",
+    "유라": "송뢰가 울릴 무렵",
+    "알베도": "진사의 방추",
+    "모나": "천공의 두루마리",
+
+    "감우": "아모스의 활",
+    "소": "화박연",
+    "호두": "호마의 지팡이",
+    "야란": "약수",
+    "백출": "벽락의 옥",
+    "신학": "식재",
+    "각청": "반암결록",
+
+    "카즈하": "오래된 자유의 서약",
+    "아야카": "안개를 가르는 회광",
+    "아야토": "하란 월백의 후츠",
+    "요이미야": "비뢰의 고동",
+    "이토": "쇄석의 붉은 뿔",
+    "코코미": "불멸의 달빛",
+    "야에 미코": "카구라의 진의",
+
+    "알하이탐": "잎을 가르는 빛",
+    "닐루": "성현의 열쇠",
+    "사이노": "적색 사막의 지팡이",
+    "데히야": "갈대 바다의 등대",
+    "방랑자": "툴레이툴라의 기억",
+    "타이나리": "사냥꾼의 길",
+
+    "나비아": "판정",
+    "시그윈": "심금을 울리는 하얀 비",
+    "에밀리": "등방울꽃의 애가",
+    "치오리": "우라쿠의 미스기리",
+    "라이오슬리": "현금 흐름 감독",
+    "한운": "학의 여음",
+
+    "말라니": "서핑 타임",
+    "키니치": "산왕의 엄니",
+    "차스카": "붉은 깃털 별독수리",
+    "시틀라리": "제사의 옥",
+    "마비카": "천 개의 불타는 태양",
+    "실로넨": "바위산을 맴도는 노래",
+    "바레사": "비비드 하트",
+    "에스코피에": "향기로운 협주",
+    "스커크": "창백한 천상의 검",
+
+    "여행자": "빛나는 여행자의 검",
+    "알로이": "프레데터",
+}
+
+SIGNATURE_WEAPONS = {
+    name: SIGNATURE_WEAPON_OVERRIDES.get(name, f"{name}의 전용 무기")
+    for name in GENSHIN_CHARACTERS.keys()
+}
+
+WEAPON_GACHA_COST = 500
+
 
 def get_user_characters(user_id):
     uid = str(user_id)
@@ -2840,6 +2910,96 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
 
     await msg.edit(embed=embed)
 
+def get_user_weapons(user_id):
+    uid = str(user_id)
+    weapons.setdefault(uid, {})
+    return weapons[uid]
+
+
+def draw_signature_weapon():
+    return random.choice(list(SIGNATURE_WEAPONS.keys()))
+
+
+@bot.tree.command(name="전무뽑기", description="원신 캐릭터 전용 무기를 뽑는다", guild=GUILD)
+@app_commands.describe(횟수="1 또는 10")
+async def signature_weapon_gacha(interaction: discord.Interaction, 횟수: int = 1):
+    uid = str(interaction.user.id)
+
+    if 횟수 not in [1, 10]:
+        await interaction.response.send_message(
+            "❌ 1회 또는 10회만 가능해.",
+            ephemeral=True
+        )
+        return
+
+    cost = WEAPON_GACHA_COST * 횟수
+
+    if get_poker_money(uid) < cost:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{cost:,}모라**\n보유: **{get_poker_money(uid):,}모라**",
+            ephemeral=True
+        )
+        return
+
+    add_poker_money(uid, -cost)
+
+    user_weapons = get_user_weapons(uid)
+    user_chars = get_user_characters(uid)
+
+    results = []
+    matched_lines = []
+
+    for _ in range(횟수):
+        char_name = draw_signature_weapon()
+        weapon_name = SIGNATURE_WEAPONS[char_name]
+
+        is_new = char_name not in user_weapons
+
+        if is_new:
+            user_weapons[char_name] = {
+                "weapon": weapon_name,
+                "count": 1
+            }
+            results.append(f"🌟 **{weapon_name}** - {char_name} 전용무기 (신규)")
+        else:
+            user_weapons[char_name]["count"] += 1
+            results.append(f"✨ **{weapon_name}** - {char_name} 전용무기 (중복)")
+
+        if char_name in user_chars:
+            user_chars[char_name]["signature_weapon"] = weapon_name
+            matched_lines.append(
+                f"💬 **{char_name}** 전용무기 장착!\n"
+                f"> {GENSHIN_CHARACTERS[char_name]['dialogue']}\n"
+                f"> ✨ {weapon_name}을 손에 쥐자, 새로운 분위기가 느껴진다."
+            )
+
+    save_data()
+
+    embed = discord.Embed(
+        title="⚔️ 전용무기 기원 결과",
+        color=discord.Color.gold()
+    )
+
+    embed.add_field(
+        name="획득 결과",
+        value="\n".join(results),
+        inline=False
+    )
+
+    embed.add_field(
+        name="전용무기 보유 캐릭터 대사",
+        value="\n\n".join(matched_lines) if matched_lines else "아직 해당 캐릭터를 보유하지 않아서 대사 추가 없음.",
+        inline=False
+    )
+
+    embed.add_field(
+        name="현재 모라",
+        value=f"{get_poker_money(uid):,} 모라",
+        inline=True
+    )
+
+    await interaction.response.send_message(embed=embed)
+    
 # =========================
 # 원신 캐릭터 도감 UI
 # =========================
@@ -2894,15 +3054,20 @@ class CharacterDexButton(discord.ui.Button):
             f"중복 획득 횟수: **{favor_exp}회**"
         )
 
+        weapon_name = user_chars[self.char_name].get("signature_weapon")
+
         if level >= 2:
             text += f"\n\n💬 **해금 대사**\n> {info['dialogue']}"
         else:
             text += "\n\n🔒 호감도 Lv.2부터 대사가 해금돼."
 
-        await interaction.response.send_message(
-            text,
-            ephemeral=True
-        )
+        if weapon_name:
+            text += (
+                f"\n\n⚔️ **전용무기 보유: {weapon_name}**\n"
+                f"> 이 무기라면... 오늘의 무대도 완벽하게 장식할 수 있겠어."
+            )
+        else:
+            text += "\n\n⚔️ 전용무기 없음"
 
 
 class CharacterDexPrevButton(discord.ui.Button):
@@ -3311,6 +3476,7 @@ RAID_BASES = {
     "밀수업자 창고": {"cost": 1000, "start_danger": 35, "max_turn": 5},
     "심연 교단 거점": {"cost": 3000, "start_danger": 55, "max_turn": 5},
     "북국은행 비밀금고": {"cost": 5000, "start_danger": 70, "max_turn": 6},
+    "천리의 봉인 구역": {"cost": 10000, "start_danger": 85, "max_turn": 7},
 }
 
 
@@ -3362,6 +3528,7 @@ RAID_RANDOM_CHOICES = {
         choice("금고 벽을 뜯는다", 35, 6000, 45, ["탈출"]),
         choice("타르탈리아 이름을 팔아본다", 40, 7000, 50, ["탈출"]),
     ],
+    
 }
 
 
@@ -3590,6 +3757,52 @@ RAID_SCENES = {
             }
         ],
     },
+    
+    "천리의 봉인 구역": {
+        "입구": [
+            {
+                "text": "하늘에 균열이 생기며 봉인된 공간이 모습을 드러냈다.",
+                "fixed": [
+                    choice("균열 안으로 들어간다", 65, 3000, 15, ["봉인실"]),
+                    choice("주변 문양을 조사한다", 80, 1000, -10, ["봉인실"], "seal"),
+                    choice("힘으로 봉인을 부순다", 40, 7000, 35, ["심층"]),
+                ]
+            }
+        ],
+
+        "봉인실": [
+            {
+                "text": "수수께끼의 유물이 공중에 떠 있다.",
+                "fixed": [
+                    choice("유물을 챙긴다", 55, 6000, 20, ["심층"]),
+                    choice("에너지를 흡수한다", 45, 10000, 35, ["탈출"]),
+                    choice("기록만 남긴다", 90, 2000, 0, ["탈출"]),
+                ]
+            }
+        ],
+
+        "심층": [
+            {
+                "text": "알 수 없는 존재의 시선이 느껴진다.",
+                "fixed": [
+                    choice("정체를 확인한다", 35, 15000, 40, ["탈출"]),
+                    choice("보물을 챙겨 도망친다", 70, 5000, 15, ["탈출"]),
+                    choice("숨죽여 기다린다", 85, 1500, -10, ["탈출"]),
+                ]
+            }
+        ],
+
+        "탈출": [
+            {
+                "text": "봉인 구역이 무너지기 시작한다!",
+                "fixed": [
+                    choice("균열로 뛰어든다", 75, 0, 0, end=True),
+                    choice("유물을 버리고 도망친다", 95, -2000, -20, end=True),
+                    choice("끝까지 챙긴다", 40, 12000, 40, end=True),
+                 ]
+             }
+         ],
+    },
 }
 
 
@@ -3804,6 +4017,7 @@ def make_raid_embed(base_name, state, result_lines=None):
         app_commands.Choice(name="밀수업자 창고", value="밀수업자 창고"),
         app_commands.Choice(name="심연 교단 거점", value="심연 교단 거점"),
         app_commands.Choice(name="북국은행 비밀금고", value="북국은행 비밀금고"),
+        app_commands.Choice(name="천리의 봉인 구역", value="천리의 봉인 구역"),
     ]
 )
 async def raid_base(interaction: discord.Interaction, 기지: app_commands.Choice[str]):
@@ -4148,6 +4362,7 @@ WEAPONS = {
     "천공의 검": {"price": 13000, "bonus": 30},
     "안개를 가르는 회광": {"price": 18000, "bonus": 38},
     "고요히 샘솟는 빛": {"price": 25000, "bonus": 48},
+    "서약의 자유": {"price": 100000, "bonus": 60}
 }
 
 ARMORS = {
@@ -4160,7 +4375,8 @@ ARMORS = {
     "절연의 기치": {"price": 8500, "bonus": 22},
     "몰락한 마음": {"price": 11000, "bonus": 27},
     "그림자 사냥꾼": {"price": 15000, "bonus": 34},
-    "황금 극단": {"price": 20000, "bonus": 42},
+    "황금 극단": {"price": 20000, "bonus": 40},
+    "화려한 꿈의 껍데기": {"price": 100000, "bonus": 50}
 }
 
 MONSTERS = [
@@ -4180,14 +4396,30 @@ MONSTERS = [
     {"name": "심연 영창자", "min": 60, "max": 100, "penalty": 42},
     {"name": "원해 짐승", "min": 65, "max": 110, "penalty": 45},
     {"name": "자율 초정밀 태엽장치", "min": 70, "max": 120, "penalty": 48},
+    {"name": "유적 서펜트", "min": 80, "max": 130, "penalty": 52},
+    {"name": "영겁의 드레이크", "min": 90, "max": 140, "penalty": 56},
+    {"name": "반영구 제어 매트릭스", "min": 100, "max": 150, "penalty": 60},
+    {"name": "수계 사냥개 무리", "min": 110, "max": 165, "penalty": 65},
+    {"name": "철갑 용 도마뱀", "min": 120, "max": 180, "penalty": 70},
+    {"name": "황금 늑대왕", "min": 135, "max": 200, "penalty": 76},
+    {"name": "아펩의 수호자", "min": 150, "max": 220, "penalty": 82},
+    {"name": "주간보스 타르탈리아", "min": 170, "max": 250, "penalty": 90},
+    {"name": "주간보스 라이덴 쇼군", "min": 190, "max": 280, "penalty": 100},
+    {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 120}
 ]
 
 BOSS_MONSTERS = [
-    {"name": "시뇨라", "penalty": 55},
-    {"name": "라이덴 쇼군", "penalty": 60},
-    {"name": "나르발", "penalty": 65},
-    {"name": "아를레키노", "penalty": 70},
-    {"name": "아펩의 수호자", "penalty": 75},
+    {"name": "타르탈리아", "penalty": 55},
+    {"name": "시뇨라", "penalty": 60},
+    {"name": "라이덴 쇼군", "penalty": 65},
+    {"name": "스카라무슈", "penalty": 70},
+    {"name": "아를레키노", "penalty": 75},
+    {"name": "느비예트", "penalty": 85},
+    {"name": "종려", "penalty": 100},
+    {"name": "벤티", "penalty": 120},
+    {"name": "나히다", "penalty": 150},
+    {"name": "라이덴 에이", "penalty": 180},
+    {"name": "푸리나 드 폰타인", "penalty": 200}
 ]
 
 def get_hunt_user(uid):
