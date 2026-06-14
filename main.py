@@ -4597,7 +4597,7 @@ async def hunt(interaction: discord.Interaction):
         f"승률: **{win_chance}%**\n\n"
         f"{result}\n\n"
         f"현재 레벨: **Lv.{user['level']}**\n"
-        f"EXP: **{user['exp']}/{user['level'] * 100}**\n"
+        f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
         f"보유 모라: **{get_poker_money(uid):,}모라**"
     )
 
