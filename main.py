@@ -4503,13 +4503,126 @@ def give_hunt_exp(user, amount):
 
     return leveled
 
+class HuntStartView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=30)
+        self.user_id = str(user_id)
+        self.started = False
+
+    @discord.ui.button(label="⚔️ 전투 시작", style=discord.ButtonStyle.danger)
+    async def start_hunt(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 니 사냥 아님.", ephemeral=True)
+            return
+
+        if self.started:
+            await interaction.response.send_message("이미 전투 시작됨.", ephemeral=True)
+            return
+
+        self.started = True
+
+        for item in self.children:
+            item.disabled = True
+
+        uid = str(interaction.user.id)
+        user = get_hunt_user(uid)
+
+        monster, monster_level = pick_monster(user["level"])
+        win_chance = calc_win_chance(user, monster, monster_level)
+
+        embed = discord.Embed(
+            title="⚔️ 사냥 시작",
+            description=(
+                f"**Lv.{monster_level} {monster['name']}** 등장!\n"
+                f"승률: **{win_chance}%**\n\n"
+                "전투 중."
+            ),
+            color=discord.Color.orange()
+        )
+
+        await interaction.response.edit_message(embed=embed, view=self)
+
+        msg = await interaction.original_response()
+
+        await asyncio.sleep(1)
+        embed.description += "\n검을 휘두르는 중."
+        await msg.edit(embed=embed)
+
+        await asyncio.sleep(1)
+        embed.description += "\n운명의 판정 중."
+        await msg.edit(embed=embed)
+
+        await asyncio.sleep(1)
+
+        win = random.randint(1, 100) <= win_chance
+
+        if win:
+            reward = random.randint(80, 160) + monster_level * 20
+            exp = random.randint(30, 60) + monster_level * 5
+
+            add_poker_money(uid, reward)
+            leveled = give_hunt_exp(user, exp)
+
+            result = (
+                f"✅ 승리!\n"
+                f"획득 모라: **{reward:,}모라**\n"
+                f"획득 경험치: **{exp} EXP**\n"
+            )
+
+            if leveled:
+                result += f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**"
+
+            embed.color = discord.Color.green()
+
+        else:
+            user["lives"] -= 1
+
+            result = (
+                f"💀 패배...\n"
+                f"남은 목숨: **{user['lives']}/3**"
+            )
+
+            if user["lives"] <= 0:
+                money = get_poker_money(uid)
+                hospital_fee = int(money * 0.07)
+
+                remove_poker_money(uid, hospital_fee)
+                user["lives"] = 3
+
+                result += (
+                    f"\n\n🏥 병원에서 깨어났다...\n"
+                    f"치료비로 재산의 7%인 **{hospital_fee:,}모라**가 빠져나감."
+                )
+
+            embed.color = discord.Color.red()
+
+        save_data()
+
+        embed.title = "⚔️ 사냥 결과"
+        embed.description = (
+            f"상대: **Lv.{monster_level} {monster['name']}**\n"
+            f"승률: **{win_chance}%**\n\n"
+            f"{result}\n\n"
+            f"현재 레벨: **Lv.{user['level']}**\n"
+            f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
+            f"보유 모라: **{get_poker_money(uid):,}모라**"
+        )
+
+        await msg.edit(embed=embed, view=None)
+
+    async def on_timeout(self):
+        if self.started:
+            return
+
+        for item in self.children:
+            item.disabled = True
+
 
 @bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
 async def hunt(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     now = datetime.now(timezone.utc)
 
-    # 쿨타임 체크
     cooldown_until = hunt_cooldowns.get(uid)
 
     if cooldown_until and cooldown_until > now:
@@ -4520,94 +4633,19 @@ async def hunt(interaction: discord.Interaction):
         )
         return
 
-    # 여기서 바로 3초 쿨타임 걸기
-    hunt_cooldowns[uid] = now + timedelta(seconds=3)
-
-    user = get_hunt_user(uid)
-
-    monster, monster_level = pick_monster(user["level"])
-    win_chance = calc_win_chance(user, monster, monster_level)
+    view = HuntStartView(uid)
 
     embed = discord.Embed(
-        title="⚔️ 사냥 시작",
+        title="⚔️ 사냥 준비",
         description=(
-            f"**Lv.{monster_level} {monster['name']}** 등장!\n"
-            f"승률: **{win_chance}%**\n\n"
-            "전투 중..."
+            f"{interaction.user.mention} 사냥을 시작할까?\n\n"
+            "아래 버튼을 눌러야 전투가 시작됨.\n"
+            "30초 동안 안 누르면 자동 취소."
         ),
         color=discord.Color.orange()
     )
 
-    await interaction.response.send_message(embed=embed)
-    msg = await interaction.original_response()
-
-    await asyncio.sleep(1)
-
-    embed.description += "\n검을 휘두르는 중..."
-    await msg.edit(embed=embed)
-
-    await asyncio.sleep(1)
-
-    embed.description += "\n운명의 판정 중..."
-    await msg.edit(embed=embed)
-
-    await asyncio.sleep(1)
-
-    win = random.randint(1, 100) <= win_chance
-
-    if win:
-        reward = random.randint(80, 160) + monster_level * 20
-        exp = random.randint(30, 60) + monster_level * 5
-
-        add_poker_money(uid, reward)
-        leveled = give_hunt_exp(user, exp)
-
-        result = (
-            f"✅ 승리!\n"
-            f"획득 모라: **{reward:,}모라**\n"
-            f"획득 경험치: **{exp} EXP**\n"
-        )
-
-        if leveled:
-            result += f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**"
-
-        embed.color = discord.Color.green()
-
-    else:
-        user["lives"] -= 1
-
-        result = (
-            f"💀 패배...\n"
-            f"남은 목숨: **{user['lives']}/3**"
-        )
-
-        if user["lives"] <= 0:
-            money = get_poker_money(uid)
-            hospital_fee = int(money * 0.07)
-
-            remove_poker_money(uid, hospital_fee)
-            user["lives"] = 3
-
-            result += (
-                f"\n\n🏥 병원에서 깨어났다...\n"
-                f"치료비로 재산의 7%인 **{hospital_fee:,}모라**가 빠져나감."
-            )
-
-        embed.color = discord.Color.red()
-
-    save_data()
-
-    embed.title = "⚔️ 사냥 결과"
-    embed.description = (
-        f"상대: **Lv.{monster_level} {monster['name']}**\n"
-        f"승률: **{win_chance}%**\n\n"
-        f"{result}\n\n"
-        f"현재 레벨: **Lv.{user['level']}**\n"
-        f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
-        f"보유 모라: **{get_poker_money(uid):,}모라**"
-    )
-
-    await msg.edit(embed=embed)
+    await interaction.response.send_message(embed=embed, view=view)
 
 
 @bot.tree.command(name="무기", description="무기를 구매하거나 확인한다", guild=GUILD)
