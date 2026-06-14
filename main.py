@@ -3971,8 +3971,14 @@ class RaidButton(discord.ui.Button):
         await interaction.response.edit_message(embed=embed, view=view)
 
 def get_required_exp(level):
-    multiplier = ((level - 1) // 20) + 1
-    return level * 100 * multiplier
+    base = level * 100
+
+    # 20 -> 21, 40 -> 41, 60 -> 61 때만 추가 배율
+    if level % 20 == 0:
+        multiplier = (level // 20) + 1
+        return base * multiplier
+
+    return base
     
 
 def make_raid_embed(base_name, state, result_lines=None):
