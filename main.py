@@ -44,7 +44,7 @@ data = {
     "favor": {},
     "memory": {},
     "characters": {},
-    "hunt_users": {}
+    "hunt_users": {},
     "weapons": {}
 }
 
