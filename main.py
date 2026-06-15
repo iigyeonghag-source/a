@@ -4202,17 +4202,18 @@ async def donate(
         f"**{금액:,} 모라** 기부 완료!"
     )
 
-voice_inactive = {}   # {user_id: 시작 시간}
-voice_warned = {}     # {user_id: DM 보낸 시간}
-voice_snooze = {}     # {user_id: 유예 종료 시간}
+voice_inactive = {}     # {user_id: 헤드셋 끈 시간}
+voice_warned = {}       # {user_id: 최종 경고 DM 보낸 시간}
+voice_snooze = {}       # {user_id: 유예 종료 시간}
+voice_pending_on = {}   # {user_id: 3분 안에 헤드셋 켜야 하는 종료 시간}
 
-VOICE_LIMIT = timedelta(hours=1)
-WARNING_TIME = timedelta(minutes=10)
 SNOOZE_TIME = timedelta(hours=5)
+SLEEP_TIME = timedelta(hours=8)
+HEADSET_ON_TIME = timedelta(minutes=3)
+FINAL_WARNING_TIME = timedelta(minutes=10)
 
 
 def is_headset_off(state):
-    # 마이크 끔은 제외, 듣기 끔만 잠수 처리
     return state.self_deaf or state.deaf
 
 
@@ -4221,16 +4222,22 @@ class VoiceWarningView(discord.ui.View):
         super().__init__(timeout=None)
         self.user_id = user_id
 
-    @discord.ui.button(label="✅ 확인하고 5시간 유예", style=discord.ButtonStyle.success)
-    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def user_check(self, interaction):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="✅ 확인하고 5시간 유예", style=discord.ButtonStyle.success)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.user_check(interaction):
             return
 
         until = datetime.now(KST) + SNOOZE_TIME
 
         voice_snooze[self.user_id] = until
         voice_warned.pop(self.user_id, None)
+        voice_pending_on.pop(self.user_id, None)
 
         await interaction.response.edit_message(
             content=(
@@ -4241,20 +4248,130 @@ class VoiceWarningView(discord.ui.View):
             view=None
         )
 
+    @discord.ui.button(label="😴 숙면 모드", style=discord.ButtonStyle.primary)
+    async def sleep_mode(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.user_check(interaction):
+            return
+
+        until = datetime.now(KST) + SLEEP_TIME
+
+        voice_snooze[self.user_id] = until
+        voice_warned.pop(self.user_id, None)
+        voice_pending_on.pop(self.user_id, None)
+
+        await interaction.response.edit_message(
+            content=(
+                "😴 숙면 모드 켰어.\n"
+                "양심상 **8시간 동안** 경고/퇴장 안 할게.\n"
+                f"종료 시간: **{until.strftime('%H:%M')}**"
+            ),
+            view=None
+        )
+
+    @discord.ui.button(label="🎧 헤드셋 킬게요", style=discord.ButtonStyle.secondary)
+    async def headset_on_soon(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.user_check(interaction):
+            return
+
+        until = datetime.now(KST) + HEADSET_ON_TIME
+        voice_pending_on[self.user_id] = until
+
+        await interaction.response.edit_message(
+            content=(
+                "🎧 알겠어.\n"
+                "**3분 안에 듣기 끔을 해제**해줘.\n"
+                "안 키면 DM 한 번 더 보내고, 그 뒤 **10분 안에 반응 없으면 연결 끊을게.**"
+            ),
+            view=None
+        )
+
     @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
+        if not await self.user_check(interaction):
             return
 
         voice_inactive.pop(self.user_id, None)
         voice_warned.pop(self.user_id, None)
         voice_snooze.pop(self.user_id, None)
+        voice_pending_on.pop(self.user_id, None)
 
         await interaction.response.edit_message(
             content="🛑 음성 잠수 감시가 종료됐어.",
             view=None
         )
+
+
+async def send_first_voice_dm(member):
+    uid = member.id
+    now = datetime.now(KST)
+
+    try:
+        await member.send(
+            "⚠️ 지금 음성채널에서 **듣기 끔 상태**야.\n\n"
+            "아래 버튼 중 하나를 선택해줘.\n"
+            "- ✅ 확인하고 5시간 유예\n"
+            "- 😴 숙면 모드\n"
+            "- 🎧 헤드셋 킬게요\n\n"
+            "헤드셋을 켤 거면 **3분 안에 듣기 끔을 해제**해줘.",
+            view=VoiceWarningView(uid)
+        )
+        print(f"[VoiceKick] {member} 1차 DM 전송 완료")
+
+    except discord.Forbidden:
+        print(f"[VoiceKick] {member} DM 전송 실패: DM 차단됨")
+
+    except Exception as e:
+        print(f"[VoiceKick] {member} 1차 DM 오류: {e}")
+
+    voice_inactive[uid] = now
+
+
+async def send_final_voice_dm(member):
+    uid = member.id
+    now = datetime.now(KST)
+
+    try:
+        await member.send(
+            "⚠️ 아직도 **듣기 끔 상태**야.\n\n"
+            "이제 **10분 안에 반응 없으면** 자동으로 연결을 끊을게.\n"
+            "살려면 버튼을 눌러줘.",
+            view=VoiceWarningView(uid)
+        )
+        print(f"[VoiceKick] {member} 2차 DM 전송 완료")
+
+    except discord.Forbidden:
+        print(f"[VoiceKick] {member} 2차 DM 실패: DM 차단됨")
+
+    except Exception as e:
+        print(f"[VoiceKick] {member} 2차 DM 오류: {e}")
+
+    voice_warned[uid] = now
+    voice_pending_on.pop(uid, None)
+
+
+async def disconnect_with_countdown(member):
+    try:
+        await member.send("3")
+        await asyncio.sleep(1)
+        await member.send("2")
+        await asyncio.sleep(1)
+        await member.send("1")
+        await asyncio.sleep(1)
+        await member.move_to(None)
+
+        print(f"[VoiceKick] {member} 자동 퇴장 완료")
+
+    except discord.Forbidden:
+        print(f"[VoiceKick] {member} 퇴장 실패: 권한 부족 또는 DM 차단")
+
+    except Exception as e:
+        print(f"[VoiceKick] {member} 퇴장 중 오류: {e}")
+
+    uid = member.id
+    voice_inactive.pop(uid, None)
+    voice_warned.pop(uid, None)
+    voice_snooze.pop(uid, None)
+    voice_pending_on.pop(uid, None)
 
 
 @bot.event
@@ -4263,23 +4380,22 @@ async def on_voice_state_update(member, before, after):
         return
 
     uid = member.id
-    now = datetime.now(KST)
 
-    # 음성채널에서 나가면 전부 초기화
     if after.channel is None:
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
         voice_snooze.pop(uid, None)
+        voice_pending_on.pop(uid, None)
         return
 
-    # 듣기 끔 상태면 시작 시간 기록
     if is_headset_off(after):
-        voice_inactive.setdefault(uid, now)
+        if uid not in voice_inactive and uid not in voice_snooze:
+            await send_first_voice_dm(member)
     else:
-        # 듣기 켜면 전부 초기화
         voice_inactive.pop(uid, None)
         voice_warned.pop(uid, None)
         voice_snooze.pop(uid, None)
+        voice_pending_on.pop(uid, None)
 
 
 @tasks.loop(minutes=1)
@@ -4298,69 +4414,38 @@ async def voice_kick_check():
 
                 uid = member.id
 
-                # 듣기 끔 아니면 초기화
                 if not is_headset_off(state):
                     voice_inactive.pop(uid, None)
                     voice_warned.pop(uid, None)
                     voice_snooze.pop(uid, None)
+                    voice_pending_on.pop(uid, None)
                     continue
 
-                # 유예 중이면 경고/퇴장 안 함
                 snooze_until = voice_snooze.get(uid)
                 if snooze_until:
                     if now < snooze_until:
                         continue
 
-                    # 유예 끝나면 다시 1시간 카운트 시작
                     voice_snooze.pop(uid, None)
+                    voice_inactive.pop(uid, None)
                     voice_warned.pop(uid, None)
-                    voice_inactive[uid] = now
+                    voice_pending_on.pop(uid, None)
+
+                    await send_first_voice_dm(member)
                     continue
 
-                started = voice_inactive.setdefault(uid, now)
+                if uid not in voice_inactive:
+                    await send_first_voice_dm(member)
+                    continue
 
-                # 1시간 이상 듣기 끔 상태
-                if now - started >= VOICE_LIMIT:
-                    warned_at = voice_warned.get(uid)
+                pending_until = voice_pending_on.get(uid)
+                if pending_until and now >= pending_until:
+                    await send_final_voice_dm(member)
+                    continue
 
-                    # 아직 경고 안 보냈으면 DM 발송
-                    if warned_at is None:
-                        try:
-                            await member.send(
-                                "⚠️ 현재 음성채널에서 **1시간 이상 듣기 끔 상태**로 유지 중이야.\n"
-                                "아래 버튼으로 확인하면 **5시간 동안 경고가 오지 않을 거야.**\n"
-                                "버튼을 누르지 않으면 **10분 뒤 자동 퇴장** 시킬게.\n\n"
-                                "남은 시간: **10분**",
-                                view=VoiceWarningView(uid)
-                            )
-                            print(f"[VoiceKick] {member} 에게 경고 DM 전송 완료")
-
-                        except discord.Forbidden:
-                            print(f"[VoiceKick] {member} DM 전송 실패: DM 차단됨")
-
-                        except Exception as e:
-                            print(f"[VoiceKick] {member} DM 전송 중 오류: {e}")
-
-                        voice_warned[uid] = now
-                        continue
-
-                    # 경고 후 10분 지났으면 퇴장
-                    if now - warned_at >= WARNING_TIME:
-                        try:
-                            await member.move_to(None)
-                            print(f"[VoiceKick] {member} 자동 퇴장 완료")
-
-                        except discord.Forbidden:
-                            print(f"[VoiceKick] {member} 퇴장 실패: 권한 부족")
-
-                        except Exception as e:
-                            print(f"[VoiceKick] {member} 퇴장 중 오류: {e}")
-
-                        voice_inactive.pop(uid, None)
-                        voice_warned.pop(uid, None)
-                        voice_snooze.pop(uid, None)
-
-
+                warned_at = voice_warned.get(uid)
+                if warned_at and now - warned_at >= FINAL_WARNING_TIME:
+                    await disconnect_with_countdown(member)
 # =========================
 # 사냥 / 장비 시스템
 # =========================
@@ -4758,6 +4843,7 @@ async def on_ready():
         voice_kick_check.start()
 
     synced = await bot.tree.sync(guild=GUILD)
+
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
     
