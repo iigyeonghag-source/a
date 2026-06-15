@@ -4262,7 +4262,7 @@ class VoiceWarningView(discord.ui.View):
         await interaction.response.edit_message(
             content=(
                 "😴 숙면 모드 켰어.\n"
-                "양심상 **8시간 동안** 경고/퇴장 안 할게.\n"
+                "**8시간 동안** 경고/퇴장을 비활성화 할게.\n"
                 f"종료 시간: **{until.strftime('%H:%M')}**"
             ),
             view=None
@@ -4280,27 +4280,36 @@ class VoiceWarningView(discord.ui.View):
             content=(
                 "🎧 알겠어.\n"
                 "**3분 안에 듣기 끔을 해제**해줘.\n"
-                "안 키면 DM 한 번 더 보내고, 그 뒤 **10분 안에 반응 없으면 연결 끊을게.**"
+                "그동안 안 키면 DM을 한 번 더 보낼 예정이야.**"
             ),
             view=None
         )
 
-    @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
+   @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "이 버튼은 본인만 누를 수 있어.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
             return
 
-        member = interaction.guild.get_member(self.user_id)
+        for guild in bot.guilds:
+            member = guild.get_member(self.user_id)
 
-        if member and member.voice:
-            await member.move_to(None)
+            if member and member.voice:
+                await member.move_to(None)
+
+                voice_inactive.pop(self.user_id, None)
+                voice_warned.pop(self.user_id, None)
+                voice_snooze.pop(self.user_id, None)
+                voice_pending_on.pop(self.user_id, None)
+
+                await interaction.response.edit_message(
+                    content="🛑 음성 채널 연결을 종료했어.",
+                    view=None
+                )
+                return
 
         await interaction.response.edit_message(
-            content="🛑 음성 채널 연결을 종료했어.",
+            content="이미 음성 채널에 없어서 종료할 게 없어.",
             view=None
         )
 
@@ -4316,7 +4325,7 @@ async def send_first_voice_dm(member):
             "- ✅ 확인하고 5시간 유예\n"
             "- 😴 숙면 모드\n"
             "- 🎧 헤드셋 킬게요\n\n"
-            "헤드셋을 켤 거면 **3분 안에 듣기 끔을 해제**해줘.",
+            "헤드셋을 켤 거면 **3분 안에 헤드셋을 해제**해줘.",
             view=VoiceWarningView(uid)
         )
         print(f"[VoiceKick] {member} 1차 DM 전송 완료")
