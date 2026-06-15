@@ -4287,16 +4287,20 @@ class VoiceWarningView(discord.ui.View):
 
     @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.user_check(interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message(
+                "이 버튼은 본인만 누를 수 있어.",
+                ephemeral=True
+            )
             return
 
-        voice_inactive.pop(self.user_id, None)
-        voice_warned.pop(self.user_id, None)
-        voice_snooze.pop(self.user_id, None)
-        voice_pending_on.pop(self.user_id, None)
+        member = interaction.guild.get_member(self.user_id)
+
+        if member and member.voice:
+            await member.move_to(None)
 
         await interaction.response.edit_message(
-            content="🛑 음성 잠수 감시가 종료됐어.",
+            content="🛑 음성 채널 연결을 종료했어.",
             view=None
         )
 
