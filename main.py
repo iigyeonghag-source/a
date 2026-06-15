@@ -4212,6 +4212,30 @@ SLEEP_TIME = timedelta(hours=8)
 HEADSET_ON_TIME = timedelta(minutes=3)
 FINAL_WARNING_TIME = timedelta(minutes=10)
 
+async def check_voice_state(self, interaction):
+    member = get_voice_member(self.user_id)
+
+    if not member or not member.voice:
+        await interaction.response.edit_message(
+            content="이미 음성 채널에 없어서 처리할 게 없어.",
+            view=None
+        )
+        return None
+
+    if not is_headset_off(member.voice):
+        voice_inactive.pop(self.user_id, None)
+        voice_warned.pop(self.user_id, None)
+        voice_snooze.pop(self.user_id, None)
+        voice_pending_on.pop(self.user_id, None)
+
+        await interaction.response.edit_message(
+            content="이미 헤드셋 켜져 있어서 경고 취소했어.",
+            view=None
+        )
+        return None
+
+    return member
+    
 
 def is_headset_off(state):
     return state.self_deaf or state.deaf
@@ -4233,6 +4257,10 @@ class VoiceWarningView(discord.ui.View):
         if not await self.user_check(interaction):
             return
 
+        member = await self.check_voice_state(interaction)
+        if member is None:
+            return
+        
         until = datetime.now(KST) + SNOOZE_TIME
 
         voice_snooze[self.user_id] = until
@@ -4253,6 +4281,10 @@ class VoiceWarningView(discord.ui.View):
         if not await self.user_check(interaction):
             return
 
+        member = await self.check_voice_state(interaction)
+        if member is None:
+            return
+        
         until = datetime.now(KST) + SLEEP_TIME
 
         voice_snooze[self.user_id] = until
@@ -4271,6 +4303,10 @@ class VoiceWarningView(discord.ui.View):
     @discord.ui.button(label="🎧 헤드셋 킬게요", style=discord.ButtonStyle.secondary)
     async def headset_on_soon(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.user_check(interaction):
+            return
+
+        member = await self.check_voice_state(interaction)
+        if member is None:
             return
 
         until = datetime.now(KST) + HEADSET_ON_TIME
