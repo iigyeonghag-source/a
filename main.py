@@ -4212,6 +4212,48 @@ SLEEP_TIME = timedelta(hours=8)
 HEADSET_ON_TIME = timedelta(minutes=3)
 FINAL_WARNING_TIME = timedelta(minutes=10)
 
+class VoiceWarningView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=None)
+        self.user_id = user_id
+
+    async def user_check(self, interaction):
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
+            return False
+        return True
+
+    async def check_voice_state(self, interaction):
+        member = get_voice_member(self.user_id)
+
+        if not member or not member.voice:
+            await interaction.response.edit_message(
+                content="이미 음성 채널에 없어서 처리할 게 없어.",
+                view=None
+            )
+            return None
+
+        if not is_headset_off(member.voice):
+            voice_inactive.pop(self.user_id, None)
+            voice_warned.pop(self.user_id, None)
+            voice_snooze.pop(self.user_id, None)
+            voice_pending_on.pop(self.user_id, None)
+
+            await interaction.response.edit_message(
+                content="이미 헤드셋 켜져 있어서 경고 취소했어.",
+                view=None
+            )
+            return None
+
+        return member
+
+def get_voice_member(user_id):
+    for guild in bot.guilds:
+        member = guild.get_member(user_id)
+        if member:
+            return member
+    return None
+    
 async def check_voice_state(self, interaction):
     member = get_voice_member(self.user_id)
 
