@@ -4285,7 +4285,7 @@ class VoiceWarningView(discord.ui.View):
             view=None
         )
 
-   @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
+    @discord.ui.button(label="🛑 종료", style=discord.ButtonStyle.danger)
     async def stop(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
             await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
