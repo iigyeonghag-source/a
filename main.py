@@ -4885,7 +4885,7 @@ async def create_stat_image(member, user):
     bg.save(buffer, format="PNG")
     buffer.seek(0)
 
-return buffer
+    return buffer
 
 def get_hunt_user(uid):
     uid = str(uid)
