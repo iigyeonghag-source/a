@@ -4814,15 +4814,15 @@ async def create_stat_image(member, user):
     mag_proc = min(50, mag * 0.1)
     vit_save = min(60, vit * 0.2)
 
-    draw.text((100, 520), f"힘: 승률 +{str_bonus}%", font=font_small, fill=white)
+    draw.text((100, 510), f"힘: 승률 +{str_bonus}%", font=font_small, fill=white)
 
-    draw.text((100, 560), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
+    draw.text((100, 550), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
 
-    draw.text((100, 600), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
+    draw.text((100, 590), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
 
-    draw.text((100, 640), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
+    draw.text((100, 630), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
 
-    draw.text((100, 680), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
+    draw.text((100, 670), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
     
     # =====================
     # 오른쪽 스탯
