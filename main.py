@@ -4741,6 +4741,7 @@ async def create_stat_image(member, user):
     font_stat_name = get_font(27)
     font_stat_num = get_font(36)
     font_small = get_font(21)
+    font_plus = get_font(34)
 
     level = user["level"]
     exp = user["exp"]
@@ -4753,9 +4754,6 @@ async def create_stat_image(member, user):
     mag = get_stat(user, "mag")
     vit = get_stat(user, "vit")
 
-    # =====================
-    # 프로필 사진
-    # =====================
     try:
         avatar_bytes = await member.display_avatar.with_size(256).read()
 
@@ -4764,7 +4762,7 @@ async def create_stat_image(member, user):
 
         mask = Image.new("L", (220, 255), 0)
         mask_draw = ImageDraw.Draw(mask)
-    
+
         mask_draw.rounded_rectangle(
             (0, 0, 220, 255),
             radius=20,
@@ -4776,13 +4774,9 @@ async def create_stat_image(member, user):
     except Exception as e:
         print("프사 로드 실패:", e)
 
-    # =====================
-    # 왼쪽 기본 정보
-    # =====================
-
     name_box = draw.textbbox((0, 0), member.display_name, font=font_name)
     name_width = name_box[2] - name_box[0]
-    
+
     draw.text(
         (205 - name_width // 2, 410),
         member.display_name,
@@ -4790,22 +4784,21 @@ async def create_stat_image(member, user):
         fill=white
     )
 
-    draw.text((390, 135), f"직업", font=font_info, fill=cyan)
+    draw.text((390, 135), "직업", font=font_info, fill=cyan)
     draw.text((455, 135), job, font=font_info, fill=white)
 
-    draw.text((390, 220), f"레벨", font=font_info, fill=cyan)
+    draw.text((390, 220), "레벨", font=font_info, fill=cyan)
     draw.text((455, 220), f"Lv.{level}", font=font_info, fill=white)
 
-    draw.text((390, 330), f"EXP", font=font_info, fill=cyan)
+    draw.text((390, 330), "EXP", font=font_info, fill=cyan)
     draw.text((455, 330), f"{exp}/{need_exp}", font=font_small, fill=white)
 
-    draw.text((390, 410), f"목숨", font=font_info, fill=cyan)
+    draw.text((390, 410), "목숨", font=font_info, fill=cyan)
     draw.text((455, 410), f"{user['lives']} / 3", font=font_info, fill=white)
 
-    draw.text((390, 440), f"스탯", font=font_info, fill=cyan)
+    draw.text((390, 440), "스탯", font=font_info, fill=cyan)
     draw.text((455, 440), f"{user['stat_point']} P", font=font_info, fill=white)
 
-    # EXP 바
     draw_bar(draw, 85, 778, 485, 25, exp, need_exp)
 
     str_bonus = int(strength * 0.1)
@@ -4815,18 +4808,11 @@ async def create_stat_image(member, user):
     vit_save = min(60, vit * 0.2)
 
     draw.text((100, 510), f"힘: 승률 +{str_bonus}%", font=font_small, fill=white)
-
     draw.text((100, 550), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
-
     draw.text((100, 590), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
-
     draw.text((100, 630), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
-
     draw.text((100, 670), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
-    
-    # =====================
-    # 오른쪽 스탯
-    # =====================
+
     stats = [
         ("힘", "STR", strength, 800, 145),
         ("민첩", "DEX", dex, 800, 285),
@@ -4834,6 +4820,7 @@ async def create_stat_image(member, user):
         ("마력", "MAG", mag, 800, 550),
         ("체력", "VIT", vit, 800, 680),
     ]
+
     for name, eng, value, x, y in stats:
         draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
 
@@ -4849,6 +4836,24 @@ async def create_stat_image(member, user):
         )
 
         draw_bar(draw, x, y + 72, 565, 20, value, 100)
+
+        if user["stat_point"] > 0:
+            plus_x = 1045
+            plus_y = y - 8
+
+            draw.rounded_rectangle(
+                (plus_x, plus_y, plus_x + 42, plus_y + 42),
+                radius=10,
+                outline=cyan,
+                width=2
+            )
+
+            draw.text(
+                (plus_x + 12, plus_y - 1),
+                "+",
+                font=font_plus,
+                fill=cyan
+            )
 
     buffer = BytesIO()
     bg.save(buffer, format="PNG")
