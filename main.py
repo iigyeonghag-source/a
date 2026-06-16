@@ -4537,11 +4537,51 @@ async def voice_kick_check():
                 warned_at = voice_warned.get(uid)
                 if warned_at and now - warned_at >= FINAL_WARNING_TIME:
                     await disconnect_with_countdown(member)
+
 # =========================
-# 사냥 / 장비 시스템
+# 사냥 / 장비 / 스탯 / 직업 시스템
 # =========================
 
 hunt_cooldowns = {}
+target_hunt_cooldowns = {}
+
+HUNT_COOLDOWN = timedelta(seconds=10)
+TARGET_HUNT_COOLDOWN = timedelta(hours=24)
+
+STAT_NAMES = {
+    "힘": "str",
+    "민첩": "dex",
+    "지능": "int",
+    "마력": "mag",
+    "체력": "vit"
+}
+
+STAT_KR = {
+    "str": "힘",
+    "dex": "민첩",
+    "int": "지능",
+    "mag": "마력",
+    "vit": "체력"
+}
+
+JOBS = {
+    "궁수": {
+        "stats": ["str", "vit"],
+        "desc": "힘과 체력 특화. 안정적으로 승률을 올리는 직업."
+    },
+    "전사": {
+        "stats": ["dex", "vit"],
+        "desc": "민첩과 체력 특화. 약한 적을 잘 만나고 버티는 직업."
+    },
+    "도적": {
+        "stats": ["int", "dex"],
+        "desc": "지능과 민첩 특화. 보상과 사냥 안정성을 챙기는 직업."
+    },
+    "법사": {
+        "stats": ["mag", "vit"],
+        "desc": "마력과 체력 특화. 승률 2배와 생존력을 노리는 직업."
+    }
+}
 
 WEAPONS = {
     "무인검": {"price": 0, "bonus": 0},
@@ -4600,34 +4640,43 @@ MONSTERS = [
     {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 120}
 ]
 
-BOSS_MONSTERS = [
-    {"name": "타르탈리아", "penalty": 55},
-    {"name": "시뇨라", "penalty": 60},
-    {"name": "라이덴 쇼군", "penalty": 65},
-    {"name": "스카라무슈", "penalty": 70},
-    {"name": "아를레키노", "penalty": 75},
-    {"name": "느비예트", "penalty": 85},
-    {"name": "종려", "penalty": 100},
-    {"name": "벤티", "penalty": 120},
-    {"name": "나히다", "penalty": 150},
-    {"name": "라이덴 에이", "penalty": 180},
-    {"name": "푸리나 드 폰타인", "penalty": 200}
-]
 
 def get_hunt_user(uid):
     uid = str(uid)
+
     if uid not in hunt_users:
-        hunt_users[uid] = {
-            "level": 1,
-            "exp": 0,
-            "weapon": "무인검",
-            "armor": "모험가 세트",
-            "lives": 3
-        }
-    return hunt_users[uid]
+        hunt_users[uid] = {}
+
+    user = hunt_users[uid]
+
+    defaults = {
+        "level": 1,
+        "exp": 0,
+        "weapon": "무인검",
+        "armor": "모험가 세트",
+        "lives": 3,
+        "stat_point": 0,
+        "job": None,
+        "str": 0,
+        "dex": 0,
+        "int": 0,
+        "mag": 0,
+        "vit": 0
+    }
+
+    for key, value in defaults.items():
+        user.setdefault(key, value)
+
+    return user
 
 
-def pick_monster(player_level):
+def get_stat(user, stat):
+    return int(user.get(stat, 0))
+
+
+def pick_monster(player_level, user=None):
+    dex = get_stat(user, "dex") if user else 0
+
     if random.random() < 0.01:
         target_level = player_level + 10
     else:
@@ -4635,6 +4684,10 @@ def pick_monster(player_level):
             max(1, player_level - 5),
             player_level + 5
         )
+
+    # 민첩: 약한 몬스터가 더 잘 나오게 함
+    target_level -= dex // 20
+    target_level = max(1, target_level)
 
     possible = [
         m for m in MONSTERS
@@ -4645,6 +4698,7 @@ def pick_monster(player_level):
         possible = MONSTERS
 
     monster = random.choice(possible)
+
     monster_level = random.randint(
         max(monster["min"], target_level - 2),
         min(monster["max"], target_level + 2)
@@ -4653,10 +4707,21 @@ def pick_monster(player_level):
     return monster, monster_level
 
 
+def find_monster_by_name(name):
+    for monster in MONSTERS:
+        if monster["name"] == name:
+            return monster
+    return None
+
+
 def calc_win_chance(user, monster, monster_level):
     player_level = user["level"]
     weapon_bonus = WEAPONS[user["weapon"]]["bonus"]
     armor_bonus = ARMORS[user["armor"]]["bonus"]
+
+    strength = get_stat(user, "str")
+    dex = get_stat(user, "dex")
+    vit = get_stat(user, "vit")
 
     chance = 55
     chance += (player_level - monster_level) * 4
@@ -4665,7 +4730,66 @@ def calc_win_chance(user, monster, monster_level):
     chance -= monster["penalty"]
     chance -= monster_level * 0.4
 
+    # 힘: 스탯당 승률 +0.1%
+    chance += strength * 0.1
+
+    # 민첩: 10스탯당 승률 +1%
+    chance += dex // 10
+
+    # 체력: 10스탯당 승률 +1%
+    chance += vit // 10
+
     return max(5, min(95, int(chance)))
+
+
+def apply_magic_double_chance(user, win_chance):
+    mag = get_stat(user, "mag")
+
+    # 마력: 확률적으로 승률 2배
+    # 스탯당 0.1%, 최대 50%
+    proc_chance = min(50, mag * 0.1)
+
+    activated = random.random() * 100 < proc_chance
+
+    if activated:
+        win_chance = min(95, win_chance * 2)
+
+    return int(win_chance), activated
+
+
+def apply_int_reward_bonus(user, reward, exp):
+    intelligence = get_stat(user, "int")
+
+    # 지능: 획득 경험치와 모라 스탯당 0.1% 증가
+    bonus = 1 + intelligence * 0.001
+
+    reward = int(reward * bonus)
+    exp = int(exp * bonus)
+
+    return reward, exp
+
+
+def check_life_save(user):
+    vit = get_stat(user, "vit")
+
+    # 체력: 패배해도 확률적으로 목숨 보존
+    # 스탯당 0.2%, 최대 60%
+    save_chance = min(60, vit * 0.2)
+
+    return random.random() * 100 < save_chance
+
+
+def calc_hospital_fee(user, money):
+    vit = get_stat(user, "vit")
+
+    base_rate = 0.07
+
+    # 체력 50당 병원비 0.1% 감소
+    discount = (vit // 50) * 0.001
+
+    final_rate = max(0, base_rate - discount)
+
+    return int(money * final_rate), final_rate
 
 
 def give_hunt_exp(user, amount):
@@ -4675,15 +4799,127 @@ def give_hunt_exp(user, amount):
     while user["exp"] >= get_required_exp(user["level"]):
         user["exp"] -= get_required_exp(user["level"])
         user["level"] += 1
+        user["stat_point"] += 5
         leveled += 1
 
     return leveled
 
+
+async def run_hunt_battle(interaction, user, monster, monster_level, is_target=False):
+    uid = str(interaction.user.id)
+
+    win_chance = calc_win_chance(user, monster, monster_level)
+    win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+
+    embed = discord.Embed(
+        title="⚔️ 사냥 시작",
+        description=(
+            f"**Lv.{monster_level} {monster['name']}** 등장!\n"
+            f"승률: **{int(win_chance)}%**\n"
+            f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
+            "전투 중."
+        ),
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.edit_message(embed=embed, view=None)
+    msg = await interaction.original_response()
+
+    await asyncio.sleep(1)
+    embed.description += "\n검을 휘두르는 중."
+    await msg.edit(embed=embed)
+
+    await asyncio.sleep(1)
+    embed.description += "\n운명의 판정 중."
+    await msg.edit(embed=embed)
+
+    await asyncio.sleep(1)
+
+    win = random.randint(1, 100) <= win_chance
+
+    if win:
+        reward = random.randint(80, 160) + monster_level * 20
+        exp = random.randint(30, 60) + monster_level * 5
+
+        reward, exp = apply_int_reward_bonus(user, reward, exp)
+
+        add_poker_money(uid, reward)
+        leveled = give_hunt_exp(user, exp)
+
+        result = (
+            f"✅ 승리!\n"
+            f"획득 모라: **{reward:,}모라**\n"
+            f"획득 경험치: **{exp} EXP**\n"
+        )
+
+        if leveled:
+            result += (
+                f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**\n"
+                f"스탯 포인트 **{leveled * 5}** 획득!"
+            )
+
+        embed.color = discord.Color.green()
+
+    else:
+        life_saved = check_life_save(user)
+
+        if life_saved:
+            result = (
+                f"💀 패배...\n"
+                f"하지만 체력 효과로 목숨을 잃지 않았다!\n"
+                f"남은 목숨: **{user['lives']}/3**"
+            )
+        else:
+            user["lives"] -= 1
+
+            result = (
+                f"💀 패배...\n"
+                f"남은 목숨: **{user['lives']}/3**"
+            )
+
+            if user["lives"] <= 0:
+                money = get_poker_money(uid)
+                hospital_fee, final_rate = calc_hospital_fee(user, money)
+
+                remove_poker_money(uid, hospital_fee)
+                user["lives"] = 3
+
+                result += (
+                    f"\n\n🏥 병원에서 깨어났다...\n"
+                    f"치료비로 재산의 **{final_rate * 100:.1f}%**인 "
+                    f"**{hospital_fee:,}모라**가 빠져나감."
+                )
+
+        embed.color = discord.Color.red()
+
+    if not is_target:
+        hunt_cooldowns[uid] = datetime.now(timezone.utc) + HUNT_COOLDOWN
+
+    save_data()
+
+    embed.title = "⚔️ 사냥 결과"
+    embed.description = (
+        f"상대: **Lv.{monster_level} {monster['name']}**\n"
+        f"최종 승률: **{int(win_chance)}%**\n"
+        f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
+        f"{result}\n\n"
+        f"현재 레벨: **Lv.{user['level']}**\n"
+        f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
+        f"목숨: **{user['lives']}/3**\n"
+        f"보유 모라: **{get_poker_money(uid):,}모라**"
+    )
+
+    await msg.edit(embed=embed, view=None)
+
+
 class HuntStartView(discord.ui.View):
-    def __init__(self, user_id):
+    def __init__(self, user_id, monster=None, monster_level=None, is_target=False):
         super().__init__(timeout=30)
         self.user_id = str(user_id)
         self.started = False
+        self.monster = monster
+        self.monster_level = monster_level
+        self.is_target = is_target
 
     @discord.ui.button(label="⚔️ 전투 시작", style=discord.ButtonStyle.danger)
     async def start_hunt(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -4703,88 +4939,19 @@ class HuntStartView(discord.ui.View):
         uid = str(interaction.user.id)
         user = get_hunt_user(uid)
 
-        monster, monster_level = pick_monster(user["level"])
-        win_chance = calc_win_chance(user, monster, monster_level)
+        monster = self.monster
+        monster_level = self.monster_level
 
-        embed = discord.Embed(
-            title="⚔️ 사냥 시작",
-            description=(
-                f"**Lv.{monster_level} {monster['name']}** 등장!\n"
-                f"승률: **{win_chance}%**\n\n"
-                "전투 중."
-            ),
-            color=discord.Color.orange()
+        if monster is None or monster_level is None:
+            monster, monster_level = pick_monster(user["level"], user)
+
+        await run_hunt_battle(
+            interaction,
+            user,
+            monster,
+            monster_level,
+            is_target=self.is_target
         )
-
-        await interaction.response.edit_message(embed=embed, view=self)
-
-        msg = await interaction.original_response()
-
-        await asyncio.sleep(1)
-        embed.description += "\n검을 휘두르는 중."
-        await msg.edit(embed=embed)
-
-        await asyncio.sleep(1)
-        embed.description += "\n운명의 판정 중."
-        await msg.edit(embed=embed)
-
-        await asyncio.sleep(1)
-
-        win = random.randint(1, 100) <= win_chance
-
-        if win:
-            reward = random.randint(80, 160) + monster_level * 20
-            exp = random.randint(30, 60) + monster_level * 5
-
-            add_poker_money(uid, reward)
-            leveled = give_hunt_exp(user, exp)
-
-            result = (
-                f"✅ 승리!\n"
-                f"획득 모라: **{reward:,}모라**\n"
-                f"획득 경험치: **{exp} EXP**\n"
-            )
-
-            if leveled:
-                result += f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**"
-
-            embed.color = discord.Color.green()
-
-        else:
-            user["lives"] -= 1
-
-            result = (
-                f"💀 패배...\n"
-                f"남은 목숨: **{user['lives']}/3**"
-            )
-
-            if user["lives"] <= 0:
-                money = get_poker_money(uid)
-                hospital_fee = int(money * 0.07)
-
-                remove_poker_money(uid, hospital_fee)
-                user["lives"] = 3
-
-                result += (
-                    f"\n\n🏥 병원에서 깨어났다...\n"
-                    f"치료비로 재산의 7%인 **{hospital_fee:,}모라**가 빠져나감."
-                )
-
-            embed.color = discord.Color.red()
-
-        save_data()
-
-        embed.title = "⚔️ 사냥 결과"
-        embed.description = (
-            f"상대: **Lv.{monster_level} {monster['name']}**\n"
-            f"승률: **{win_chance}%**\n\n"
-            f"{result}\n\n"
-            f"현재 레벨: **Lv.{user['level']}**\n"
-            f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
-            f"보유 모라: **{get_poker_money(uid):,}모라**"
-        )
-
-        await msg.edit(embed=embed, view=None)
 
     async def on_timeout(self):
         if self.started:
@@ -4797,6 +4964,7 @@ class HuntStartView(discord.ui.View):
 @bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
 async def hunt(interaction: discord.Interaction):
     uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
     now = datetime.now(timezone.utc)
 
     cooldown_until = hunt_cooldowns.get(uid)
@@ -4809,12 +4977,19 @@ async def hunt(interaction: discord.Interaction):
         )
         return
 
-    view = HuntStartView(uid)
+    monster, monster_level = pick_monster(user["level"], user)
+    win_chance = calc_win_chance(user, monster, monster_level)
+    preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+
+    view = HuntStartView(uid, monster, monster_level)
 
     embed = discord.Embed(
         title="⚔️ 사냥 준비",
         description=(
             f"{interaction.user.mention} 사냥을 시작할까?\n\n"
+            f"예상 상대: **Lv.{monster_level} {monster['name']}**\n"
+            f"예상 승률: **{int(preview_chance)}%**\n"
+            f"마력 폭주 미리보기: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
             "아래 버튼을 눌러야 전투가 시작됨.\n"
             "30초 동안 안 누르면 자동 취소."
         ),
@@ -4824,6 +4999,238 @@ async def hunt(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 
+@bot.tree.command(name="지정사냥", description="마력 200 이상이면 원하는 몬스터와 싸운다", guild=GUILD)
+@app_commands.describe(몬스터="싸우고 싶은 몬스터 이름")
+async def target_hunt(interaction: discord.Interaction, 몬스터: str):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+    now = datetime.now(timezone.utc)
+
+    if get_stat(user, "mag") < 200:
+        await interaction.response.send_message(
+            "❌ 마력 200 이상부터 지정사냥 가능함.",
+            ephemeral=True
+        )
+        return
+
+    cooldown_until = target_hunt_cooldowns.get(uid)
+
+    if cooldown_until and cooldown_until > now:
+        left = cooldown_until - now
+        hours = int(left.total_seconds() // 3600)
+        minutes = int((left.total_seconds() % 3600) // 60)
+
+        await interaction.response.send_message(
+            f"⏳ 지정사냥 쿨타임 중!\n남은 시간: **{hours}시간 {minutes}분**",
+            ephemeral=True
+        )
+        return
+
+    monster = find_monster_by_name(몬스터)
+
+    if monster is None:
+        names = ", ".join(m["name"] for m in MONSTERS)
+        await interaction.response.send_message(
+            f"❌ 그런 몬스터 없음.\n\n가능한 몬스터:\n{names}",
+            ephemeral=True
+        )
+        return
+
+    monster_level = random.randint(monster["min"], monster["max"])
+
+    target_hunt_cooldowns[uid] = now + TARGET_HUNT_COOLDOWN
+    save_data()
+
+    view = HuntStartView(uid, monster, monster_level, is_target=True)
+
+    embed = discord.Embed(
+        title="🎯 지정사냥 준비",
+        description=(
+            f"{interaction.user.mention} 지정사냥을 시작할까?\n\n"
+            f"상대: **Lv.{monster_level} {monster['name']}**\n"
+            f"아래 버튼을 누르면 전투 시작.\n\n"
+            "지정사냥은 24시간 쿨타임임."
+        ),
+        color=discord.Color.purple()
+    )
+
+    await interaction.response.send_message(embed=embed, view=view)
+
+
+@bot.tree.command(name="스탯창", description="내 스탯을 확인한다", guild=GUILD)
+async def stat_window(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    strength = get_stat(user, "str")
+    dex = get_stat(user, "dex")
+    intelligence = get_stat(user, "int")
+    mag = get_stat(user, "mag")
+    vit = get_stat(user, "vit")
+
+    str_bonus = int(strength * 0.1)
+    dex_bonus = dex // 10
+    int_bonus = int(intelligence * 0.1)
+    mag_proc = min(50, mag * 0.1)
+    vit_win_bonus = vit // 10
+    vit_save = min(60, vit * 0.2)
+    vit_hospital_discount = (vit // 50) * 0.1
+
+    job = user["job"] if user["job"] else "없음"
+
+    embed = discord.Embed(
+        title=f"📊 {interaction.user.display_name}의 스탯창",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(
+        name="기본 정보",
+        value=(
+            f"직업: **{job}**\n"
+            f"레벨: **Lv.{user['level']}**\n"
+            f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
+            f"목숨: **{user['lives']}/3**\n"
+            f"남은 스탯 포인트: **{user['stat_point']}**"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="스탯",
+        value=(
+            f"💪 힘: **{strength}** / 승률 +{str_bonus}%\n"
+            f"🏹 민첩: **{dex}** / 승률 +{dex_bonus}% / 약한 몹 등장 증가\n"
+            f"🧠 지능: **{intelligence}** / EXP, 모라 +{int_bonus}%\n"
+            f"✨ 마력: **{mag}** / 승률 2배 확률 {mag_proc:.1f}%\n"
+            f"❤️ 체력: **{vit}** / 승률 +{vit_win_bonus}% / 목숨 보호 {vit_save:.1f}% / 병원비 -{vit_hospital_discount:.1f}%"
+        ),
+        inline=False
+    )
+
+    embed.add_field(
+        name="장비",
+        value=(
+            f"무기: **{user['weapon']}** `+{WEAPONS[user['weapon']]['bonus']}%`\n"
+            f"갑옷: **{user['armor']}** `+{ARMORS[user['armor']]['bonus']}%`\n"
+            f"모라: **{get_poker_money(uid):,}모라**"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="스탯찍기", description="스탯 포인트를 사용해 스탯을 올린다", guild=GUILD)
+@app_commands.describe(스탯="올릴 스탯", 수치="투자할 포인트")
+async def add_stat(interaction: discord.Interaction, 스탯: str, 수치: int = 1):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if 스탯 not in STAT_NAMES:
+        await interaction.response.send_message(
+            "❌ 없는 스탯임. 가능: 힘, 민첩, 지능, 마력, 체력",
+            ephemeral=True
+        )
+        return
+
+    if 수치 <= 0:
+        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
+        return
+
+    if user["stat_point"] < 수치:
+        await interaction.response.send_message(
+            f"❌ 스탯 포인트 부족!\n보유: **{user['stat_point']}**",
+            ephemeral=True
+        )
+        return
+
+    stat_key = STAT_NAMES[스탯]
+    total_gain = 0
+    bonus_count = 0
+
+    user["stat_point"] -= 수치
+
+    for _ in range(수치):
+        gain = 1
+
+        if user["job"] in JOBS:
+            if stat_key in JOBS[user["job"]]["stats"]:
+                if random.random() < 0.5:
+                    gain += 1
+                    bonus_count += 1
+
+        user[stat_key] += gain
+        total_gain += gain
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ **{스탯}**에 스탯 포인트 **{수치}** 사용!\n"
+        f"총 증가량: **+{total_gain}**\n"
+        f"직업 보너스 발동: **{bonus_count}회**\n"
+        f"현재 {스탯}: **{user[stat_key]}**\n"
+        f"남은 스탯 포인트: **{user['stat_point']}**"
+    )
+
+
+@bot.tree.command(name="직업", description="21레벨부터 직업을 선택한다", guild=GUILD)
+@app_commands.describe(이름="선택할 직업")
+async def choose_job(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if 이름 is None:
+        embed = discord.Embed(
+            title="🧭 직업 목록",
+            description="21레벨부터 직업 선택 가능.",
+            color=discord.Color.gold()
+        )
+
+        for job_name, info in JOBS.items():
+            stats = ", ".join(STAT_KR[s] for s in info["stats"])
+            embed.add_field(
+                name=job_name,
+                value=f"특화 스탯: **{stats}**\n{info['desc']}",
+                inline=False
+            )
+
+        await interaction.response.send_message(embed=embed)
+        return
+
+    if user["level"] < 21:
+        await interaction.response.send_message(
+            "❌ 21레벨부터 직업 선택 가능함.",
+            ephemeral=True
+        )
+        return
+
+    if user["job"] is not None:
+        await interaction.response.send_message(
+            f"❌ 이미 직업이 있음: **{user['job']}**",
+            ephemeral=True
+        )
+        return
+
+    if 이름 not in JOBS:
+        await interaction.response.send_message(
+            "❌ 없는 직업임. 가능: 궁수, 전사, 도적, 법사",
+            ephemeral=True
+        )
+        return
+
+    user["job"] = 이름
+    save_data()
+
+    stats = ", ".join(STAT_KR[s] for s in JOBS[이름]["stats"])
+
+    await interaction.response.send_message(
+        f"✅ 직업 선택 완료!\n"
+        f"직업: **{이름}**\n"
+        f"특화 스탯: **{stats}**\n\n"
+        f"이제 특화 스탯을 찍으면 50% 확률로 +2 오름."
+    )
+
+
 @bot.tree.command(name="무기", description="무기를 구매하거나 확인한다", guild=GUILD)
 @app_commands.describe(이름="구매할 무기 이름")
 async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
@@ -4831,16 +5238,21 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
     user = get_hunt_user(uid)
 
     if 이름 is None:
+        embed = discord.Embed(
+            title="🗡️ 무기 상점",
+            color=discord.Color.dark_gold()
+        )
+
         lines = []
+
         for name, info in WEAPONS.items():
             owned = " ✅ 장착중" if user["weapon"] == name else ""
             lines.append(
                 f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
             )
 
-        await interaction.response.send_message(
-            "🗡️ **무기 상점**\n" + "\n".join(lines)
-        )
+        embed.description = "\n".join(lines)
+        await interaction.response.send_message(embed=embed)
         return
 
     if 이름 not in WEAPONS:
@@ -4874,16 +5286,21 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
     user = get_hunt_user(uid)
 
     if 이름 is None:
+        embed = discord.Embed(
+            title="🛡️ 갑옷 상점",
+            color=discord.Color.dark_teal()
+        )
+
         lines = []
+
         for name, info in ARMORS.items():
             owned = " ✅ 장착중" if user["armor"] == name else ""
             lines.append(
                 f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
             )
 
-        await interaction.response.send_message(
-            "🛡️ **갑옷 상점**\n" + "\n".join(lines)
-        )
+        embed.description = "\n".join(lines)
+        await interaction.response.send_message(embed=embed)
         return
 
     if 이름 not in ARMORS:
@@ -4915,15 +5332,28 @@ async def hunt_status(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     user = get_hunt_user(uid)
 
-    await interaction.response.send_message(
-        f"📜 **{interaction.user.display_name}의 사냥 정보**\n"
-        f"레벨: **Lv.{user['level']}**\n"
-        f"EXP: **{user['exp']}/{user['level'] * 100}**\n"
-        f"목숨: **{user['lives']}/3**\n"
-        f"무기: **{user['weapon']}**\n"
-        f"갑옷: **{user['armor']}**\n"
-        f"모라: **{get_poker_money(uid):,}모라**"
+    embed = discord.Embed(
+        title=f"📜 {interaction.user.display_name}의 사냥 정보",
+        color=discord.Color.green()
     )
+
+    embed.add_field(
+        name="정보",
+        value=(
+            f"레벨: **Lv.{user['level']}**\n"
+            f"EXP: **{user['exp']}/{get_required_exp(user['level'])}**\n"
+            f"목숨: **{user['lives']}/3**\n"
+            f"직업: **{user['job'] or '없음'}**\n"
+            f"스탯 포인트: **{user['stat_point']}**\n"
+            f"무기: **{user['weapon']}**\n"
+            f"갑옷: **{user['armor']}**\n"
+            f"모라: **{get_poker_money(uid):,}모라**"
+        ),
+        inline=False
+    )
+
+    await interaction.response.send_message(embed=embed)
+    
     
 @bot.event
 async def on_ready():
