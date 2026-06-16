@@ -4771,7 +4771,7 @@ async def create_stat_image(member, user):
             fill=255
         )
 
-        bg.paste(avatar, (95, 175), mask)
+        bg.paste(avatar, (95, 145), mask)
 
     except Exception as e:
         print("프사 로드 실패:", e)
@@ -4779,17 +4779,9 @@ async def create_stat_image(member, user):
     # =====================
     # 왼쪽 기본 정보
     # =====================
-    draw.text((390, 135), "이름", font=font_info, fill=cyan)
-
-    name_font = fit_font(
-        draw,
-        member.display_name,
-        170,   # 더 좁게 잡기
-        30
-    )
 
     draw.text(
-        (455, 135),
+        (95, 410),
         member.display_name,
         font=name_font,
         fill=white
