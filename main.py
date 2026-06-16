@@ -5641,7 +5641,100 @@ async def hunt_status(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(embed=embed)
-    
+
+@bot.tree.command(
+    name="스킬포인트",
+    description="유저에게 스탯 포인트를 지급한다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="지급할 대상",
+    수치="지급할 스탯 포인트"
+)
+async def give_stat_point(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    uid = str(유저.id)
+    user = get_hunt_user(uid)
+
+    user["stat_point"] += 수치
+
+    if user["stat_point"] < 0:
+        user["stat_point"] = 0
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention}의 스탯 포인트가 **{수치:+}P** 변경됨!\n"
+        f"현재 스탯 포인트: **{user['stat_point']}P**"
+    )
+
+@bot.tree.command(
+    name="레벨",
+    description="관리자 전용: 유저의 사냥 레벨을 올린다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="레벨을 올릴 유저",
+    수치="올릴 레벨 수"
+)
+async def add_hunt_level(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    if 수치 <= 0:
+        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
+        return
+
+    user = get_hunt_user(str(유저.id))
+
+    user["level"] += 수치
+    user["stat_point"] += 수치 * 5
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention} 레벨 **+{수치}** 완료!\n"
+        f"현재 레벨: **Lv.{user['level']}**\n"
+        f"스탯 포인트: **{user['stat_point']}P**"
+    )
+
+
+@bot.tree.command(
+    name="레벨차감",
+    description="관리자 전용: 유저의 사냥 레벨을 낮춘다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="레벨을 낮출 유저",
+    수치="차감할 레벨 수"
+)
+async def remove_hunt_level(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    if 수치 <= 0:
+        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
+        return
+
+    user = get_hunt_user(str(유저.id))
+
+    user["level"] = max(1, user["level"] - 수치)
+    user["exp"] = 0
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention} 레벨 **-{수치}** 완료!\n"
+        f"현재 레벨: **Lv.{user['level']}**"
+    )
     
 @bot.event
 async def on_ready():
