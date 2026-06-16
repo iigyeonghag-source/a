@@ -4761,10 +4761,15 @@ async def create_stat_image(member, user):
         avatar_bytes = await member.display_avatar.with_size(256).read()
 
         avatar = Image.open(BytesIO(avatar_bytes)).convert("RGBA")
-        avatar = ImageOps.fit(avatar, (220, 220))
+        avatar = ImageOps.fit(avatar, (220, 255))
 
-        mask = Image.new("L", (220, 220), 0)
-        mask_draw = ImageDraw.Draw(mask)
+        mask = Image.new("L", (220, 255), 0)
+
+        mask_draw.rounded_rectangle(
+            (0, 0, 220, 255),
+            radius=20,
+            fill=255
+        )
 
         mask_draw.rounded_rectangle(
             (0, 0, 220, 220),
@@ -4772,7 +4777,7 @@ async def create_stat_image(member, user):
             fill=255
         )
 
-        bg.paste(avatar, (95, 195), mask)
+        bg.paste(avatar, (95, 175), mask)
 
     except Exception as e:
         print("프사 로드 실패:", e)
@@ -4785,8 +4790,8 @@ async def create_stat_image(member, user):
     name_font = fit_font(
         draw,
         member.display_name,
-        220,  # 이름 칸 너비
-        32    # 최대 글자 크기
+        170,   # 더 좁게 잡기
+        30
     )
 
     draw.text(
@@ -4838,9 +4843,18 @@ async def create_stat_image(member, user):
 
     for name, eng, value, x, y in stats:
         draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
-        draw.text((1445, y - 5), str(value), font=font_stat_num, fill=white)
 
-        # 배경에 있는 바 위치에 맞춰 채우기
+        value_text = str(value)
+        bbox = draw.textbbox((0, 0), value_text, font=font_stat_num)
+        value_width = bbox[2] - bbox[0]
+
+        draw.text(
+            (1430 - value_width, y - 8),
+            value_text,
+            font=font_stat_num,
+            fill=white
+        )
+
         draw_bar(draw, x, y + 72, 565, 20, value, 100)
 
     # =====================
