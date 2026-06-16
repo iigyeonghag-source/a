@@ -4737,11 +4737,10 @@ async def create_stat_image(member, user):
     cyan = (130, 235, 255, 255)
 
     font_name = fit_text(draw, member.display_name, FONT_PATH, 180, 25)
-    font_info = get_font(23)
+    font_info = get_font(21)
     font_stat_name = get_font(27)
     font_stat_num = get_font(36)
-    font_small = get_font(20)
-    font_desc = get_font(22)
+    font_small = get_font(21)
 
     level = user["level"]
     exp = user["exp"]
@@ -4814,26 +4813,56 @@ async def create_stat_image(member, user):
     # EXP 바
     draw_bar(draw, 85, 778, 485, 25, exp, need_exp)
 
-    # =====================
-    # 프로필 설명
-    # =====================
-    profile_desc = user.get("profile_desc", "아직 등록된 프로필 설명이 없습니다.")
-    lines = wrap_text(draw, profile_desc, font_desc, 470)
+    str_bonus = int(strength * 0.1)
+    dex_bonus = dex // 10
+    int_bonus = int(intelligence * 0.1)
+    mag_proc = min(50, mag * 0.1)
+    vit_save = min(60, vit * 0.2)
 
-    y = 540
-    for line in lines[:6]:
-        draw.text((100, y), line, font=font_desc, fill=white)
-        y += 34
+    draw.text(
+        (100, 540),
+        f"💪 힘: 승률 +{str_bonus}%",
+        font=font_small,
+        fill=white
+    )
 
+    draw.text(
+        (100, 580),
+        f"🏹 민첩: 승률 +{dex_bonus}%",
+        font=font_small,
+        fill=white
+    )
+
+    draw.text(
+        (100, 620),
+        f"🧠 지능: EXP·모라 +{int_bonus}%",
+        font=font_small,
+        fill=white
+    )
+    
+    draw.text(
+        (100, 660),
+        f"✨ 마력: 2배 확률 {mag_proc:.1f}%",
+        font=font_small,
+        fill=white
+    )
+
+    draw.text(
+        (100, 700),
+        f"❤️ 체력: 목숨 보호 {vit_save:.1f}%",
+        font=font_small,
+        fill=white
+    )
+    
     # =====================
     # 오른쪽 스탯
     # =====================
     stats = [
         ("힘", "STR", strength, 800, 145),
-        ("민첩", "DEX", dex, 800, 285),
-        ("지능", "INT", intelligence, 800, 425),
-        ("마력", "MAG", mag, 800, 565),
-        ("체력", "VIT", vit, 800, 705),
+        ("민첩", "DEX", dex, 800, 145),
+        ("지능", "INT", intelligence, 800, 145),
+        ("마력", "MAG", mag, 800, 145),
+        ("체력", "VIT", vit, 800, 145),
     ]
 
     for name, eng, value, x, y in stats:
@@ -4844,36 +4873,13 @@ async def create_stat_image(member, user):
         value_width = bbox[2] - bbox[0]
 
         draw.text(
-            (1430 - value_width, y - 8),
+            (1000 - value_width, y - 8),
             value_text,
             font=font_stat_num,
             fill=white
         )
 
         draw_bar(draw, x, y + 72, 565, 20, value, 100)
-
-    # =====================
-    # 하단 효과 정보
-    # =====================
-    str_bonus = int(strength * 0.1)
-    dex_bonus = dex // 10
-    int_bonus = int(intelligence * 0.1)
-    mag_proc = min(50, mag * 0.1)
-    vit_save = min(60, vit * 0.2)
-
-    draw.text((705, 885), f"힘 승률 +{str_bonus}%", font=font_small, fill=cyan)
-    draw.text((705, 918), f"민첩 승률 +{dex_bonus}%", font=font_small, fill=cyan)
-
-    draw.text((970, 885), f"지능 보상 +{int_bonus}%", font=font_small, fill=cyan)
-    draw.text((970, 918), f"마력 2배 {mag_proc:.1f}%", font=font_small, fill=cyan)
-
-    draw.text((1235, 885), f"체력 보호 {vit_save:.1f}%", font=font_small, fill=cyan)
-
-    buffer = BytesIO()
-    bg.save(buffer, format="PNG")
-    buffer.seek(0)
-
-    return buffer
     
 
 def get_hunt_user(uid):
