@@ -4761,18 +4761,13 @@ async def create_stat_image(member, user):
         avatar_bytes = await member.display_avatar.with_size(256).read()
 
         avatar = Image.open(BytesIO(avatar_bytes)).convert("RGBA")
-        avatar = ImageOps.fit(avatar, (220, 255))
+        avatar = ImageOps.fit(avatar, (220, 255), centering=(0.5, 0.5))
 
         mask = Image.new("L", (220, 255), 0)
+        mask_draw = ImageDraw.Draw(mask)
 
         mask_draw.rounded_rectangle(
             (0, 0, 220, 255),
-            radius=20,
-            fill=255
-        )
-
-        mask_draw.rounded_rectangle(
-            (0, 0, 220, 220),
             radius=20,
             fill=255
         )
