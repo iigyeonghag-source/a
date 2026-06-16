@@ -4671,6 +4671,22 @@ def get_font(size):
     except:
         return ImageFont.load_default()
 
+def fit_font(draw, text, max_width, start=36):
+    for size in range(start, 14, -2):
+        font = get_font(size)
+
+        bbox = draw.textbbox(
+            (0, 0),
+            text,
+            font=font
+        )
+
+        width = bbox[2] - bbox[0]
+
+        if width <= max_width:
+            return font
+
+    return get_font(14)
 
 def draw_bar(draw, x, y, w, h, value, max_value):
     ratio = 0 if max_value <= 0 else min(1, value / max_value)
@@ -4754,15 +4770,28 @@ async def create_stat_image(member, user):
             fill=255
         )
 
-bg.paste(avatar, (95, 195), mask)
+    bg.paste(avatar, (95, 195), mask)
     except:
         pass
 
     # =====================
     # 왼쪽 기본 정보
     # =====================
-    draw.text((390, 135), f"이름", font=font_info, fill=cyan)
-    draw.text((455, 135), member.display_name, font=font_name, fill=white)
+    draw.text((390, 135), "이름", font=font_info, fill=cyan)
+
+    name_font = fit_font(
+        draw,
+        member.display_name,
+        220,  # 이름 칸 너비
+        32    # 최대 글자 크기
+    )
+
+    draw.text(
+        (455, 135),
+        member.display_name,
+        font=name_font,
+        fill=white
+    )
 
     draw.text((390, 195), f"직업", font=font_info, fill=cyan)
     draw.text((455, 195), job, font=font_info, fill=white)
