@@ -4818,11 +4818,11 @@ async def create_stat_image(member, user):
 
     draw.text((100, 550), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
 
-    draw.text((100, 585), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
+    draw.text((100, 590), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
 
-    draw.text((100, 615), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
+    draw.text((100, 630), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
 
-    draw.text((100, 640), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
+    draw.text((100, 670), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
     
     # =====================
     # 오른쪽 스탯
@@ -4830,9 +4830,9 @@ async def create_stat_image(member, user):
     stats = [
         ("힘", "STR", strength, 800, 145),
         ("민첩", "DEX", dex, 800, 285),
-        ("지능", "INT", intelligence, 800, 425),
-        ("마력", "MAG", mag, 800, 565),
-        ("체력", "VIT", vit, 800, 705),
+        ("지능", "INT", intelligence, 800, 420),
+        ("마력", "MAG", mag, 800, 555),
+        ("체력", "VIT", vit, 800, 685),
     ]
     for name, eng, value, x, y in stats:
         draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
