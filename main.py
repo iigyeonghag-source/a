@@ -4780,10 +4780,13 @@ async def create_stat_image(member, user):
     # 왼쪽 기본 정보
     # =====================
 
+    name_box = draw.textbbox((0, 0), member.display_name, font=font_name)
+    name_width = name_box[2] - name_box[0]
+    
     draw.text(
-        (95, 410),
+        (205 - name_width // 2, 410),
         member.display_name,
-        font=name_font,
+        font=font_name,
         fill=white
     )
 
