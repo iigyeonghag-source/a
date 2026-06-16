@@ -5341,12 +5341,23 @@ def make_stat_embed(interaction, user):
 
     return embed
 
-class StatView(discord.ui.View):
-    def __init__(self, user_id):
-        super().__init__(timeout=60)
+class StatAmountModal(discord.ui.Modal):
+    def __init__(self, user_id, stat_key):
+        super().__init__(title=f"{STAT_KR[stat_key]} 스탯 찍기")
         self.user_id = str(user_id)
+        self.stat_key = stat_key
 
-    async def add_stat(self, interaction: discord.Interaction, stat_key: str):
+        self.amount = discord.ui.TextInput(
+            label="찍을 스탯 포인트 수",
+            placeholder="예: 1, 5, 10",
+            min_length=1,
+            max_length=5,
+            required=True
+        )
+
+        self.add_item(self.amount)
+
+    async def on_submit(self, interaction: discord.Interaction):
         if str(interaction.user.id) != self.user_id:
             await interaction.response.send_message(
                 "❌ 니 스탯창 아님.",
@@ -5357,6 +5368,90 @@ class StatView(discord.ui.View):
         uid = str(interaction.user.id)
         user = get_hunt_user(uid)
 
+        try:
+            amount = int(str(self.amount.value))
+        except ValueError:
+            await interaction.response.send_message(
+                "❌ 숫자만 입력해줘.",
+                ephemeral=True
+            )
+            return
+
+        if amount <= 0:
+            await interaction.response.send_message(
+                "❌ 1 이상만 가능.",
+                ephemeral=True
+            )
+            return
+
+        if user["stat_point"] < amount:
+            await interaction.response.send_message(
+                f"❌ 스탯 포인트 부족!\n"
+                f"보유: **{user['stat_point']}P**",
+                ephemeral=True
+            )
+            return
+
+        total_gain = 0
+        bonus_count = 0
+
+        for _ in range(amount):
+            gain = 1
+
+            if user["job"] in JOBS:
+                if self.stat_key in JOBS[user["job"]]["stats"]:
+                    if random.random() < 0.5:
+                        gain += 1
+                        bonus_count += 1
+
+            user[self.stat_key] += gain
+            total_gain += gain
+
+        user["stat_point"] -= amount
+
+        save_data()
+
+        image = await create_stat_image(interaction.user, user)
+        file = discord.File(image, filename="stat.png")
+
+        embed = discord.Embed(
+            description=(
+                f"✅ **{STAT_KR[self.stat_key]}**에 **{amount}P** 사용!\n"
+                f"총 증가량: **+{total_gain}**\n"
+                f"직업 보너스 발동: **{bonus_count}회**"
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_image(url="attachment://stat.png")
+
+        kwargs = {
+            "attachments": [file],
+            "embed": embed
+        }
+
+        if user["stat_point"] > 0:
+            kwargs["view"] = StatView(uid)
+        else:
+            kwargs["view"] = discord.ui.View()
+
+        await interaction.response.edit_message(**kwargs)
+
+
+class StatView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=120)
+        self.user_id = str(user_id)
+
+    async def open_modal(self, interaction: discord.Interaction, stat_key: str):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message(
+                "❌ 니 스탯창 아님.",
+                ephemeral=True
+            )
+            return
+
+        user = get_hunt_user(str(interaction.user.id))
+
         if user["stat_point"] <= 0:
             await interaction.response.send_message(
                 "❌ 남은 스탯 포인트 없음.",
@@ -5364,102 +5459,42 @@ class StatView(discord.ui.View):
             )
             return
 
-        gain = 1
-        bonus = False
-
-        if user["job"] in JOBS:
-            if stat_key in JOBS[user["job"]]["stats"]:
-                if random.random() < 0.5:
-                    gain += 1
-                    bonus = True
-
-        user[stat_key] += gain
-        user["stat_point"] -= 1
-
-        save_data()
-
-        new_view = StatView(uid) if user["stat_point"] > 0 else None
-
-        image = await create_stat_image(interaction.user, user)
-        file = discord.File(image, filename="stat.png")
-
-        embed = discord.Embed(
-            description=(
-                f"✅ **{STAT_KR[stat_key]}** +{gain}!"
-                + ("\n🎲 직업 보너스 발동! +2 증가함." if bonus else "")
-            ),
-            color=discord.Color.blue()
-        )
-        embed.set_image(url="attachment://stat.png")
-
-        await interaction.response.edit_message(
-            attachments=[file],
-            embed=embed,
-            view=new_view
+        await interaction.response.send_modal(
+            StatAmountModal(self.user_id, stat_key)
         )
 
     @discord.ui.button(label="+ 힘", style=discord.ButtonStyle.primary)
-    async def add_str(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.add_stat(interaction, "str")
+    async def add_str(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_modal(interaction, "str")
 
     @discord.ui.button(label="+ 민첩", style=discord.ButtonStyle.primary)
-    async def add_dex(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.add_stat(interaction, "dex")
+    async def add_dex(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_modal(interaction, "dex")
 
     @discord.ui.button(label="+ 지능", style=discord.ButtonStyle.primary)
-    async def add_int(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.add_stat(interaction, "int")
+    async def add_int(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_modal(interaction, "int")
 
     @discord.ui.button(label="+ 마력", style=discord.ButtonStyle.primary)
-    async def add_mag(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.add_stat(interaction, "mag")
+    async def add_mag(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_modal(interaction, "mag")
 
     @discord.ui.button(label="+ 체력", style=discord.ButtonStyle.success)
-    async def add_vit(
-        self,
-        interaction: discord.Interaction,
-        button: discord.ui.Button
-    ):
-        await self.add_stat(interaction, "vit")
+    async def add_vit(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.open_modal(interaction, "vit")
 
-@bot.tree.command(name="스탯창", description="내 스탯을 확인하고 스탯을 찍는다", guild=GUILD)
-async def stat_window(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
-    
-    image = await create_stat_image(interaction.user, user)
-    file = discord.File(image, filename="stat.png")
+    @discord.ui.button(label="닫기", style=discord.ButtonStyle.danger)
+    async def close_stat(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message(
+                "❌ 니 스탯창 아님.",
+                ephemeral=True
+            )
+            return
 
-    embed = discord.Embed(color=discord.Color.blue())
-    embed.set_image(url="attachment://stat.png")
-
-    kwargs = {
-        "file": file,
-        "embed": embed
-    }
-
-    if user["stat_point"] > 0:
-        kwargs["view"] = StatView(uid)
-
-    await interaction.response.send_message(
-        **kwargs
-    )
+        await interaction.response.edit_message(
+            view=discord.ui.View()
+        )
     
 @bot.tree.command(name="직업", description="21레벨부터 직업을 선택한다", guild=GUILD)
 @app_commands.describe(이름="선택할 직업")
