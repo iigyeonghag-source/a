@@ -117,6 +117,10 @@ hunt_users = {}
 
 load_data()
 
+for uid, user in hunt_users.items():
+    if user.get("level", 1) == 1 and user.get("stat_point", 0) == 0:
+        user["stat_point"] = 3
+        
 KST = timezone(timedelta(hours=9))
 
 def get_favor(user_id):
@@ -4655,7 +4659,7 @@ def get_hunt_user(uid):
         "weapon": "무인검",
         "armor": "모험가 세트",
         "lives": 3,
-        "stat_point": 0,
+        "stat_point": 3,
         "job": None,
         "str": 0,
         "dex": 0,
