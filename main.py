@@ -4830,9 +4830,9 @@ async def create_stat_image(member, user):
     stats = [
         ("힘", "STR", strength, 800, 145),
         ("민첩", "DEX", dex, 800, 285),
-        ("지능", "INT", intelligence, 800, 420),
-        ("마력", "MAG", mag, 800, 555),
-        ("체력", "VIT", vit, 800, 685),
+        ("지능", "INT", intelligence, 800, 417),
+        ("마력", "MAG", mag, 800, 550),
+        ("체력", "VIT", vit, 800, 680),
     ]
     for name, eng, value, x, y in stats:
         draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
