@@ -10,6 +10,8 @@ from discord import app_commands
 import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
+from PIL import Image, ImageDraw, ImageFont
+from io import BytesIO
 
 load_dotenv()
 
@@ -4641,6 +4643,93 @@ MONSTERS = [
 ]
 
 
+STAT_BG_PATH = "stat_bg.png"
+
+def get_font(size):
+    try:
+        return ImageFont.truetype("NanumGothicBold.ttf", size)
+    except:
+        return ImageFont.load_default()
+
+
+def draw_bar(draw, x, y, w, h, value, max_value):
+    ratio = 0 if max_value <= 0 else min(1, value / max_value)
+    fill_w = int(w * ratio)
+
+    draw.rounded_rectangle((x, y, x + w, y + h), radius=6, outline=(0, 180, 255), width=2)
+    if fill_w > 0:
+        draw.rounded_rectangle((x, y, x + fill_w, y + h), radius=6, fill=(0, 200, 255))
+
+
+def create_stat_image(member, user):
+    bg = Image.open(STAT_BG_PATH).convert("RGBA")
+    draw = ImageDraw.Draw(bg)
+
+    font_big = get_font(52)
+    font_mid = get_font(36)
+    font_small = get_font(28)
+
+    white = (255, 255, 255, 255)
+    cyan = (120, 230, 255, 255)
+
+    level = user["level"]
+    exp = user["exp"]
+    need_exp = get_required_exp(level)
+    job = user["job"] or "없음"
+
+    strength = get_stat(user, "str")
+    dex = get_stat(user, "dex")
+    intelligence = get_stat(user, "int")
+    mag = get_stat(user, "mag")
+    vit = get_stat(user, "vit")
+
+    # 왼쪽 기본 정보
+    draw.text((380, 135), f"이름  {member.display_name}", font=font_mid, fill=white)
+    draw.text((380, 190), f"직업  {job}", font=font_mid, fill=white)
+    draw.text((380, 245), f"레벨  Lv.{level}", font=font_mid, fill=white)
+    draw.text((380, 300), f"EXP  {exp} / {need_exp}", font=font_mid, fill=white)
+    draw.text((380, 395), f"목숨  {user['lives']} / 3", font=font_mid, fill=white)
+    draw.text((380, 450), f"스탯 포인트  {user['stat_point']}", font=font_mid, fill=white)
+
+    # EXP 바
+    draw_bar(draw, 85, 775, 485, 25, exp, need_exp)
+
+    # 오른쪽 스탯 정보
+    stats = [
+        ("힘", "STR", strength, 790, 145),
+        ("민첩", "DEX", dex, 790, 285),
+        ("지능", "INT", intelligence, 790, 425),
+        ("마력", "MAG", mag, 790, 565),
+        ("체력", "VIT", vit, 790, 705),
+    ]
+
+    for name, eng, value, x, y in stats:
+        draw.text((x, y), f"{name} ({eng})", font=font_big, fill=white)
+        draw.text((1410, y), str(value), font=font_big, fill=white)
+
+        # 스탯 바: 100 기준으로 채움
+        draw_bar(draw, x, y + 70, 560, 22, value, 100)
+
+    # 아래쪽 보너스 정보
+    str_bonus = int(strength * 0.1)
+    dex_bonus = dex // 10
+    int_bonus = int(intelligence * 0.1)
+    mag_proc = min(50, mag * 0.1)
+    vit_save = min(60, vit * 0.2)
+
+    draw.text((705, 865), f"힘 승률 +{str_bonus}%", font=font_small, fill=cyan)
+    draw.text((705, 900), f"민첩 승률 +{dex_bonus}%", font=font_small, fill=cyan)
+    draw.text((965, 865), f"지능 보상 +{int_bonus}%", font=font_small, fill=cyan)
+    draw.text((965, 900), f"마력 2배 확률 {mag_proc:.1f}%", font=font_small, fill=cyan)
+    draw.text((1230, 865), f"체력 목숨 보호 {vit_save:.1f}%", font=font_small, fill=cyan)
+
+    buffer = BytesIO()
+    bg.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    return buffer
+    
+
 def get_hunt_user(uid):
     uid = str(uid)
 
@@ -5056,12 +5145,7 @@ async def target_hunt(interaction: discord.Interaction, 몬스터: str):
 
     await interaction.response.send_message(embed=embed, view=view)
 
-
-@bot.tree.command(name="스탯창", description="내 스탯을 확인한다", guild=GUILD)
-async def stat_window(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
-
+def make_stat_embed(interaction, user):
     strength = get_stat(user, "str")
     dex = get_stat(user, "dex")
     intelligence = get_stat(user, "int")
@@ -5107,72 +5191,105 @@ async def stat_window(interaction: discord.Interaction):
         inline=False
     )
 
-    embed.add_field(
-        name="장비",
-        value=(
-            f"무기: **{user['weapon']}** `+{WEAPONS[user['weapon']]['bonus']}%`\n"
-            f"갑옷: **{user['armor']}** `+{ARMORS[user['armor']]['bonus']}%`\n"
-            f"모라: **{get_poker_money(uid):,}모라**"
-        ),
-        inline=False
-    )
+    return embed
 
-    await interaction.response.send_message(embed=embed)
+class StatView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=60)
+        self.user_id = str(user_id)
 
+    async def add_stat(self, interaction: discord.Interaction, stat_key: str):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message(
+                "❌ 니 스탯창 아님.",
+                ephemeral=True
+            )
+            return
 
-@bot.tree.command(name="스탯찍기", description="스탯 포인트를 사용해 스탯을 올린다", guild=GUILD)
-@app_commands.describe(스탯="올릴 스탯", 수치="투자할 포인트")
-async def add_stat(interaction: discord.Interaction, 스탯: str, 수치: int = 1):
-    uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
+        uid = str(interaction.user.id)
+        user = get_hunt_user(uid)
 
-    if 스탯 not in STAT_NAMES:
-        await interaction.response.send_message(
-            "❌ 없는 스탯임. 가능: 힘, 민첩, 지능, 마력, 체력",
-            ephemeral=True
-        )
-        return
+        if user["stat_point"] <= 0:
+            await interaction.response.send_message(
+                "❌ 남은 스탯 포인트 없음.",
+                ephemeral=True
+            )
+            return
 
-    if 수치 <= 0:
-        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
-        return
-
-    if user["stat_point"] < 수치:
-        await interaction.response.send_message(
-            f"❌ 스탯 포인트 부족!\n보유: **{user['stat_point']}**",
-            ephemeral=True
-        )
-        return
-
-    stat_key = STAT_NAMES[스탯]
-    total_gain = 0
-    bonus_count = 0
-
-    user["stat_point"] -= 수치
-
-    for _ in range(수치):
         gain = 1
+        bonus = False
 
         if user["job"] in JOBS:
             if stat_key in JOBS[user["job"]]["stats"]:
                 if random.random() < 0.5:
                     gain += 1
-                    bonus_count += 1
+                    bonus = True
 
         user[stat_key] += gain
-        total_gain += gain
+        user["stat_point"] -= 1
 
-    save_data()
+        save_data()
 
-    await interaction.response.send_message(
-        f"✅ **{스탯}**에 스탯 포인트 **{수치}** 사용!\n"
-        f"총 증가량: **+{total_gain}**\n"
-        f"직업 보너스 발동: **{bonus_count}회**\n"
-        f"현재 {스탯}: **{user[stat_key]}**\n"
-        f"남은 스탯 포인트: **{user['stat_point']}**"
-    )
+        new_view = StatView(uid) if user["stat_point"] > 0 else None
 
+        image = create_stat_image(interaction.user, user)
+        file = discord.File(image, filename="stat.png")
 
+        embed = discord.Embed(
+            description=(
+                f"✅ **{STAT_KR[stat_key]}** +{gain}!"
+                + ("\n🎲 직업 보너스 발동! +2 증가함." if bonus else "")
+            ),
+            color=discord.Color.blue()
+        )
+        embed.set_image(url="attachment://stat.png")
+
+        await interaction.response.edit_message(
+            attachments=[file],
+            embed=embed,
+            view=new_view
+        )
+
+    @discord.ui.button(label="+ 힘", style=discord.ButtonStyle.primary)
+    async def add_str(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await self.add_stat(interaction, "str")
+
+    @discord.ui.button(label="+ 민첩", style=discord.ButtonStyle.primary)
+    async def add_dex(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await self.add_stat(interaction, "dex")
+
+    @discord.ui.button(label="+ 지능", style=discord.ButtonStyle.primary)
+    async def add_int(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await self.add_stat(interaction, "int")
+
+    @discord.ui.button(label="+ 마력", style=discord.ButtonStyle.primary)
+    async def add_mag(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await self.add_stat(interaction, "mag")
+
+    @discord.ui.button(label="+ 체력", style=discord.ButtonStyle.success)
+    async def add_vit(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await self.add_stat(interaction, "vit")
+        
 @bot.tree.command(name="직업", description="21레벨부터 직업을 선택한다", guild=GUILD)
 @app_commands.describe(이름="선택할 직업")
 async def choose_job(interaction: discord.Interaction, 이름: str = None):
