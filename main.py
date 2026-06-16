@@ -4795,11 +4795,11 @@ async def create_stat_image(member, user):
         fill=white
     )
 
-    draw.text((390, 195), f"직업", font=font_info, fill=cyan)
-    draw.text((455, 195), job, font=font_info, fill=white)
+    draw.text((390, 205), f"직업", font=font_info, fill=cyan)
+    draw.text((455, 205), job, font=font_info, fill=white)
 
-    draw.text((390, 255), f"레벨", font=font_info, fill=cyan)
-    draw.text((455, 255), f"Lv.{level}", font=font_info, fill=white)
+    draw.text((390, 240), f"레벨", font=font_info, fill=cyan)
+    draw.text((455, 240), f"Lv.{level}", font=font_info, fill=white)
 
     draw.text((390, 315), f"EXP", font=font_info, fill=cyan)
     draw.text((455, 315), f"{exp}/{need_exp}", font=font_small, fill=white)
