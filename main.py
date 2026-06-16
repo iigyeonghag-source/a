@@ -5289,7 +5289,26 @@ class StatView(discord.ui.View):
         button: discord.ui.Button
     ):
         await self.add_stat(interaction, "vit")
-        
+
+@bot.tree.command(name="스탯창", description="내 스탯을 확인하고 스탯을 찍는다", guild=GUILD)
+async def stat_window(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    image = create_stat_image(interaction.user, user)
+    file = discord.File(image, filename="stat.png")
+
+    embed = discord.Embed(color=discord.Color.blue())
+    embed.set_image(url="attachment://stat.png")
+
+    view = StatView(uid) if user["stat_point"] > 0 else None
+
+    await interaction.response.send_message(
+        file=file,
+        embed=embed,
+        view=view
+    )
+    
 @bot.tree.command(name="직업", description="21레벨부터 직업을 선택한다", guild=GUILD)
 @app_commands.describe(이름="선택할 직업")
 async def choose_job(interaction: discord.Interaction, 이름: str = None):
