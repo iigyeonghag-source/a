@@ -4880,7 +4880,12 @@ async def create_stat_image(member, user):
         )
 
         draw_bar(draw, x, y + 72, 565, 20, value, 100)
-    
+
+    buffer = BytesIO()
+    bg.save(buffer, format="PNG")
+    buffer.seek(0)
+
+return buffer
 
 def get_hunt_user(uid):
     uid = str(uid)
@@ -4907,7 +4912,7 @@ def get_hunt_user(uid):
 
     for key, value in defaults.items():
         user.setdefault(key, value)
-
+    
     return user
 
 
