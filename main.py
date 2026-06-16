@@ -4861,6 +4861,28 @@ async def create_stat_image(member, user):
 
     return buffer
 
+
+@bot.tree.command(name="스탯창", description="내 스탯을 확인하고 스탯을 찍는다", guild=GUILD)
+async def stat_window(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    image = await create_stat_image(interaction.user, user)
+    file = discord.File(image, filename="stat.png")
+
+    embed = discord.Embed(color=discord.Color.blue())
+    embed.set_image(url="attachment://stat.png")
+
+    kwargs = {
+        "file": file,
+        "embed": embed
+    }
+
+    if user["stat_point"] > 0:
+        kwargs["view"] = StatView(uid)
+
+    await interaction.response.send_message(**kwargs)
+    
 def get_hunt_user(uid):
     uid = str(uid)
 
