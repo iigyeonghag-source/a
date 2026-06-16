@@ -4765,7 +4765,7 @@ async def create_stat_image(member, user):
 
         mask = Image.new("L", (220, 255), 0)
         mask_draw = ImageDraw.Draw(mask)
-
+    
         mask_draw.rounded_rectangle(
             (0, 0, 220, 255),
             radius=20,
@@ -5464,12 +5464,16 @@ async def stat_window(interaction: discord.Interaction):
     embed = discord.Embed(color=discord.Color.blue())
     embed.set_image(url="attachment://stat.png")
 
-    view = StatView(uid) if user["stat_point"] > 0 else None
+    kwargs = {
+        "file": file,
+        "embed": embed
+    }
+
+    if user["stat_point"] > 0:
+        kwargs["view"] = StatView(uid)
 
     await interaction.response.send_message(
-        file=file,
-        embed=embed,
-        view=view
+        **kwargs
     )
     
 @bot.tree.command(name="직업", description="21레벨부터 직업을 선택한다", guild=GUILD)
