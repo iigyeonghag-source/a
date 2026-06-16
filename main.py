@@ -10,7 +10,7 @@ from discord import app_commands
 import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 from io import BytesIO
 
 load_dotenv()
@@ -4661,16 +4661,71 @@ def draw_bar(draw, x, y, w, h, value, max_value):
         draw.rounded_rectangle((x, y, x + fill_w, y + h), radius=6, fill=(0, 200, 255))
 
 
-def create_stat_image(member, user):
+STAT_BG_PATH = "stat_bg.png"
+FONT_PATH = "NanumGothicBold.ttf"
+
+
+def get_font(size):
+    try:
+        return ImageFont.truetype(FONT_PATH, size)
+    except:
+        return ImageFont.load_default()
+
+
+def draw_bar(draw, x, y, w, h, value, max_value):
+    ratio = 0 if max_value <= 0 else min(1, value / max_value)
+    fill_w = int(w * ratio)
+
+    if fill_w > 0:
+        draw.rounded_rectangle(
+            (x, y, x + fill_w, y + h),
+            radius=5,
+            fill=(0, 210, 255, 230)
+        )
+
+
+def fit_text(draw, text, font_path, max_width, start_size, min_size=16):
+    for size in range(start_size, min_size - 1, -2):
+        font = get_font(size)
+        box = draw.textbbox((0, 0), text, font=font)
+        if box[2] - box[0] <= max_width:
+            return font
+    return get_font(min_size)
+
+
+def wrap_text(draw, text, font, max_width):
+    lines = []
+    current = ""
+
+    for ch in text:
+        test = current + ch
+        box = draw.textbbox((0, 0), test, font=font)
+        if box[2] - box[0] <= max_width:
+            current = test
+        else:
+            if current:
+                lines.append(current)
+            current = ch
+
+    if current:
+        lines.append(current)
+
+    return lines
+
+
+async def create_stat_image(member, user):
     bg = Image.open(STAT_BG_PATH).convert("RGBA")
     draw = ImageDraw.Draw(bg)
 
-    font_big = get_font(52)
-    font_mid = get_font(36)
-    font_small = get_font(28)
-
     white = (255, 255, 255, 255)
-    cyan = (120, 230, 255, 255)
+    cyan = (130, 235, 255, 255)
+
+    font_name = fit_text(draw, member.display_name, FONT_PATH, 180, 25)
+    font_info = get_font(23)
+    font_stat_name = get_font(27)
+    font_stat_num = get_font(36)
+    font_small = get_font(20)
+    font_desc = get_font(22)
 
     level = user["level"]
     exp = user["exp"]
@@ -4683,45 +4738,91 @@ def create_stat_image(member, user):
     mag = get_stat(user, "mag")
     vit = get_stat(user, "vit")
 
+    # =====================
+    # 프로필 사진
+    # =====================
+    try:
+        avatar_bytes = await member.display_avatar.with_size(256).read()
+        avatar = Image.open(BytesIO(avatar_bytes)).convert("RGBA")
+        avatar = ImageOps.fit(avatar, (255, 255), centering=(0.5, 0.5))
+
+        mask = Image.new("L", (255, 255), 0)
+        mask_draw = ImageDraw.Draw(mask)
+        mask_draw.rounded_rectangle((0, 0, 255, 255), radius=22, fill=255)
+
+        bg.paste(avatar, (88, 193), mask)
+    except:
+        pass
+
+    # =====================
     # 왼쪽 기본 정보
-    draw.text((380, 135), f"이름  {member.display_name}", font=font_mid, fill=white)
-    draw.text((380, 190), f"직업  {job}", font=font_mid, fill=white)
-    draw.text((380, 245), f"레벨  Lv.{level}", font=font_mid, fill=white)
-    draw.text((380, 300), f"EXP  {exp} / {need_exp}", font=font_mid, fill=white)
-    draw.text((380, 395), f"목숨  {user['lives']} / 3", font=font_mid, fill=white)
-    draw.text((380, 450), f"스탯 포인트  {user['stat_point']}", font=font_mid, fill=white)
+    # =====================
+    draw.text((390, 135), f"이름", font=font_info, fill=cyan)
+    draw.text((455, 135), member.display_name, font=font_name, fill=white)
+
+    draw.text((390, 195), f"직업", font=font_info, fill=cyan)
+    draw.text((455, 195), job, font=font_info, fill=white)
+
+    draw.text((390, 255), f"레벨", font=font_info, fill=cyan)
+    draw.text((455, 255), f"Lv.{level}", font=font_info, fill=white)
+
+    draw.text((390, 315), f"EXP", font=font_info, fill=cyan)
+    draw.text((455, 315), f"{exp}/{need_exp}", font=font_small, fill=white)
+
+    draw.text((390, 405), f"목숨", font=font_info, fill=cyan)
+    draw.text((455, 405), f"{user['lives']} / 3", font=font_info, fill=white)
+
+    draw.text((390, 465), f"스탯", font=font_info, fill=cyan)
+    draw.text((455, 465), f"{user['stat_point']} P", font=font_info, fill=white)
 
     # EXP 바
-    draw_bar(draw, 85, 775, 485, 25, exp, need_exp)
+    draw_bar(draw, 85, 778, 485, 25, exp, need_exp)
 
-    # 오른쪽 스탯 정보
+    # =====================
+    # 프로필 설명
+    # =====================
+    profile_desc = user.get("profile_desc", "아직 등록된 프로필 설명이 없습니다.")
+    lines = wrap_text(draw, profile_desc, font_desc, 470)
+
+    y = 540
+    for line in lines[:6]:
+        draw.text((100, y), line, font=font_desc, fill=white)
+        y += 34
+
+    # =====================
+    # 오른쪽 스탯
+    # =====================
     stats = [
-        ("힘", "STR", strength, 790, 145),
-        ("민첩", "DEX", dex, 790, 285),
-        ("지능", "INT", intelligence, 790, 425),
-        ("마력", "MAG", mag, 790, 565),
-        ("체력", "VIT", vit, 790, 705),
+        ("힘", "STR", strength, 800, 145),
+        ("민첩", "DEX", dex, 800, 285),
+        ("지능", "INT", intelligence, 800, 425),
+        ("마력", "MAG", mag, 800, 565),
+        ("체력", "VIT", vit, 800, 705),
     ]
 
     for name, eng, value, x, y in stats:
-        draw.text((x, y), f"{name} ({eng})", font=font_big, fill=white)
-        draw.text((1410, y), str(value), font=font_big, fill=white)
+        draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
+        draw.text((1445, y - 5), str(value), font=font_stat_num, fill=white)
 
-        # 스탯 바: 100 기준으로 채움
-        draw_bar(draw, x, y + 70, 560, 22, value, 100)
+        # 배경에 있는 바 위치에 맞춰 채우기
+        draw_bar(draw, x, y + 72, 565, 20, value, 100)
 
-    # 아래쪽 보너스 정보
+    # =====================
+    # 하단 효과 정보
+    # =====================
     str_bonus = int(strength * 0.1)
     dex_bonus = dex // 10
     int_bonus = int(intelligence * 0.1)
     mag_proc = min(50, mag * 0.1)
     vit_save = min(60, vit * 0.2)
 
-    draw.text((705, 865), f"힘 승률 +{str_bonus}%", font=font_small, fill=cyan)
-    draw.text((705, 900), f"민첩 승률 +{dex_bonus}%", font=font_small, fill=cyan)
-    draw.text((965, 865), f"지능 보상 +{int_bonus}%", font=font_small, fill=cyan)
-    draw.text((965, 900), f"마력 2배 확률 {mag_proc:.1f}%", font=font_small, fill=cyan)
-    draw.text((1230, 865), f"체력 목숨 보호 {vit_save:.1f}%", font=font_small, fill=cyan)
+    draw.text((705, 885), f"힘 승률 +{str_bonus}%", font=font_small, fill=cyan)
+    draw.text((705, 918), f"민첩 승률 +{dex_bonus}%", font=font_small, fill=cyan)
+
+    draw.text((970, 885), f"지능 보상 +{int_bonus}%", font=font_small, fill=cyan)
+    draw.text((970, 918), f"마력 2배 {mag_proc:.1f}%", font=font_small, fill=cyan)
+
+    draw.text((1235, 885), f"체력 보호 {vit_save:.1f}%", font=font_small, fill=cyan)
 
     buffer = BytesIO()
     bg.save(buffer, format="PNG")
@@ -5000,7 +5101,24 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
     await msg.edit(embed=embed, view=None)
 
+@bot.tree.command(name="프로필설명", description="스탯창에 표시될 프로필 설명을 설정한다", guild=GUILD)
+@app_commands.describe(내용="프로필 설명")
+async def set_profile_desc(interaction: discord.Interaction, 내용: str):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
 
+    if len(내용) > 120:
+        await interaction.response.send_message(
+            "❌ 프로필 설명은 120자 이하로 해줘.",
+            ephemeral=True
+        )
+        return
+
+    user["profile_desc"] = 내용
+    save_data()
+
+    await interaction.response.send_message("✅ 프로필 설명 저장 완료!")
+    
 class HuntStartView(discord.ui.View):
     def __init__(self, user_id, monster=None, monster_level=None, is_target=False):
         super().__init__(timeout=30)
@@ -5232,7 +5350,7 @@ class StatView(discord.ui.View):
 
         new_view = StatView(uid) if user["stat_point"] > 0 else None
 
-        image = create_stat_image(interaction.user, user)
+        image = await create_stat_image(interaction.user, user)
         file = discord.File(image, filename="stat.png")
 
         embed = discord.Embed(
@@ -5294,8 +5412,8 @@ class StatView(discord.ui.View):
 async def stat_window(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     user = get_hunt_user(uid)
-
-    image = create_stat_image(interaction.user, user)
+    
+    image = await create_stat_image(interaction.user, user)
     file = discord.File(image, filename="stat.png")
 
     embed = discord.Embed(color=discord.Color.blue())
