@@ -116,10 +116,6 @@ characters = {}
 hunt_users = {}
 
 load_data()
-
-for uid, user in hunt_users.items():
-    if user.get("level", 1) == 1 and user.get("stat_point", 0) == 0:
-        user["stat_point"] = 3
         
 KST = timezone(timedelta(hours=9))
 
