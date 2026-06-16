@@ -4819,52 +4819,26 @@ async def create_stat_image(member, user):
     mag_proc = min(50, mag * 0.1)
     vit_save = min(60, vit * 0.2)
 
-    draw.text(
-        (100, 540),
-        f"💪 힘: 승률 +{str_bonus}%",
-        font=font_small,
-        fill=white
-    )
+    draw.text((100, 540), f"힘: 승률 +{str_bonus}%", font=font_small, fill=white)
 
-    draw.text(
-        (100, 580),
-        f"🏹 민첩: 승률 +{dex_bonus}%",
-        font=font_small,
-        fill=white
-    )
+    draw.text((100, 580), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
 
-    draw.text(
-        (100, 620),
-        f"🧠 지능: EXP·모라 +{int_bonus}%",
-        font=font_small,
-        fill=white
-    )
-    
-    draw.text(
-        (100, 660),
-        f"✨ 마력: 2배 확률 {mag_proc:.1f}%",
-        font=font_small,
-        fill=white
-    )
+    draw.text((100, 620), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
 
-    draw.text(
-        (100, 700),
-        f"❤️ 체력: 목숨 보호 {vit_save:.1f}%",
-        font=font_small,
-        fill=white
-    )
+    draw.text((100, 660), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
+
+    draw.text((100, 700), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
     
     # =====================
     # 오른쪽 스탯
     # =====================
     stats = [
         ("힘", "STR", strength, 800, 145),
-        ("민첩", "DEX", dex, 800, 145),
-        ("지능", "INT", intelligence, 800, 145),
-        ("마력", "MAG", mag, 800, 145),
-        ("체력", "VIT", vit, 800, 145),
+        ("민첩", "DEX", dex, 800, 285),
+        ("지능", "INT", intelligence, 800, 425),
+        ("마력", "MAG", mag, 800, 565),
+        ("체력", "VIT", vit, 800, 705),
     ]
-
     for name, eng, value, x, y in stats:
         draw.text((x, y), f"{name} ({eng})", font=font_stat_name, fill=white)
 
