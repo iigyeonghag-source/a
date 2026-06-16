@@ -4801,14 +4801,14 @@ async def create_stat_image(member, user):
     draw.text((390, 240), f"레벨", font=font_info, fill=cyan)
     draw.text((455, 240), f"Lv.{level}", font=font_info, fill=white)
 
-    draw.text((390, 315), f"EXP", font=font_info, fill=cyan)
-    draw.text((455, 315), f"{exp}/{need_exp}", font=font_small, fill=white)
+    draw.text((390, 330), f"EXP", font=font_info, fill=cyan)
+    draw.text((455, 330), f"{exp}/{need_exp}", font=font_small, fill=white)
 
-    draw.text((390, 405), f"목숨", font=font_info, fill=cyan)
-    draw.text((455, 405), f"{user['lives']} / 3", font=font_info, fill=white)
+    draw.text((390, 410), f"목숨", font=font_info, fill=cyan)
+    draw.text((455, 410), f"{user['lives']} / 3", font=font_info, fill=white)
 
-    draw.text((390, 465), f"스탯", font=font_info, fill=cyan)
-    draw.text((455, 465), f"{user['stat_point']} P", font=font_info, fill=white)
+    draw.text((390, 440), f"스탯", font=font_info, fill=cyan)
+    draw.text((455, 440), f"{user['stat_point']} P", font=font_info, fill=white)
 
     # EXP 바
     draw_bar(draw, 85, 778, 485, 25, exp, need_exp)
