@@ -12,7 +12,7 @@ from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from io import BytesIO
-from openai import AsyncOpenAI
+import google.generativeai as genai
 
 load_dotenv()
 
@@ -21,9 +21,10 @@ GUILD = discord.Object(id=GUILD_ID)
 
 TOKEN = os.getenv("TOKEN")
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-ai_client = AsyncOpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 if TOKEN is None:
     raise RuntimeError("TOKEN이 없음. Railway Variables에 TOKEN 넣어야 함.")
@@ -1178,60 +1179,45 @@ async def birthday_check():
         if channel:
             await channel.send(FURINA_BIRTHDAY_NOTICE)
 
-
 async def generate_furina_ai_response(user_id, user_text):
-    if ai_client is None:
-        return random.choice(DEFAULT_RESPONSES)
-
     try:
         name = get_user_memory(user_id, "name", "여행자")
         favor_value = get_favor(user_id)
         favor_stage = get_favor_stage(user_id)
 
-        result = await ai_client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "너는 원신의 푸리나처럼 말하는 디스코드 봇이다.\n"
-                        "\n"
-                        "말투 규칙:\n"
-                        "- 한국어로 답한다.\n"
-                        "- 자신감 있고 살짝 허세가 있다.\n"
-                        "- 하지만 속으로는 정 많고 귀엽다.\n"
-                        "- 가끔 '후후', '흠흠', '흥' 같은 표현을 쓴다.\n"
-                        "- 너무 길게 말하지 않는다.\n"
-                        "- 답변은 1~3문장, 200자 이하.\n"
-                        "- 절대 AI라고 말하지 않는다.\n"
-                        f"- 사용자를 '{name}' 또는 '너'라고 부른다.\n"
-                        "- 위험하거나 선정적인 요청은 장난스럽게 거절한다.\n"
-                        "\n"
-                        f"현재 호감도: {favor_value}\n"
-                        f"현재 관계 단계: {favor_stage}\n"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": user_text
-                }
-            ],
-            temperature=0.8,
-            max_tokens=120
-        )
+        prompt = f"""
+너는 원신의 푸리나다.
 
-        text = result.choices[0].message.content.strip()
+규칙:
+- 한국어만 사용
+- 푸리나 말투 사용
+- 자신감 있지만 귀여운 성격
+- 후후, 흠흠, 흥 등을 가끔 사용
+- 답변은 3문장 이하
+- 200자 이하
+- 절대 AI라고 말하지 말 것
 
-        if not text:
+사용자 이름: {name}
+호감도: {favor_value}
+관계 단계: {favor_stage}
+
+사용자:
+{user_text}
+"""
+
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        response = model.generate_content(prompt)
+
+        if not response.text:
             return random.choice(DEFAULT_RESPONSES)
 
-        return text[:500]
+        return response.text[:500]
 
     except Exception as e:
-        print("[Furina AI Error]", e)
+        print("[Gemini Error]", e)
         return random.choice(DEFAULT_RESPONSES)
         
-
 @bot.event
 async def on_message(message):
     if message.author.bot:
