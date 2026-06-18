@@ -6248,51 +6248,10 @@ def add_quest_progress(user_id, quest_type, amount=1):
 
     save_data()
 
-class QuestView(discord.ui.View):
-    def __init__(self, user_id):
-        super().__init__(timeout=120)
-        self.user_id = str(user_id)
+QUEST_PAGE_SIZE = 6
 
-    async def check_user(self, interaction):
-        if str(interaction.user.id) != self.user_id:
-            await interaction.response.send_message("❌ 니 퀘스트 아님.", ephemeral=True)
-            return False
-        return True
 
-    @discord.ui.button(label="일일 퀘스트", style=discord.ButtonStyle.primary)
-    async def daily(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.check_user(interaction):
-            return
-        await interaction.response.edit_message(
-            embed=make_quest_embed(interaction.user, "daily"),
-            view=self
-        )
-
-    @discord.ui.button(label="주간 퀘스트", style=discord.ButtonStyle.success)
-    async def weekly(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.check_user(interaction):
-            return
-        await interaction.response.edit_message(
-            embed=make_quest_embed(interaction.user, "weekly"),
-            view=self
-        )
-
-    @discord.ui.button(label="업적 퀘스트", style=discord.ButtonStyle.secondary)
-    async def permanent(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.check_user(interaction):
-            return
-        await interaction.response.edit_message(
-            embed=make_quest_embed(interaction.user, "permanent"),
-            view=self
-        )
-
-    @discord.ui.button(label="닫기", style=discord.ButtonStyle.danger)
-    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
-        if not await self.check_user(interaction):
-            return
-        await interaction.response.edit_message(view=discord.ui.View())
-
-def make_quest_embed(member, group):
+def make_quest_embed(member, group, page=0):
     uid = str(member.id)
     q = get_user_quests(uid)
 
@@ -6309,6 +6268,15 @@ def make_quest_embed(member, group):
         pool = PERMANENT_QUESTS
         color = discord.Color.purple()
 
+    items = list(q[group].items())
+    max_page = max(0, (len(items) - 1) // QUEST_PAGE_SIZE)
+
+    page = max(0, min(page, max_page))
+
+    start = page * QUEST_PAGE_SIZE
+    end = start + QUEST_PAGE_SIZE
+    page_items = items[start:end]
+
     embed = discord.Embed(
         title=f"{title} - {member.display_name}",
         color=color
@@ -6316,7 +6284,7 @@ def make_quest_embed(member, group):
 
     lines = []
 
-    for key, state in q[group].items():
+    for key, state in page_items:
         info = pool[key]
         grade = info["grade"]
         emoji = QUEST_GRADES.get(grade, "⚪")
@@ -6341,16 +6309,91 @@ def make_quest_embed(member, group):
         )
 
     embed.description = "\n\n".join(lines) if lines else "퀘스트가 없음."
+    embed.set_footer(text=f"{page + 1}/{max_page + 1} 페이지")
 
-    return embed
+    return embed, max_page
+class QuestView(discord.ui.View):
+    def __init__(self, user_id, group="daily", page=0):
+        super().__init__(timeout=120)
+        self.user_id = str(user_id)
+        self.group = group
+        self.page = page
+
+    async def check_user(self, interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 니 퀘스트 아님.", ephemeral=True)
+            return False
+        return True
+
+    async def refresh(self, interaction):
+        embed, max_page = make_quest_embed(
+            interaction.user,
+            self.group,
+            self.page
+        )
+
+        self.prev_page.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= max_page
+
+        await interaction.response.edit_message(
+            embed=embed,
+            view=self
+        )
+
+    @discord.ui.button(label="일일", style=discord.ButtonStyle.primary)
+    async def daily(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+
+        self.group = "daily"
+        self.page = 0
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="주간", style=discord.ButtonStyle.success)
+    async def weekly(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+
+        self.group = "weekly"
+        self.page = 0
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="업적", style=discord.ButtonStyle.secondary)
+    async def permanent(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+
+        self.group = "permanent"
+        self.page = 0
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="◀️", style=discord.ButtonStyle.secondary)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+
+        self.page -= 1
+        await self.refresh(interaction)
+
+    @discord.ui.button(label="▶️", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+
+        self.page += 1
+        await self.refresh(interaction)
 
 @bot.tree.command(name="퀘스트", description="퀘스트 도감을 확인한다", guild=GUILD)
 async def quest_status(interaction: discord.Interaction):
-    embed = make_quest_embed(interaction.user, "daily")
+    view = QuestView(interaction.user.id, "daily", 0)
+    embed, max_page = make_quest_embed(interaction.user, "daily", 0)
+
+    view.prev_page.disabled = True
+    view.next_page.disabled = max_page <= 0
 
     await interaction.response.send_message(
         embed=embed,
-        view=QuestView(interaction.user.id)
+        view=view
     )
 
 async def check_hero_title(bot, member):
