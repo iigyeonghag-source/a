@@ -6524,6 +6524,88 @@ async def quest_claim(interaction: discord.Interaction):
     )
     await check_hero_title(bot, interaction.user)
 
+@bot.tree.command(
+    name="스킬포인트차감",
+    description="유저의 스탯 포인트를 차감한다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="대상 유저",
+    수치="차감할 포인트"
+)
+async def remove_stat_point(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    if 수치 <= 0:
+        await interaction.response.send_message(
+            "❌ 1 이상만 가능.",
+            ephemeral=True
+        )
+        return
+
+    user = get_hunt_user(str(유저.id))
+
+    user["stat_point"] = max(
+        0,
+        user["stat_point"] - 수치
+    )
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention}의 스탯 포인트 **-{수치}P** 차감 완료!\n"
+        f"현재 스탯 포인트: **{user['stat_point']}P**"
+    )
+
+@bot.tree.command(
+    name="스탯차감",
+    description="유저의 스탯을 차감한다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="대상 유저",
+    스탯="str, dex, int, mag, vit",
+    수치="차감할 수치"
+)
+async def remove_stat(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    스탯: str,
+    수치: int
+):
+    stat_key = 스탯.lower()
+
+    if stat_key not in ["str", "dex", "int", "mag", "vit"]:
+        await interaction.response.send_message(
+            "❌ 사용 가능 스탯: str, dex, int, mag, vit",
+            ephemeral=True
+        )
+        return
+
+    if 수치 <= 0:
+        await interaction.response.send_message(
+            "❌ 1 이상만 가능.",
+            ephemeral=True
+        )
+        return
+
+    user = get_hunt_user(str(유저.id))
+
+    user[stat_key] = max(
+        0,
+        get_stat(user, stat_key) - 수치
+    )
+
+    save_data()
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention}의 **{stat_key}** 스탯 **-{수치}** 차감 완료!\n"
+        f"현재 수치: **{user[stat_key]}**"
+    )
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
