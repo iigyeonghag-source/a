@@ -6130,7 +6130,7 @@ PERMANENT_QUESTS = {
     "perm_target_hunt_1000": {"name": "운명의 관리자", "desc": "지정사냥 1,000회 진행", "type": "target_hunt_count", "target": 1000, "grade": "SS", "reward_primogem": 6000},
     "perm_life_save_10": {"name": "아슬아슬 생존", "desc": "체력 효과로 목숨 10회 보호", "type": "life_save", "target": 10, "grade": "C", "reward_primogem": 200},
     "perm_life_save_50": {"name": "죽음 회피자", "desc": "체력 효과로 목숨 50회 보호", "type": "life_save", "target": 50, "grade": "A", "reward_primogem": 800},
-    "perm_life_save_100": {"name": "여덟번째 걸", "desc": "체력 효과로 목숨 100회 보호", "type": "life_save", "target": 100, "grade": "S", "reward_primogem": 1500},
+    "perm_life_save_100": {"name": "여덟번째 걸음", "desc": "체력 효과로 목숨 100회 보호", "type": "life_save", "target": 100, "grade": "S", "reward_primogem": 1500},
 }
 
 
