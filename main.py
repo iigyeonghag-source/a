@@ -1209,7 +1209,7 @@ async def generate_furina_ai_response(user_id, user_text):
     "\n"
     f"현재 호감도: {favor_value}\n"
     f"현재 관계 단계: {favor_stage}\n"
-                },
+                    ),
                 {
                     "role": "user",
                     "content": user_text
