@@ -4241,41 +4241,6 @@ SLEEP_TIME = timedelta(hours=8)
 HEADSET_ON_TIME = timedelta(minutes=3)
 FINAL_WARNING_TIME = timedelta(minutes=10)
 
-class VoiceWarningView(discord.ui.View):
-    def __init__(self, user_id):
-        super().__init__(timeout=None)
-        self.user_id = user_id
-
-    async def user_check(self, interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("이 버튼은 본인만 누를 수 있어.", ephemeral=True)
-            return False
-        return True
-
-    async def check_voice_state(self, interaction):
-        member = get_voice_member(self.user_id)
-
-        if not member or not member.voice:
-            await interaction.response.edit_message(
-                content="이미 음성 채널에 없어서 처리할 게 없어.",
-                view=None
-            )
-            return None
-
-        if not is_headset_off(member.voice):
-            voice_inactive.pop(self.user_id, None)
-            voice_warned.pop(self.user_id, None)
-            voice_snooze.pop(self.user_id, None)
-            voice_pending_on.pop(self.user_id, None)
-
-            await interaction.response.edit_message(
-                content="이미 헤드셋 켜져 있어서 경고 취소했어.",
-                view=None
-            )
-            return None
-
-        return member
-
 def get_voice_member(user_id):
     for guild in bot.guilds:
         member = guild.get_member(user_id)
@@ -6409,6 +6374,8 @@ async def quest_status(interaction: discord.Interaction):
         view=view
     )
 
+HERO_ROLE_ID = 1517096562931793950
+
 async def check_hero_title(bot, member):
     uid = str(member.id)
 
@@ -6419,7 +6386,6 @@ async def check_hero_title(bot, member):
             return
 
     user = get_hunt_user(uid)
-
     titles = user.setdefault("titles", [])
 
     if "용사" in titles:
@@ -6427,6 +6393,16 @@ async def check_hero_title(bot, member):
 
     titles.append("용사")
     save_data()
+
+    # 용사 역할 지급
+    role = member.guild.get_role(HERO_ROLE_ID)
+    if role and role not in member.roles:
+        try:
+            await member.add_roles(role, reason="용사 칭호 획득")
+        except discord.Forbidden:
+            print("용사 역할 지급 실패: 봇 권한 부족 또는 역할 위치 낮음")
+        except discord.HTTPException as e:
+            print(f"용사 역할 지급 실패: {e}")
 
     channel = bot.get_channel(1512642190302777415)
 
@@ -6436,7 +6412,7 @@ async def check_hero_title(bot, member):
             f"축하드립니다, {member.mention}.\n\n"
             f"첫번째 걸음부터 여덟번째 걸음까지,\n"
             f"모든 여정을 완수하셨군요.\n\n"
-            f"당신은 이제 **『용사』** 칭호를 획득했습니다. ✨"
+            f"당신은 이제 **『용사』** 칭호를 획득했습니다. ✨\n"
         )
         
 @bot.tree.command(name="퀘스트수령", description="완료한 퀘스트 보상을 수령한다", guild=GUILD)
