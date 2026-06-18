@@ -6133,16 +6133,7 @@ PERMANENT_QUESTS = {
     "perm_life_save_100": {"name": "여덟번째 걸", "desc": "체력 효과로 목숨 100회 보호", "type": "life_save", "target": 100, "grade": "S", "reward_primogem": 1500},
 }
 
-quests[uid] = {
-    "daily": {},
-    "weekly": {},
-    "permanent": {
-        "hunt_100": {
-            "progress": 37,
-            "claimed": False
-        }
-    }
-}
+
 
 HERO_STEPS = [
     "perm_hunt_100000",
@@ -6217,12 +6208,21 @@ def get_user_quests(user_id):
         q["weekly_week"] = week
         q["weekly"] = {
             key: {"progress": 0, "claimed": False}
-            for key in random.sample(list(WEEKLY_QUEST_POOL.keys()), min(3, len(WEEKLY_QUEST_POOL)))
+            for key in random.sample(
+                list(WEEKLY_QUEST_POOL.keys()),
+                min(3, len(WEEKLY_QUEST_POOL))
+            )
         }
 
+    q.setdefault("daily", {})
+    q.setdefault("weekly", {})
     q.setdefault("permanent", {})
+
     for key in PERMANENT_QUESTS:
-        q["permanent"].setdefault(key, {"progress": 0, "claimed": False})
+        q["permanent"].setdefault(
+            key,
+            {"progress": 0, "claimed": False}
+        )
 
     return q
 
