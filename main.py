@@ -6387,15 +6387,12 @@ class QuestView(discord.ui.View):
     async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.check_user(interaction):
             return
-
+    
         await interaction.response.edit_message(
-            view=discord.ui.View()
+            content="✅ 퀘스트 창을 닫았음.",
+            embed=None,
+            view=None
         )
-        await interaction.response.edit_message(
-        content="✅ 퀘스트 창을 닫았음.",
-        embed=None,
-        view=discord.ui.View()
-    )
 
 @bot.tree.command(name="퀘스트", description="퀘스트 도감을 확인한다", guild=GUILD)
 async def quest_status(interaction: discord.Interaction):
