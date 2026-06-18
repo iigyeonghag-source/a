@@ -5857,6 +5857,8 @@ async def exchange_primogems(interaction: discord.Interaction, 원석: int):
         color=discord.Color.green()
     )
 
+    await interaction.response.send_message(embed=embed)
+
 @bot.tree.command(name="원석", description="내 원석을 확인한다", guild=GUILD)
 async def primogem_status(interaction: discord.Interaction):
     uid = str(interaction.user.id)
