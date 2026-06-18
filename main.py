@@ -5280,7 +5280,7 @@ async def hunt(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=view)
 
 
-@bot.tree.command(name="지정사냥", description="마력 200 이상이면 원하는 몬스터와 싸운다", guild=GUILD)
+@bot.tree.command(name="지정사냥", description="마력 80 이상이면 원하는 몬스터와 싸운다", guild=GUILD)
 @app_commands.describe(몬스터="싸우고 싶은 몬스터 이름")
 async def target_hunt(interaction: discord.Interaction, 몬스터: str):
     uid = str(interaction.user.id)
