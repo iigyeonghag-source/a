@@ -5287,7 +5287,7 @@ async def target_hunt(interaction: discord.Interaction, 몬스터: str):
     user = get_hunt_user(uid)
     now = datetime.now(timezone.utc)
 
-    if get_stat(user, "mag") < 800:
+    if get_stat(user, "mag") < 80:
         await interaction.response.send_message(
             "❌ 마력 80 이상부터 지정사냥 가능함.",
             ephemeral=True
