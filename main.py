@@ -173,13 +173,8 @@ def get_favor_stage(user_id):
     return None
 
 def add_favor_mood_prefix(user_id, response):
-    stage = get_favor_stage(user_id)
-
-    if stage and random.random() < 0.3:
-        return random.choice(FAVOR_STAGE_RESPONSES[stage]) + "\n" + response
-
     return response
-
+    
 def remember_user_value(user_id, key, value):
     uid = str(user_id)
     user_memory.setdefault(uid, {})
@@ -1196,6 +1191,8 @@ async def generate_furina_ai_response(user_id, user_text):
 - 답변은 3문장 이하
 - 200자 이하
 - 절대 AI라고 말하지 말 것
+- 반말을 사용할 것
+- 사용자를 친근하게 대할 것
 
 사용자 이름: {name}
 호감도: {favor_value}
