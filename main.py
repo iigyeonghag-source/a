@@ -4809,8 +4809,8 @@ async def create_stat_image(member, user):
 
     draw.text((100, 510), f"힘: 승률 +{str_bonus}%", font=font_small, fill=white)
     draw.text((100, 550), f"민첩: 승률 +{dex_bonus}%", font=font_small, fill=white)
-    draw.text((100, 590), f"지능: EXP·모라 +{int_bonus}%", font=font_small, fill=white)
-    draw.text((100, 630), f"마력: 2배 확률 {mag_proc:.1f}%", font=font_small, fill=white)
+    draw.text((100, 590), f"지능: EXP·모라 +{int_bonus:.1f}%", font=font_small, fill=white)
+    draw.text((100, 630), f"마력: 승률 강화 확률 {mag_proc:.1f}%", font=font_small, fill=white)
     draw.text((100, 670), f"체력: 목숨 보호 {vit_save:.1f}%", font=font_small, fill=white)
 
     stats = [
@@ -4919,15 +4919,22 @@ def get_stat(user, stat):
 def pick_monster(player_level, user=None):
     dex = get_stat(user, "dex") if user else 0
 
-    if random.random() < 0.01:
-        target_level = player_level + 10
-    else:
-        target_level = random.randint(
-            max(1, player_level - 5),
-            player_level + 5
-        )
+    # 레벨별 몬스터 출현 범위
+    if player_level >= 100:
+        min_level = max(1, player_level - 5)
+        max_level = player_level + 20
 
-    # 민첩: 약한 몬스터가 더 잘 나오게 함
+    elif player_level >= 50:
+        min_level = max(1, player_level - 10)
+        max_level = player_level + 15
+
+    else:
+        min_level = max(1, player_level - 7)
+        max_level = player_level + 7
+
+    target_level = random.randint(min_level, max_level)
+
+    # 민첩: 약한 몹이 조금 더 잘 나오게 함
     target_level -= dex // 20
     target_level = max(1, target_level)
 
@@ -4963,47 +4970,35 @@ def calc_win_chance(user, monster, monster_level):
 
     strength = get_stat(user, "str")
     dex = get_stat(user, "dex")
-    vit = get_stat(user, "vit")
 
-    chance = 55
-    chance += (player_level - monster_level) * 4
-    chance += weapon_bonus
-    chance += armor_bonus
-    chance -= monster["penalty"]
-    chance -= monster_level * 0.4
+    chance = 50
+    chance += (player_level - monster_level) * 3
+    chance += weapon_bonus * 0.8
+    chance += armor_bonus * 0.6
+    chance -= monster["penalty"] * 0.6
+    chance -= max(0, monster_level - player_level) * 0.8
 
-    # 힘: 스탯당 승률 +0.1%
-    chance += strength * 0.1
+    chance += strength // 5
+    chance += dex // 15
 
-    # 민첩: 10스탯당 승률 +1%
-    chance += dex // 10
-
-    # 체력: 10스탯당 승률 +1%
-    chance += vit // 10
-
-    return max(5, min(95, int(chance)))
+    return max(8, min(92, int(chance)))
 
 
 def apply_magic_double_chance(user, win_chance):
     mag = get_stat(user, "mag")
 
-    # 마력: 확률적으로 승률 2배
-    # 스탯당 0.1%, 최대 50%
-    proc_chance = min(50, mag * 0.1)
-
+    proc_chance = min(35, mag * 0.08)
     activated = random.random() * 100 < proc_chance
 
     if activated:
-        win_chance = min(95, win_chance * 2)
+        win_chance = min(92, win_chance + 20)
 
     return int(win_chance), activated
-
-
+    
 def apply_int_reward_bonus(user, reward, exp):
     intelligence = get_stat(user, "int")
 
-    # 지능: 획득 경험치와 모라 스탯당 0.1% 증가
-    bonus = 1 + intelligence * 0.001
+    bonus = 1 + min(0.6, intelligence * 0.0008)
 
     reward = int(reward * bonus)
     exp = int(exp * bonus)
@@ -5014,9 +5009,7 @@ def apply_int_reward_bonus(user, reward, exp):
 def check_life_save(user):
     vit = get_stat(user, "vit")
 
-    # 체력: 패배해도 확률적으로 목숨 보존
-    # 스탯당 0.2%, 최대 60%
-    save_chance = min(60, vit * 0.2)
+    save_chance = min(45, vit * 0.15)
 
     return random.random() * 100 < save_chance
 
@@ -5265,9 +5258,9 @@ async def target_hunt(interaction: discord.Interaction, 몬스터: str):
     user = get_hunt_user(uid)
     now = datetime.now(timezone.utc)
 
-    if get_stat(user, "mag") < 200:
+    if get_stat(user, "mag") < 800:
         await interaction.response.send_message(
-            "❌ 마력 200 이상부터 지정사냥 가능함.",
+            "❌ 마력 80 이상부터 지정사냥 가능함.",
             ephemeral=True
         )
         return
@@ -5322,12 +5315,11 @@ def make_stat_embed(interaction, user):
     mag = get_stat(user, "mag")
     vit = get_stat(user, "vit")
 
-    str_bonus = int(strength * 0.1)
-    dex_bonus = dex // 10
-    int_bonus = int(intelligence * 0.1)
-    mag_proc = min(50, mag * 0.1)
-    vit_win_bonus = vit // 10
-    vit_save = min(60, vit * 0.2)
+    str_bonus = strength // 5
+    dex_bonus = dex // 15
+    int_bonus = min(60, intelligence * 0.08)
+    mag_proc = min(35, mag * 0.08)
+    vit_save = min(45, vit * 0.15)
     vit_hospital_discount = (vit // 50) * 0.1
 
     job = user["job"] if user["job"] else "없음"
