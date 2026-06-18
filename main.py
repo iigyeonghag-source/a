@@ -4288,6 +4288,30 @@ class VoiceWarningView(discord.ui.View):
             return False
         return True
 
+        async def check_voice_state(self, interaction):
+            member = get_voice_member(self.user_id)
+    
+            if not member or not member.voice:
+                await interaction.response.edit_message(
+                    content="이미 음성 채널에 없어서 처리할 게 없어.",
+                    view=None
+                )
+                return None
+    
+            if not is_headset_off(member.voice):
+                voice_inactive.pop(self.user_id, None)
+                voice_warned.pop(self.user_id, None)
+                voice_snooze.pop(self.user_id, None)
+                voice_pending_on.pop(self.user_id, None)
+    
+                await interaction.response.edit_message(
+                    content="이미 헤드셋 켜져 있어서 경고 취소했어.",
+                    view=None
+                )
+                return None
+    
+            return member
+            
     @discord.ui.button(label="✅ 확인하고 5시간 유예", style=discord.ButtonStyle.success)
     async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await self.user_check(interaction):
