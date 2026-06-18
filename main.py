@@ -1370,7 +1370,13 @@ async def on_message(message):
         await message.reply(response)
         return
 
-    await message.reply(random.choice(DEFAULT_RESPONSES))
+    ai_response = await generate_furina_ai_response(uid, text)
+    ai_response = add_favor_mood_prefix(message.author.id, ai_response)
+    
+    last_response_key[uid] = "ai"
+    last_topic[uid] = "ai"
+    
+    await message.reply(ai_response)
 
             
 GENSHIN_CHARACTERS = ({
