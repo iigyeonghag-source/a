@@ -47,11 +47,17 @@ data = {
     "memory": {},
     "characters": {},
     "hunt_users": {},
-    "weapons": {}
+    "weapons": {},
+    "primogems": {},
+    "quests": {},
+    "achievements": {}
 }
 
 characters = {}
 weapons = {}
+primogems = {}
+quests = {}
+achievements = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -64,7 +70,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements
 
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -79,6 +85,9 @@ def load_data():
         data["characters"] = loaded.get("characters", {})
         data["hunt_users"] = loaded.get("hunt_users", {})
         data["weapons"] = loaded.get("weapons", {})
+        data["primogems"] = loaded.get("primogems", {})
+        data["quests"] = loaded.get("quests", {})
+        data["achievements"] = loaded.get("achievements", {})
 
     poker_money = data["poker_money"]
     favor = data["favor"]
@@ -86,6 +95,9 @@ def load_data():
     characters = data["characters"]
     hunt_users = data["hunt_users"]
     weapons = data["weapons"]
+    primogems = data["primogems"]
+    quests = data["quests"]
+    achievements = data["achievements"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -94,6 +106,9 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["primogems"] = primogems
+    data["quests"] = quests
+    data["achievements"] = achievements
     data["weapons"] = weapons
     data["poker_money"] = poker_money
     data["favor"] = favor
@@ -131,6 +146,15 @@ def add_favor(user_id, amount):
     
     save_data()
 
+def get_primogems(user_id):
+    return int(primogems.get(str(user_id), 0))
+
+
+def add_primogems(user_id, amount):
+    uid = str(user_id)
+    primogems[uid] = max(0, get_primogems(uid) + int(amount))
+    save_data()
+    
 def get_favor_stage(user_id):
     value = get_favor(user_id)
 
@@ -1291,7 +1315,7 @@ async def on_message(message):
 
         # 아주 가끔 푸리나가 용돈을 줌
         if random.random() < 0.03:
-            bonus = random.choice([10, 20, 30])
+            bonus = random.choice([1000, 2000, 3000])
             add_poker_money(uid, bonus)
             response += f"\n\n후후, 오늘은 기분이 좋으니까 **{bonus}모라** 줄게! 현재 돈: **{get_poker_money(uid)}모라**"
 
@@ -2740,7 +2764,8 @@ async def on_member_update(before, after):
 print(get_time_key())
 print(datetime.now())
 
-CHARACTER_GACHA_COST = 300
+CHARACTER_GACHA_COST = 160
+WEAPON_GACHA_COST = 200
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 
 @bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
@@ -2758,23 +2783,25 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
 
     cost = CHARACTER_GACHA_COST * 횟수
 
-    if get_poker_money(uid) < cost:
+    if get_primogems(uid) < cost:
         embed = discord.Embed(
-            title="❌ 모라 부족",
+            title="❌ 원석 부족",
             description=(
-                f"필요 모라: **{cost:,}**\n"
-                f"보유 모라: **{get_poker_money(uid):,}**"
+                f"필요 원석: **{cost:,}개**\n"
+                f"보유 원석: **{get_primogems(uid):,}개**"
             ),
             color=discord.Color.red()
         )
-
+    
+        embed.set_footer(text="원석은 /원석교환 으로 획득할 수 있음.")
+    
         await interaction.response.send_message(
             embed=embed,
             ephemeral=True
         )
         return
 
-    add_poker_money(uid, -cost)
+    add_primogems(uid, -cost)
 
     user_chars = get_user_characters(uid)
 
@@ -5045,6 +5072,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
     win_chance = calc_win_chance(user, monster, monster_level)
     win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+    add_quest_progress(uid, "hunt_count", 1)
 
     embed = discord.Embed(
         title="⚔️ 사냥 시작",
@@ -5080,21 +5108,32 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
         add_poker_money(uid, reward)
         leveled = give_hunt_exp(user, exp)
-
+        
         result = (
             f"✅ 승리!\n"
             f"획득 모라: **{reward:,}모라**\n"
             f"획득 경험치: **{exp} EXP**\n"
         )
-
+        
         if leveled:
             result += (
                 f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**\n"
                 f"스탯 포인트 **{leveled * 5}** 획득!"
             )
+            
+            add_quest_progress(uid, "level_up", leveled)
 
+        q = get_user_quests(uid)
+        perm = q["permanent"]
+        
+        if "perm_level_100" in perm:
+            perm["perm_level_100"]["progress"] = max(
+                perm["perm_level_100"]["progress"],
+                user["level"]
+            )
+            
         embed.color = discord.Color.green()
-
+        
     else:
         life_saved = check_life_save(user)
 
@@ -5127,6 +5166,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
         embed.color = discord.Color.red()
 
+    
     if not is_target:
         hunt_cooldowns[uid] = datetime.now(timezone.utc) + HUNT_COOLDOWN
 
@@ -5784,7 +5824,607 @@ async def remove_hunt_level(
         f"✅ {유저.mention} 레벨 **-{수치}** 완료!\n"
         f"현재 레벨: **Lv.{user['level']}**"
     )
-    
+
+@bot.tree.command(name="원석교환", description="모라를 원석으로 교환한다", guild=GUILD)
+@app_commands.describe(원석="교환할 원석 수")
+async def exchange_primogems(interaction: discord.Interaction, 원석: int):
+    uid = str(interaction.user.id)
+
+    if 원석 <= 0:
+        await interaction.response.send_message("❌ 1 이상 입력해줘.", ephemeral=True)
+        return
+
+    cost = 원석 * 1000
+    money = get_poker_money(uid)
+
+    if money < cost:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{cost:,}모라**\n보유: **{money:,}모라**",
+            ephemeral=True
+        )
+        return
+
+    remove_poker_money(uid, cost)
+    add_primogems(uid, 원석)
+
+    embed = discord.Embed(
+        title="💎 원석 교환 완료",
+        description=(
+            f"사용 모라: **{cost:,}모라**\n"
+            f"획득 원석: **{원석:,}개**\n\n"
+            f"현재 원석: **{get_primogems(uid):,}개**"
+        ),
+        color=discord.Color.green()
+    )
+
+@bot.tree.command(name="원석", description="내 원석을 확인한다", guild=GUILD)
+async def primogem_status(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+
+    await interaction.response.send_message(
+        f"💎 {interaction.user.mention}의 원석: **{get_primogems(uid):,}개**"
+    )
+
+QUEST_TYPES = {
+    "daily": "일일",
+    "weekly": "주간",
+    "permanent": "업적"
+}
+
+QUEST_GRADES = {
+    "E": "⚪",
+    "D": "🟢",
+    "C": "🔵",
+    "B": "🟣",
+    "A": "🟡",
+    "S": "🟠",
+    "SS": "🔴"
+}
+
+DAILY_QUEST_POOL = {
+    "daily_hunt_10": {
+        "name": "오늘의 사냥",
+        "desc": "사냥 10회 진행",
+        "type": "hunt_count",
+        "target": 10,
+        "grade": "E",
+        "reward_primogem": 20
+    },
+    "daily_hunt_20": {
+        "name": "부지런한 사냥꾼",
+        "desc": "사냥 20회 진행",
+        "type": "hunt_count",
+        "target": 20,
+        "grade": "D",
+        "reward_primogem": 35
+    },
+    "daily_win_5": {
+        "name": "승리의 감각",
+        "desc": "사냥 5회 승리",
+        "type": "hunt_win",
+        "target": 5,
+        "grade": "D",
+        "reward_primogem": 30
+    },
+    "daily_win_10": {
+        "name": "오늘도 연승",
+        "desc": "사냥 10회 승리",
+        "type": "hunt_win",
+        "target": 10,
+        "grade": "C",
+        "reward_primogem": 45
+    },
+    "daily_mora_5000": {
+        "name": "모라 수집",
+        "desc": "모라 5,000 획득",
+        "type": "mora_earned",
+        "target": 5000,
+        "grade": "D",
+        "reward_primogem": 30
+    },
+    "daily_mora_15000": {
+        "name": "오늘의 벌이",
+        "desc": "모라 15,000 획득",
+        "type": "mora_earned",
+        "target": 15000,
+        "grade": "C",
+        "reward_primogem": 50
+    },
+    "daily_level_1": {
+        "name": "작은 성장",
+        "desc": "레벨 1회 상승",
+        "type": "level_up",
+        "target": 1,
+        "grade": "C",
+        "reward_primogem": 50
+    },
+    "daily_gacha_1": {
+        "name": "운명의 시험",
+        "desc": "캐릭터 뽑기 1회 진행",
+        "type": "gacha_count",
+        "target": 1,
+        "grade": "C",
+        "reward_primogem": 40
+    }
+}
+
+WEEKLY_QUEST_POOL = {
+    "weekly_hunt_100": {
+        "name": "끈질긴 사냥꾼",
+        "desc": "사냥 100회 진행",
+        "type": "hunt_count",
+        "target": 100,
+        "grade": "B",
+        "reward_primogem": 160
+    },
+    "weekly_hunt_200": {
+        "name": "사냥 중독",
+        "desc": "사냥 200회 진행",
+        "type": "hunt_count",
+        "target": 200,
+        "grade": "A",
+        "reward_primogem": 280
+    },
+    "weekly_win_50": {
+        "name": "주간 승리자",
+        "desc": "사냥 50회 승리",
+        "type": "hunt_win",
+        "target": 50,
+        "grade": "A",
+        "reward_primogem": 240
+    },
+    "weekly_win_100": {
+        "name": "승리 루틴",
+        "desc": "사냥 100회 승리",
+        "type": "hunt_win",
+        "target": 100,
+        "grade": "S",
+        "reward_primogem": 400
+    },
+    "weekly_level_3": {
+        "name": "성장의 증명",
+        "desc": "레벨 3회 상승",
+        "type": "level_up",
+        "target": 3,
+        "grade": "A",
+        "reward_primogem": 240
+    },
+    "weekly_level_5": {
+        "name": "폭풍 성장",
+        "desc": "레벨 5회 상승",
+        "type": "level_up",
+        "target": 5,
+        "grade": "S",
+        "reward_primogem": 420
+    },
+    "weekly_mora_100000": {
+        "name": "주간 수금",
+        "desc": "모라 100,000 획득",
+        "type": "mora_earned",
+        "target": 100000,
+        "grade": "A",
+        "reward_primogem": 260
+    },
+    "weekly_gacha_10": {
+        "name": "운명의 회전",
+        "desc": "캐릭터 뽑기 10회 진행",
+        "type": "gacha_count",
+        "target": 10,
+        "grade": "A",
+        "reward_primogem": 240
+    },
+    "weekly_weapon_gacha_5": {
+        "name": "무기 단조의 꿈",
+        "desc": "전무 뽑기 5회 진행",
+        "type": "weapon_gacha_count",
+        "target": 5,
+        "grade": "A",
+        "reward_primogem": 260
+    }
+}
+
+PERMANENT_QUESTS = {
+    "perm_hunt_10": {"name": "첫 발걸음", "desc": "사냥 10회 진행", "type": "hunt_count", "target": 10, "grade": "E", "reward_primogem": 30},
+    "perm_hunt_30": {"name": "숲의 초심자", "desc": "사냥 30회 진행", "type": "hunt_count", "target": 30, "grade": "E", "reward_primogem": 40},
+    "perm_hunt_50": {"name": "사냥 입문", "desc": "사냥 50회 진행", "type": "hunt_count", "target": 50, "grade": "E", "reward_primogem": 50},
+    "perm_hunt_100": {"name": "초보 사냥꾼", "desc": "사냥 100회 진행", "type": "hunt_count", "target": 100, "grade": "D", "reward_primogem": 70},
+    "perm_hunt_200": {"name": "익숙한 발걸음", "desc": "사냥 200회 진행", "type": "hunt_count", "target": 200, "grade": "D", "reward_primogem": 90},
+    "perm_hunt_300": {"name": "반복의 힘", "desc": "사냥 300회 진행", "type": "hunt_count", "target": 300, "grade": "D", "reward_primogem": 110},
+    "perm_hunt_500": {"name": "숙련된 사냥꾼", "desc": "사냥 500회 진행", "type": "hunt_count", "target": 500, "grade": "C", "reward_primogem": 150},
+    "perm_hunt_750": {"name": "야생의 감각", "desc": "사냥 750회 진행", "type": "hunt_count", "target": 750, "grade": "C", "reward_primogem": 180},
+    "perm_hunt_1000": {"name": "천 번의 사냥", "desc": "사냥 1,000회 진행", "type": "hunt_count", "target": 1000, "grade": "C", "reward_primogem": 220},
+    "perm_hunt_1500": {"name": "끈질긴 추적자", "desc": "사냥 1,500회 진행", "type": "hunt_count", "target": 1500, "grade": "B", "reward_primogem": 280},
+    "perm_hunt_2000": {"name": "전장의 단골", "desc": "사냥 2,000회 진행", "type": "hunt_count", "target": 2000, "grade": "B", "reward_primogem": 340},
+    "perm_hunt_3000": {"name": "사냥의 생활화", "desc": "사냥 3,000회 진행", "type": "hunt_count", "target": 3000, "grade": "B", "reward_primogem": 420},
+    "perm_hunt_5000": {"name": "사냥의 달인", "desc": "사냥 5,000회 진행", "type": "hunt_count", "target": 5000, "grade": "A", "reward_primogem": 600},
+    "perm_hunt_7500": {"name": "끝없는 발자국", "desc": "사냥 7,500회 진행", "type": "hunt_count", "target": 7500, "grade": "A", "reward_primogem": 800},
+    "perm_hunt_10000": {"name": "사냥의 망령", "desc": "사냥 10,000회 진행", "type": "hunt_count", "target": 10000, "grade": "S", "reward_primogem": 1200},
+    "perm_hunt_15000": {"name": "몬스터의 재앙", "desc": "사냥 15,000회 진행", "type": "hunt_count", "target": 15000, "grade": "S", "reward_primogem": 1600},
+    "perm_hunt_20000": {"name": "사냥의 화신", "desc": "사냥 20,000회 진행", "type": "hunt_count", "target": 20000, "grade": "SS", "reward_primogem": 2200},
+    "perm_hunt_30000": {"name": "생태계 교란종", "desc": "사냥 30,000회 진행", "type": "hunt_count", "target": 30000, "grade": "SS", "reward_primogem": 3000},
+    "perm_hunt_50000": {"name": "학살의 신", "desc": "사냥 50,000회 진행", "type": "hunt_count", "target": 50000, "grade": "SS", "reward_primogem": 5000},
+    "perm_hunt_100000": {"name": "첫번째 걸음", "desc": "사냥 100,000회 진행", "type": "hunt_count", "target": 100000, "grade": "SS", "reward_primogem": 8000},
+
+    "perm_win_5": {"name": "첫 승리", "desc": "사냥에서 5회 승리", "type": "hunt_win", "target": 5, "grade": "E", "reward_primogem": 30},
+    "perm_win_20": {"name": "승리의 감각", "desc": "사냥에서 20회 승리", "type": "hunt_win", "target": 20, "grade": "E", "reward_primogem": 45},
+    "perm_win_50": {"name": "전투 적응", "desc": "사냥에서 50회 승리", "type": "hunt_win", "target": 50, "grade": "E", "reward_primogem": 60},
+    "perm_win_100": {"name": "승리 입문자", "desc": "사냥에서 100회 승리", "type": "hunt_win", "target": 100, "grade": "D", "reward_primogem": 80},
+    "perm_win_200": {"name": "연승의 시작", "desc": "사냥에서 200회 승리", "type": "hunt_win", "target": 200, "grade": "D", "reward_primogem": 110},
+    "perm_win_300": {"name": "전투 숙련자", "desc": "사냥에서 300회 승리", "type": "hunt_win", "target": 300, "grade": "D", "reward_primogem": 130},
+    "perm_win_500": {"name": "승리 수집가", "desc": "사냥에서 500회 승리", "type": "hunt_win", "target": 500, "grade": "C", "reward_primogem": 180},
+    "perm_win_750": {"name": "쓰러지지 않는 자", "desc": "사냥에서 750회 승리", "type": "hunt_win", "target": 750, "grade": "C", "reward_primogem": 220},
+    "perm_win_1000": {"name": "천승의 사냥꾼", "desc": "사냥에서 1,000회 승리", "type": "hunt_win", "target": 1000, "grade": "C", "reward_primogem": 260},
+    "perm_win_1500": {"name": "압도적인 전과", "desc": "사냥에서 1,500회 승리", "type": "hunt_win", "target": 1500, "grade": "B", "reward_primogem": 340},
+    "perm_win_2000": {"name": "승리의 중독자", "desc": "사냥에서 2,000회 승리", "type": "hunt_win", "target": 2000, "grade": "B", "reward_primogem": 420},
+    "perm_win_3000": {"name": "전장의 지배자", "desc": "사냥에서 3,000회 승리", "type": "hunt_win", "target": 3000, "grade": "B", "reward_primogem": 520},
+    "perm_win_5000": {"name": "무패의 그림자", "desc": "사냥에서 5,000회 승리", "type": "hunt_win", "target": 5000, "grade": "A", "reward_primogem": 750},
+    "perm_win_7500": {"name": "피로 쓰인 기록", "desc": "사냥에서 7,500회 승리", "type": "hunt_win", "target": 7500, "grade": "A", "reward_primogem": 950},
+    "perm_win_10000": {"name": "승리의 화신", "desc": "사냥에서 10,000회 승리", "type": "hunt_win", "target": 10000, "grade": "S", "reward_primogem": 1400},
+    "perm_win_15000": {"name": "전설의 검끝", "desc": "사냥에서 15,000회 승리", "type": "hunt_win", "target": 15000, "grade": "S", "reward_primogem": 1800},
+    "perm_win_20000": {"name": "패배를 잊은 자", "desc": "사냥에서 20,000회 승리", "type": "hunt_win", "target": 20000, "grade": "SS", "reward_primogem": 2500},
+    "perm_win_30000": {"name": "전투의 신", "desc": "사냥에서 30,000회 승리", "type": "hunt_win", "target": 30000, "grade": "SS", "reward_primogem": 3500},
+    "perm_win_50000": {"name": "몬스터 절멸자", "desc": "사냥에서 50,000회 승리", "type": "hunt_win", "target": 50000, "grade": "SS", "reward_primogem": 5500},
+    "perm_win_100000": {"name": "두번째 걸음", "desc": "사냥에서 100,000회 승리", "type": "hunt_win", "target": 100000, "grade": "SS", "reward_primogem": 9000},
+
+    "perm_level_5": {"name": "성장의 시작", "desc": "사냥 레벨 5 달성", "type": "level", "target": 5, "grade": "E", "reward_primogem": 40},
+    "perm_level_10": {"name": "초보 탈출", "desc": "사냥 레벨 10 달성", "type": "level", "target": 10, "grade": "E", "reward_primogem": 50},
+    "perm_level_20": {"name": "가능성의 문", "desc": "사냥 레벨 20 달성", "type": "level", "target": 20, "grade": "D", "reward_primogem": 90},
+    "perm_level_30": {"name": "직업의 길목", "desc": "사냥 레벨 30 달성", "type": "level", "target": 30, "grade": "D", "reward_primogem": 120},
+    "perm_level_50": {"name": "숙련자의 문턱", "desc": "사냥 레벨 50 달성", "type": "level", "target": 50, "grade": "C", "reward_primogem": 200},
+    "perm_level_75": {"name": "강자의 기척", "desc": "사냥 레벨 75 달성", "type": "level", "target": 75, "grade": "B", "reward_primogem": 350},
+    "perm_level_100": {"name": "경지에 오른 자", "desc": "사냥 레벨 100 달성", "type": "level", "target": 100, "grade": "A", "reward_primogem": 600},
+    "perm_level_150": {"name": "한계돌파", "desc": "사냥 레벨 150 달성", "type": "level", "target": 150, "grade": "S", "reward_primogem": 1000},
+    "perm_level_200": {"name": "초월자", "desc": "사냥 레벨 200 달성", "type": "level", "target": 200, "grade": "SS", "reward_primogem": 1800},
+    "perm_level_300": {"name": "세번째 걸음", "desc": "사냥 레벨 300 달성", "type": "level", "target": 300, "grade": "SS", "reward_primogem": 3000},
+
+    "perm_mora_1000": {"name": "동전 줍기", "desc": "누적 모라 1,000 획득", "type": "mora_earned", "target": 1000, "grade": "E", "reward_primogem": 30},
+    "perm_mora_5000": {"name": "작은 주머니", "desc": "누적 모라 5,000 획득", "type": "mora_earned", "target": 5000, "grade": "E", "reward_primogem": 40},
+    "perm_mora_10000": {"name": "짭짤한 벌이", "desc": "누적 모라 10,000 획득", "type": "mora_earned", "target": 10000, "grade": "E", "reward_primogem": 50},
+    "perm_mora_50000": {"name": "모라 수집가", "desc": "누적 모라 50,000 획득", "type": "mora_earned", "target": 50000, "grade": "D", "reward_primogem": 90},
+    "perm_mora_100000": {"name": "돈 냄새", "desc": "누적 모라 100,000 획득", "type": "mora_earned", "target": 100000, "grade": "D", "reward_primogem": 120},
+    "perm_mora_500000": {"name": "부자의 시작", "desc": "누적 모라 500,000 획득", "type": "mora_earned", "target": 500000, "grade": "C", "reward_primogem": 220},
+    "perm_mora_1000000": {"name": "백만장자", "desc": "누적 모라 1,000,000 획득", "type": "mora_earned", "target": 1000000, "grade": "B", "reward_primogem": 400},
+    "perm_mora_5000000": {"name": "금고의 주인", "desc": "누적 모라 5,000,000 획득", "type": "mora_earned", "target": 5000000, "grade": "A", "reward_primogem": 800},
+    "perm_mora_10000000": {"name": "인플레이션의 지배자", "desc": "누적 모라 10,000,000 획득", "type": "mora_earned", "target": 10000000, "grade": "S", "reward_primogem": 1400},
+    "perm_mora_50000000": {"name": "네번째 걸음", "desc": "누적 모라 50,000,000 획득", "type": "mora_earned", "target": 50000000, "grade": "SS", "reward_primogem": 3000},
+
+    "perm_gacha_1": {"name": "첫 운명", "desc": "캐릭터 뽑기 1회 진행", "type": "gacha_count", "target": 1, "grade": "E", "reward_primogem": 20},
+    "perm_gacha_10": {"name": "열 번의 운명", "desc": "캐릭터 뽑기 10회 진행", "type": "gacha_count", "target": 10, "grade": "D", "reward_primogem": 80},
+    "perm_gacha_30": {"name": "기대와 절망", "desc": "캐릭터 뽑기 30회 진행", "type": "gacha_count", "target": 30, "grade": "C", "reward_primogem": 180},
+    "perm_gacha_50": {"name": "반천장의 그림자", "desc": "캐릭터 뽑기 50회 진행", "type": "gacha_count", "target": 50, "grade": "B", "reward_primogem": 300},
+    "perm_gacha_90": {"name": "천장의 문턱", "desc": "캐릭터 뽑기 90회 진행", "type": "gacha_count", "target": 90, "grade": "A", "reward_primogem": 600},
+    "perm_gacha_180": {"name": "확정의 대가", "desc": "캐릭터 뽑기 180회 진행", "type": "gacha_count", "target": 180, "grade": "S", "reward_primogem": 1200},
+    "perm_gacha_300": {"name": "별을 좇는 자", "desc": "캐릭터 뽑기 300회 진행", "type": "gacha_count", "target": 300, "grade": "S", "reward_primogem": 1800},
+    "perm_gacha_500": {"name": "운명의 단골", "desc": "캐릭터 뽑기 500회 진행", "type": "gacha_count", "target": 500, "grade": "SS", "reward_primogem": 3000},
+    "perm_gacha_1000": {"name": "별을 부르는 자", "desc": "캐릭터 뽑기 1,000회 진행", "type": "gacha_count", "target": 1000, "grade": "SS", "reward_primogem": 5000},
+    "perm_gacha_2000": {"name": "다섯번째 걸음", "desc": "캐릭터 뽑기 2,000회 진행", "type": "gacha_count", "target": 2000, "grade": "SS", "reward_primogem": 8000},
+
+    "perm_weapon_gacha_1": {"name": "첫 전무", "desc": "전무 뽑기 1회 진행", "type": "weapon_gacha_count", "target": 1, "grade": "E", "reward_primogem": 25},
+    "perm_weapon_gacha_10": {"name": "무기의 부름", "desc": "전무 뽑기 10회 진행", "type": "weapon_gacha_count", "target": 10, "grade": "D", "reward_primogem": 90},
+    "perm_weapon_gacha_30": {"name": "강화된 운명", "desc": "전무 뽑기 30회 진행", "type": "weapon_gacha_count", "target": 30, "grade": "C", "reward_primogem": 200},
+    "perm_weapon_gacha_50": {"name": "검을 좇는 자", "desc": "전무 뽑기 50회 진행", "type": "weapon_gacha_count", "target": 50, "grade": "B", "reward_primogem": 340},
+    "perm_weapon_gacha_100": {"name": "전무 수집가", "desc": "전무 뽑기 100회 진행", "type": "weapon_gacha_count", "target": 100, "grade": "A", "reward_primogem": 700},
+    "perm_weapon_gacha_200": {"name": "무기고의 주인", "desc": "전무 뽑기 200회 진행", "type": "weapon_gacha_count", "target": 200, "grade": "S", "reward_primogem": 1300},
+    "perm_weapon_gacha_500": {"name": "전설의 대장장이", "desc": "전무 뽑기 500회 진행", "type": "weapon_gacha_count", "target": 500, "grade": "SS", "reward_primogem": 3500},
+    "perm_weapon_gacha_1000": {"name": "무기의 심연", "desc": "전무 뽑기 1,000회 진행", "type": "weapon_gacha_count", "target": 1000, "grade": "SS", "reward_primogem": 6000},
+    "perm_weapon_gacha_1500": {"name": "무기와 계약한 자", "desc": "전무 뽑기 1,500회 진행", "type": "weapon_gacha_count", "target": 1500, "grade": "SS", "reward_primogem": 7500},
+    "perm_weapon_gacha_2000": {"name": "여섯번째 걸음", "desc": "전무 뽑기 2,000회 진행", "type": "weapon_gacha_count", "target": 2000, "grade": "SS", "reward_primogem": 9000},
+
+    "perm_exchange_100": {"name": "첫 교환", "desc": "원석 100개 교환", "type": "primogem_exchange", "target": 100, "grade": "E", "reward_primogem": 20},
+    "perm_exchange_500": {"name": "반짝이는 주머니", "desc": "원석 500개 교환", "type": "primogem_exchange", "target": 500, "grade": "D", "reward_primogem": 70},
+    "perm_exchange_1000": {"name": "원석 수집가", "desc": "원석 1,000개 교환", "type": "primogem_exchange", "target": 1000, "grade": "C", "reward_primogem": 150},
+    "perm_exchange_5000": {"name": "빛나는 투자자", "desc": "원석 5,000개 교환", "type": "primogem_exchange", "target": 5000, "grade": "B", "reward_primogem": 400},
+    "perm_exchange_10000": {"name": "모라 연금술사", "desc": "원석 10,000개 교환", "type": "primogem_exchange", "target": 10000, "grade": "A", "reward_primogem": 800},
+    "perm_exchange_30000": {"name": "화폐 개혁자", "desc": "원석 30,000개 교환", "type": "primogem_exchange", "target": 30000, "grade": "S", "reward_primogem": 1500},
+    "perm_exchange_50000": {"name": "경제의 지배자", "desc": "원석 50,000개 교환", "type": "primogem_exchange", "target": 50000, "grade": "SS", "reward_primogem": 2500},
+    "perm_exchange_100000": {"name": "원석 은행장", "desc": "원석 100,000개 교환", "type": "primogem_exchange", "target": 100000, "grade": "SS", "reward_primogem": 5000},
+    "perm_exchange_300000": {"name": "초인플레 청산자", "desc": "원석 300,000개 교환", "type": "primogem_exchange", "target": 300000, "grade": "SS", "reward_primogem": 8000},
+    "perm_exchange_500000": {"name": "일곱번째 걸음", "desc": "원석 500,000개 교환", "type": "primogem_exchange", "target": 500000, "grade": "SS", "reward_primogem": 12000},
+
+    "perm_target_hunt_1": {"name": "지정된 운명", "desc": "지정사냥 1회 진행", "type": "target_hunt_count", "target": 1, "grade": "D", "reward_primogem": 80},
+    "perm_target_hunt_10": {"name": "노린 사냥감", "desc": "지정사냥 10회 진행", "type": "target_hunt_count", "target": 10, "grade": "C", "reward_primogem": 200},
+    "perm_target_hunt_50": {"name": "표적 추적자", "desc": "지정사냥 50회 진행", "type": "target_hunt_count", "target": 50, "grade": "B", "reward_primogem": 500},
+    "perm_target_hunt_100": {"name": "정밀한 사냥꾼", "desc": "지정사냥 100회 진행", "type": "target_hunt_count", "target": 100, "grade": "A", "reward_primogem": 900},
+    "perm_target_hunt_300": {"name": "운명을 고르는 자", "desc": "지정사냥 300회 진행", "type": "target_hunt_count", "target": 300, "grade": "S", "reward_primogem": 1600},
+    "perm_target_hunt_500": {"name": "사냥감 지정권한", "desc": "지정사냥 500회 진행", "type": "target_hunt_count", "target": 500, "grade": "SS", "reward_primogem": 3000},
+    "perm_target_hunt_1000": {"name": "운명의 관리자", "desc": "지정사냥 1,000회 진행", "type": "target_hunt_count", "target": 1000, "grade": "SS", "reward_primogem": 6000},
+    "perm_life_save_10": {"name": "아슬아슬 생존", "desc": "체력 효과로 목숨 10회 보호", "type": "life_save", "target": 10, "grade": "C", "reward_primogem": 200},
+    "perm_life_save_50": {"name": "죽음 회피자", "desc": "체력 효과로 목숨 50회 보호", "type": "life_save", "target": 50, "grade": "A", "reward_primogem": 800},
+    "perm_life_save_100": {"name": "여덟번째 걸", "desc": "체력 효과로 목숨 100회 보호", "type": "life_save", "target": 100, "grade": "S", "reward_primogem": 1500},
+}
+
+quests[uid] = {
+    "daily": {},
+    "weekly": {},
+    "permanent": {
+        "hunt_100": {
+            "progress": 37,
+            "claimed": False
+        }
+    }
+}
+
+HERO_STEPS = [
+    "perm_hunt_100000",
+    "perm_win_100000",
+    "perm_level_300",
+    "perm_mora_50000000",
+    "perm_gacha_2000",
+    "perm_weapon_gacha_2000",
+    "perm_exchange_500000",
+    "perm_life_save_100"
+]
+
+async def check_hero_title(bot, member):
+    uid = str(member.id)
+
+    q = get_user_quests(uid)
+
+    for key in HERO_STEPS:
+        if not q["permanent"].get(key, {}).get("claimed", False):
+            return
+
+    user = get_hunt_user(uid)
+
+    titles = user.setdefault("titles", [])
+
+    if "용사" in titles:
+        return
+
+    titles.append("용사")
+    save_data()
+
+    channel = bot.get_channel(업적채널ID)
+
+    if channel:
+        await channel.send(
+            f"🌊 **푸리나 드 폰타인**\n\n"
+            f"축하드립니다, {member.mention}.\n\n"
+            f"첫번째 걸음부터 여덟번째 걸음까지,\n"
+            f"모든 여정을 완수하셨군요.\n\n"
+            f"당신은 이제 **『용사』** 칭호를 획득했습니다. ✨"
+        )
+        
+def get_week_key():
+    now = datetime.now(KST)
+    year, week, _ = now.isocalendar()
+    return f"{year}-W{week}"
+
+
+def get_date_key():
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+
+def get_user_quests(user_id):
+    uid = str(user_id)
+
+    if uid not in quests:
+        quests[uid] = {}
+
+    q = quests[uid]
+
+    today = get_date_key()
+    week = get_week_key()
+
+    if q.get("daily_date") != today:
+        q["daily_date"] = today
+        q["daily"] = {
+            key: {"progress": 0, "claimed": False}
+            for key in random.sample(list(DAILY_QUEST_POOL.keys()), 3)
+        }
+
+    if q.get("weekly_week") != week:
+        q["weekly_week"] = week
+        q["weekly"] = {
+            key: {"progress": 0, "claimed": False}
+            for key in random.sample(list(WEEKLY_QUEST_POOL.keys()), min(3, len(WEEKLY_QUEST_POOL)))
+        }
+
+    q.setdefault("permanent", {})
+    for key in PERMANENT_QUESTS:
+        q["permanent"].setdefault(key, {"progress": 0, "claimed": False})
+
+    return q
+
+def add_quest_progress(user_id, quest_type, amount=1):
+    uid = str(user_id)
+    q = get_user_quests(uid)
+
+    for group_name, pool in [
+        ("daily", DAILY_QUEST_POOL),
+        ("weekly", WEEKLY_QUEST_POOL),
+        ("permanent", PERMANENT_QUESTS)
+    ]:
+        for key, state in q[group_name].items():
+            info = pool[key]
+
+            if info["type"] != quest_type:
+                continue
+
+            state["progress"] = min(
+                info["target"],
+                state.get("progress", 0) + amount
+            )
+
+    save_data()
+
+class QuestView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=120)
+        self.user_id = str(user_id)
+
+    async def check_user(self, interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 니 퀘스트 아님.", ephemeral=True)
+            return False
+        return True
+
+    @discord.ui.button(label="일일 퀘스트", style=discord.ButtonStyle.primary)
+    async def daily(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+        await interaction.response.edit_message(
+            embed=make_quest_embed(interaction.user, "daily"),
+            view=self
+        )
+
+    @discord.ui.button(label="주간 퀘스트", style=discord.ButtonStyle.success)
+    async def weekly(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+        await interaction.response.edit_message(
+            embed=make_quest_embed(interaction.user, "weekly"),
+            view=self
+        )
+
+    @discord.ui.button(label="업적 퀘스트", style=discord.ButtonStyle.secondary)
+    async def permanent(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+        await interaction.response.edit_message(
+            embed=make_quest_embed(interaction.user, "permanent"),
+            view=self
+        )
+
+    @discord.ui.button(label="닫기", style=discord.ButtonStyle.danger)
+    async def close(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await self.check_user(interaction):
+            return
+        await interaction.response.edit_message(view=discord.ui.View())
+
+def make_quest_embed(member, group):
+    uid = str(member.id)
+    q = get_user_quests(uid)
+
+    if group == "daily":
+        title = "🌞 일일 퀘스트"
+        pool = DAILY_QUEST_POOL
+        color = discord.Color.gold()
+    elif group == "weekly":
+        title = "📆 주간 퀘스트"
+        pool = WEEKLY_QUEST_POOL
+        color = discord.Color.green()
+    else:
+        title = "🏆 업적 퀘스트"
+        pool = PERMANENT_QUESTS
+        color = discord.Color.purple()
+
+    embed = discord.Embed(
+        title=f"{title} - {member.display_name}",
+        color=color
+    )
+
+    lines = []
+
+    for key, state in q[group].items():
+        info = pool[key]
+        grade = info["grade"]
+        emoji = QUEST_GRADES.get(grade, "⚪")
+
+        progress = state.get("progress", 0)
+        target = info["target"]
+        claimed = state.get("claimed", False)
+
+        if claimed:
+            status = "✅ 수령 완료"
+        elif progress >= target:
+            status = "🎁 수령 가능"
+        else:
+            status = "진행 중"
+
+        lines.append(
+            f"{emoji} **[{grade}급] {info['name']}**\n"
+            f"{info['desc']}\n"
+            f"진행도: **{progress:,}/{target:,}**\n"
+            f"보상: 💎 **{info['reward_primogem']:,}원석**\n"
+            f"상태: **{status}**"
+        )
+
+    embed.description = "\n\n".join(lines) if lines else "퀘스트가 없음."
+
+    return embed
+
+@bot.tree.command(name="퀘스트", description="퀘스트 도감을 확인한다", guild=GUILD)
+async def quest_status(interaction: discord.Interaction):
+    embed = make_quest_embed(interaction.user, "daily")
+
+    await interaction.response.send_message(
+        embed=embed,
+        view=QuestView(interaction.user.id)
+    )
+
+async def check_hero_title(bot, member):
+    uid = str(member.id)
+
+    q = get_user_quests(uid)
+
+    for key in HERO_STEPS:
+        if not q["permanent"].get(key, {}).get("claimed", False):
+            return
+
+    user = get_hunt_user(uid)
+
+    titles = user.setdefault("titles", [])
+
+    if "용사" in titles:
+        return
+
+    titles.append("용사")
+    save_data()
+
+    channel = bot.get_channel(1512642190302777415)
+
+    if channel:
+        await channel.send(
+            f"🌊 **푸리나 드 폰타인**\n\n"
+            f"축하드립니다, {member.mention}.\n\n"
+            f"첫번째 걸음부터 여덟번째 걸음까지,\n"
+            f"모든 여정을 완수하셨군요.\n\n"
+            f"당신은 이제 **『용사』** 칭호를 획득했습니다. ✨"
+        )
+        
+@bot.tree.command(name="퀘스트수령", description="완료한 퀘스트 보상을 수령한다", guild=GUILD)
+async def quest_claim(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    q = get_user_quests(uid)
+
+    total_reward = 0
+    claimed_names = []
+
+    for group_name, pool in [
+        ("daily", DAILY_QUEST_POOL),
+        ("weekly", WEEKLY_QUEST_POOL),
+        ("permanent", PERMANENT_QUESTS)
+    ]:
+        for key, state in q[group_name].items():
+            info = pool[key]
+
+            if state.get("claimed"):
+                continue
+
+            if state.get("progress", 0) >= info["target"]:
+                state["claimed"] = True
+                total_reward += info["reward_primogem"]
+                claimed_names.append(f"[{info['grade']}급] {info['name']}")
+
+    if total_reward <= 0:
+        await interaction.response.send_message(
+            "❌ 수령 가능한 퀘스트 보상이 없음.",
+            ephemeral=True
+        )
+        return
+
+    add_primogems(uid, total_reward)
+    save_data()
+
+    await interaction.response.send_message(
+        f"🎁 퀘스트 보상 수령 완료!\n\n"
+        f"{chr(10).join(claimed_names)}\n\n"
+        f"획득 원석: **{total_reward:,}개**\n"
+        f"현재 원석: **{get_primogems(uid):,}개**"
+    )
+    await check_hero_title(bot, interaction.user)
+
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
