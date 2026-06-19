@@ -5184,7 +5184,9 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
     win_chance = calc_win_chance(user, monster, monster_level)
     win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+
     add_quest_progress(uid, "hunt_count", 1)
+    sync_hunt_level_quests(uid)
 
     embed = discord.Embed(
         title="⚔️ 사냥 시작",
@@ -5219,39 +5221,35 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
         reward, exp = apply_int_reward_bonus(user, reward, exp)
 
         add_poker_money(uid, reward)
+
         add_quest_progress(uid, "hunt_win", 1)
         add_quest_progress(uid, "mora_earned", reward)
+
         leveled = give_hunt_exp(user, exp)
-        
+
+        # 현재 레벨 그대로 업적에 반영
+        add_quest_progress(uid, "level", user["level"], mode="max")
+
         result = (
             f"✅ 승리!\n"
             f"획득 모라: **{reward:,}모라**\n"
             f"획득 경험치: **{exp} EXP**\n"
         )
-        
+
         if leveled:
             result += (
                 f"\n🎉 레벨 업! 현재 레벨: **Lv.{user['level']}**\n"
                 f"스탯 포인트 **{leveled * 5}** 획득!"
             )
-            
-            add_quest_progress(uid, "level_up", leveled)
 
-        q = get_user_quests(uid)
-        perm = q["permanent"]
-        
-        if "perm_level_100" in perm:
-            perm["perm_level_100"]["progress"] = max(
-                perm["perm_level_100"]["progress"],
-                user["level"]
-            )
-            
         embed.color = discord.Color.green()
-        
+
     else:
         life_saved = check_life_save(user)
 
         if life_saved:
+            add_quest_progress(uid, "life_save", 1)
+
             result = (
                 f"💀 패배...\n"
                 f"하지만 체력 효과로 목숨을 잃지 않았다!\n"
@@ -5280,7 +5278,6 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
 
         embed.color = discord.Color.red()
 
-    
     if not is_target:
         hunt_cooldowns[uid] = datetime.now(timezone.utc) + HUNT_COOLDOWN
 
@@ -6265,6 +6262,8 @@ HERO_STEPS = [
 async def check_hero_title(bot, member):
     uid = str(member.id)
 
+    sync_hunt_level_quests(uid)
+
     q = get_user_quests(uid)
 
     for key in HERO_STEPS:
@@ -6342,29 +6341,40 @@ def get_user_quests(user_id):
 
     return q
 
-def add_quest_progress(user_id, quest_type, amount=1):
+def add_quest_progress(user_id, quest_type, amount=1, mode="add"):
     uid = str(user_id)
-    user_quests = quests.setdefault(uid, {})
+    q = get_user_quests(uid)
 
-    for quest_id, quest in QUESTS.items():
-        if quest["type"] != quest_type:
-            continue
+    for group_name, pool in [
+        ("daily", DAILY_QUEST_POOL),
+        ("weekly", WEEKLY_QUEST_POOL),
+        ("permanent", PERMANENT_QUESTS)
+    ]:
+        for quest_id, quest in pool.items():
+            if quest["type"] != quest_type:
+                continue
 
-        user_quests.setdefault(quest_id, {
-            "progress": 0,
-            "claimed": False
-        })
+            q[group_name].setdefault(quest_id, {
+                "progress": 0,
+                "claimed": False
+            })
 
-        if quest_type == "level_reached":
-            user_quests[quest_id]["progress"] = max(
-                user_quests[quest_id]["progress"],
-                int(amount)
-            )
-        else:
-            user_quests[quest_id]["progress"] += int(amount)
+            if mode == "max":
+                q[group_name][quest_id]["progress"] = max(
+                    int(q[group_name][quest_id].get("progress", 0)),
+                    int(amount)
+                )
+            else:
+                q[group_name][quest_id]["progress"] += int(amount)
 
     save_data()
 
+
+def sync_hunt_level_quests(uid):
+    user = get_hunt_user(uid)
+
+    # 레벨 업적은 현재 레벨 기준으로 보정
+    add_quest_progress(uid, "level", user["level"], mode="max")
 QUEST_PAGE_SIZE = 6
 
 
@@ -6513,7 +6523,11 @@ class QuestView(discord.ui.View):
 
 @bot.tree.command(name="퀘스트", description="퀘스트 도감을 확인한다", guild=GUILD)
 async def quest_status(interaction: discord.Interaction):
-    view = QuestView(interaction.user.id, "daily", 0)
+    uid = str(interaction.user.id)
+
+    sync_hunt_level_quests(uid)
+
+    view = QuestView(uid, "daily", 0)
     embed, max_page = make_quest_embed(interaction.user, "daily", 0)
 
     view.prev_page.disabled = True
@@ -6529,8 +6543,6 @@ HERO_ROLE_ID = 1517096562931793950
 async def check_hero_title(bot, member):
     uid = str(member.id)
 
-    user = get_hunt_user(uid)
-    add_quest_progress(uid, "level_reached", user["level"])
 
     q = get_user_quests(uid)
 
