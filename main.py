@@ -1169,11 +1169,29 @@ async def birthday_check():
         if channel:
             await channel.send(FURINA_BIRTHDAY_NOTICE)
 
+def build_furina_style_examples(limit=35):
+    examples = []
+
+    for responses in RESPONSES.values():
+        examples.extend(responses)
+
+    for responses in COMBO_RESPONSES.values():
+        examples.extend(responses)
+
+    for responses in REPEAT_RESPONSES.values():
+        examples.extend(responses)
+
+    # 너무 길어지면 토큰 낭비라 랜덤 샘플만 사용
+    examples = random.sample(examples, min(limit, len(examples)))
+
+    return "\n".join(f"- {text}" for text in examples)
+    
 async def generate_furina_ai_response(user_id, user_text):
     try:
         name = get_user_memory(user_id, "name", "여행자")
         favor_value = get_favor(user_id)
         favor_stage = get_favor_stage(user_id)
+        style_examples = build_furina_style_examples()
 
         prompt = f"""
 너는 원신의 푸리나다.
@@ -1196,6 +1214,12 @@ async def generate_furina_ai_response(user_id, user_text):
 - 사실은 정이 많고 인정받고 싶어함
 - 친구와 대화하듯 편하게 말함
 - 사용자의 감정을 공감해줌
+
+기존 푸리나 대사 예시:
+{style_examples}
+
+위 예시들의 말투, 문장 길이, 감정 표현, 장난스러운 느낌을 따라 해.
+단, 예시 문장을 그대로 복붙하지 말고 새로 대답해.
 
 사용자 이름: {name}
 호감도: {favor_value}
