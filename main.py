@@ -56,7 +56,8 @@ data = {
     "weapons": {},
     "primogems": {},
     "quests": {},
-    "achievements": {}
+    "achievements": {},
+    "character_pity": {}
 }
 
 characters = {}
@@ -64,6 +65,7 @@ weapons = {}
 primogems = {}
 quests = {}
 achievements = {}
+character_pity = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -76,14 +78,15 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements
-
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity
+    
     os.makedirs(DATA_DIR, exist_ok=True)
 
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["character_pity"] = loaded.get("character_pity", {})
         data["poker_money"] = loaded.get("poker_money", {})
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
         data["favor"] = loaded.get("favor", {})
@@ -104,6 +107,7 @@ def load_data():
     primogems = data["primogems"]
     quests = data["quests"]
     achievements = data["achievements"]
+    character_pity = data["character_pity"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -112,6 +116,7 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["character_pity"] = character_pity
     data["primogems"] = primogems
     data["quests"] = quests
     data["achievements"] = achievements
@@ -1600,13 +1605,40 @@ def get_character_level(exp):
     if exp >= 1:
         return 2
     return 1
+def draw_character(user_id):
+    uid = str(user_id)
 
-def draw_character():
-    five_stars = [name for name, info in GENSHIN_CHARACTERS.items() if info["rarity"] == 5]
-    four_stars = [name for name, info in GENSHIN_CHARACTERS.items() if info["rarity"] == 4]
+    character_pity.setdefault(uid, {
+        "no_5star": 0,   # 5성 안 뜬 연속 횟수
+        "total": 0       # 누적 뽑기 횟수
+    })
 
-    if random.random() < 0.08:
+    pity = character_pity[uid]
+
+    five_stars = [
+        name for name, info in GENSHIN_CHARACTERS.items()
+        if info["rarity"] == 5
+    ]
+
+    four_stars = [
+        name for name, info in GENSHIN_CHARACTERS.items()
+        if info["rarity"] == 4
+    ]
+
+    pity["no_5star"] += 1
+    pity["total"] += 1
+
+    # 누적 200회 or 연속 50회 확정 5성
+    if pity["total"] >= 200 or pity["no_5star"] >= 50:
+        pity["no_5star"] = 0
+        pity["total"] = 0
         return random.choice(five_stars)
+
+    # 일반 5성 확률
+    if random.random() < 0.08:
+        pity["no_5star"] = 0
+        return random.choice(five_stars)
+
     return random.choice(four_stars)
     
 SUITS = ["♠", "♥", "♦", "♣"]
@@ -2923,7 +2955,7 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
 
     for i in range(횟수):
 
-        name = draw_character()
+        name = draw_character(uid)
         info = GENSHIN_CHARACTERS[name]
 
         highest_rarity = max(
@@ -2974,7 +3006,7 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
                     f"💖 {name} Lv.{old_level} → Lv.{new_level}\n"
                     f"💰 {reward:,} 모라"
                 )
-
+    add_quest_progress(uid, "gacha_count", 횟수)
     save_data()
 
     current_money = get_poker_money(uid)
@@ -5187,6 +5219,8 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
         reward, exp = apply_int_reward_bonus(user, reward, exp)
 
         add_poker_money(uid, reward)
+        add_quest_progress(uid, "hunt_win", 1)
+        add_quest_progress(uid, "mora_earned", reward)
         leveled = give_hunt_exp(user, exp)
         
         result = (
@@ -6310,23 +6344,24 @@ def get_user_quests(user_id):
 
 def add_quest_progress(user_id, quest_type, amount=1):
     uid = str(user_id)
-    q = get_user_quests(uid)
+    user_quests = quests.setdefault(uid, {})
 
-    for group_name, pool in [
-        ("daily", DAILY_QUEST_POOL),
-        ("weekly", WEEKLY_QUEST_POOL),
-        ("permanent", PERMANENT_QUESTS)
-    ]:
-        for key, state in q[group_name].items():
-            info = pool[key]
+    for quest_id, quest in QUESTS.items():
+        if quest["type"] != quest_type:
+            continue
 
-            if info["type"] != quest_type:
-                continue
+        user_quests.setdefault(quest_id, {
+            "progress": 0,
+            "claimed": False
+        })
 
-            state["progress"] = min(
-                info["target"],
-                state.get("progress", 0) + amount
+        if quest_type == "level_reached":
+            user_quests[quest_id]["progress"] = max(
+                user_quests[quest_id]["progress"],
+                int(amount)
             )
+        else:
+            user_quests[quest_id]["progress"] += int(amount)
 
     save_data()
 
@@ -6493,6 +6528,9 @@ HERO_ROLE_ID = 1517096562931793950
 
 async def check_hero_title(bot, member):
     uid = str(member.id)
+
+    user = get_hunt_user(uid)
+    add_quest_progress(uid, "level_reached", user["level"])
 
     q = get_user_quests(uid)
 
