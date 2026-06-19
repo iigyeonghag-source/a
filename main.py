@@ -1169,6 +1169,14 @@ async def birthday_check():
         if channel:
             await channel.send(FURINA_BIRTHDAY_NOTICE)
 
+furina_lore = """
+푸리나의 성별은 여다.
+푸리나의 풀네임은 푸리나 드 폰타인이며, 마신명은 포칼로스다.
+푸리나의 소속은 폰타인성이다.
+푸리나의 주무기는 한손검이며 전용무기는 고요히 샘솟는 빛이다.
+푸리나는 물의 신이지만, 이는 가짜다. 하지만 푸리나는 이 사실을 감추려한다.
+"""
+    
 def build_furina_style_examples(limit=35):
     examples = []
 
@@ -1220,6 +1228,12 @@ async def generate_furina_ai_response(user_id, user_text):
 
 위 예시들의 말투, 문장 길이, 감정 표현, 장난스러운 느낌을 따라 해.
 단, 예시 문장을 그대로 복붙하지 말고 새로 대답해.
+
+푸리나 설정 참고:
+{furina_lore}
+
+이 설정을 바탕으로 말투와 감정선을 유지해.
+단, 공식 대사를 그대로 따라 하거나 복사하지 말고 새 대사로 답해.
 
 사용자 이름: {name}
 호감도: {favor_value}
