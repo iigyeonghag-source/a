@@ -6820,6 +6820,70 @@ async def remove_stat(
         f"✅ {유저.mention}의 **{stat_key}** 스탯 **-{수치}** 차감 완료!\n"
         f"현재 수치: **{user[stat_key]}**"
     )
+
+@bot.tree.command(name="레벨", description="내 레벨과 경험치를 확인합니다.", guild=GUILD)
+async def level_check(interaction: discord.Interaction, member: discord.Member = None):
+    member = member or interaction.user
+
+    info = get_level_data(member.id)
+    need = required_xp(info["level"])
+
+    embed = discord.Embed(
+        title=f"{member.display_name}님의 레벨",
+        description=(
+            f"**Lv.{info['level']}**\n"
+            f"XP: **{info['xp']} / {need}**\n"
+            f"채팅 수: **{info.get('messages', 0)}회**\n"
+            f"글자 수: **{info.get('chars', 0)}자**\n"
+            f"음성 시간: **{info.get('voice_minutes', 0)}분**"
+        ),
+        color=discord.Color.blue()
+    )
+    embed.set_thumbnail(url=member.display_avatar.url)
+
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="랭킹", description="서버 레벨 랭킹 TOP 10을 확인합니다.", guild=GUILD)
+async def level_ranking(interaction: discord.Interaction):
+    if not levels:
+        await interaction.response.send_message("아직 랭킹 데이터가 없어!")
+        return
+
+    ranking = sorted(
+        levels.items(),
+        key=lambda item: (
+            item[1].get("level", 1),
+            item[1].get("xp", 0)
+        ),
+        reverse=True
+    )
+
+    text = ""
+
+    for rank, (uid, info) in enumerate(ranking[:10], start=1):
+        member = interaction.guild.get_member(int(uid))
+
+        if member:
+            name = member.display_name
+        else:
+            name = f"알 수 없는 유저({uid})"
+
+        level = info.get("level", 1)
+        xp = info.get("xp", 0)
+
+        medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}위"
+
+        text += f"{medal} **{name}** - Lv.{level} / {xp} XP\n"
+
+    embed = discord.Embed(
+        title="🏆 레벨 랭킹 TOP 10",
+        description=text,
+        color=discord.Color.gold()
+    )
+
+    await interaction.response.send_message(embed=embed)
+
+
 @bot.event
 async def on_ready():
     if not birthday_check.is_running():
