@@ -1362,12 +1362,12 @@ async def on_message(message):
         
         xp = min(2 + ((content_len - 2) // 2), 15)
 
-            info = get_level_data(message.author.id)
-            info["messages"] += 1
-            info["chars"] += content_len
-
-            last_chat_xp[uid] = now
-            await add_xp(message.author, xp, "채팅")
+        info = get_level_data(message.author.id)
+        info["messages"] += 1
+        info["chars"] += content_len
+            
+        last_chat_xp[uid] = now
+        await add_xp(message.author, xp, "채팅")
             
     if not message.content.startswith("푸리나"):
         await bot.process_commands(message)
