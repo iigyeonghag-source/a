@@ -215,9 +215,10 @@ async def add_xp(member, amount, reason="채팅"):
 
     save_data()
 
-    if leveled_up:
+       if leveled_up:
         await update_level_nickname(member)
-
+        await give_level_roles(member)
+    
         channel = member.guild.get_channel(LEVEL_LOG_CHANNEL_ID)
         if channel:
             need = required_xp(info["level"])
@@ -6885,6 +6886,47 @@ async def level_ranking(interaction: discord.Interaction):
     )
 
     await interaction.response.send_message(embed=embed)
+
+LEVEL_ROLE_CHANNEL_ID = 1512642190302777415
+
+LEVEL_ROLE_REWARDS = {
+    5: 111111111111111111,   # Lv.5 역할 ID
+    10: 222222222222222222,  # Lv.10 역할 ID
+    20: 333333333333333333,  # Lv.20 역할 ID
+    30: 444444444444444444,  # Lv.30 역할 ID
+}
+
+async def give_level_roles(member):
+    if member.bot:
+        return
+
+    info = get_level_data(member.id)
+    user_level = info["level"]
+
+    given_roles = []
+
+    for level, role_id in LEVEL_ROLE_REWARDS.items():
+        if user_level >= level:
+            role = member.guild.get_role(role_id)
+
+            if role and role not in member.roles:
+                try:
+                    await member.add_roles(role, reason=f"레벨 {level} 달성 보상")
+                    given_roles.append(role)
+
+                except discord.Forbidden:
+                    print(f"역할 지급 권한 없음: {member} / {role.name}")
+
+                except discord.HTTPException as e:
+                    print(f"역할 지급 실패: {member} / {e}")
+
+    if given_roles:
+        channel = member.guild.get_channel(LEVEL_ROLE_CHANNEL_ID)
+
+        if channel:
+            roles_text = ", ".join(role.mention for role in given_roles)
+            await channel.send(f"{member.mention} {roles_text}")
+
 
 
 @bot.event
