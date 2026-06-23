@@ -32,6 +32,7 @@ if TOKEN is None:
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
+intents.voice_states = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -47,6 +48,7 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "levels": {},
     "poker_money": {},
     "poker_last_claim": {},
     "favor": {},
@@ -78,7 +80,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -86,6 +88,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["levels"] = loaded.get("levels", {})
         data["character_pity"] = loaded.get("character_pity", {})
         data["poker_money"] = loaded.get("poker_money", {})
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
@@ -98,6 +101,7 @@ def load_data():
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
 
+    levels = data["levels"]
     poker_money = data["poker_money"]
     favor = data["favor"]
     user_memory = data["memory"]
@@ -116,6 +120,7 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["levels"] = levels
     data["character_pity"] = character_pity
     data["primogems"] = primogems
     data["quests"] = quests
@@ -143,10 +148,90 @@ favor = {}
 characters = {}
 hunt_users = {}
 
+levels = {}
+
+LEVEL_LOG_CHANNEL_ID = 1518910263682662451
+CHAT_XP_COOLDOWN = timedelta(seconds=5)
+last_chat_xp = {}
+
 load_data()
         
 KST = timezone(timedelta(hours=9))
 
+def get_level_data(user_id):
+    uid = str(user_id)
+    levels.setdefault(uid, {
+        "xp": 0,
+        "level": 1,
+        "messages": 0,
+        "chars": 0,
+        "voice_minutes": 0
+    })
+    return levels[uid]
+
+
+def required_xp(level):
+    return 100 + (level - 1) * 50
+
+
+def clean_level_nickname(name):
+    import re
+    return re.sub(r"\s*\[Lv\.\d+\]$", "", name)
+
+
+async def update_level_nickname(member):
+    if member.bot:
+        return
+
+    info = get_level_data(member.id)
+    base_name = clean_level_nickname(member.display_name)
+    new_name = f"{base_name} [Lv.{info['level']}]"
+
+    if member.display_name == new_name:
+        return
+
+    try:
+        await member.edit(nick=new_name)
+    except discord.Forbidden:
+        print(f"닉네임 변경 권한 없음: {member}")
+    except discord.HTTPException as e:
+        print(f"닉네임 변경 실패: {e}")
+
+
+async def add_xp(member, amount, reason="채팅"):
+    if member.bot:
+        return
+
+    info = get_level_data(member.id)
+    old_level = info["level"]
+
+    info["xp"] += int(amount)
+
+    leveled_up = False
+    while info["xp"] >= required_xp(info["level"]):
+        info["xp"] -= required_xp(info["level"])
+        info["level"] += 1
+        leveled_up = True
+
+    save_data()
+
+    if leveled_up:
+        await update_level_nickname(member)
+
+        channel = member.guild.get_channel(LEVEL_LOG_CHANNEL_ID)
+        if channel:
+            embed = discord.Embed(
+                title="🎉 레벨 업!",
+                description=(
+                    f"{member.mention} 레벨 상승!\n"
+                    f"**Lv.{old_level} → Lv.{info['level']}**\n"
+                    f"사유: `{reason}`"
+                ),
+                color=discord.Color.gold()
+            )
+            embed.set_thumbnail(url=member.display_avatar.url)
+            await channel.send(embed=embed)
+            
 def get_favor(user_id):
     return favor.get(str(user_id), 0)
 
@@ -1266,6 +1351,24 @@ async def on_message(message):
     if message.author.bot:
         return
 
+    now = datetime.now(KST)
+    uid = str(message.author.id)
+
+    if uid not in last_chat_xp or now - last_chat_xp[uid] >= CHAT_XP_COOLDOWN:
+        content_len = len(message.content.strip())
+
+        if content_len < 2:
+            return
+        
+        xp = min(2 + ((content_len - 2) // 2), 15)
+
+            info = get_level_data(message.author.id)
+            info["messages"] += 1
+            info["chars"] += content_len
+
+            last_chat_xp[uid] = now
+            await add_xp(message.author, xp, "채팅")
+            
     if not message.content.startswith("푸리나"):
         await bot.process_commands(message)
         return
@@ -1421,6 +1524,19 @@ async def on_message(message):
     
     await message.reply(ai_response)
 
+@tasks.loop(minutes=1)
+async def voice_xp_loop():
+    for guild in bot.guilds:
+        for channel in guild.voice_channels:
+            for member in channel.members:
+                if member.bot:
+                    continue
+
+                info = get_level_data(member.id)
+                info["voice_minutes"] += 1
+
+                await add_xp(member, 10, "음성 채팅 1분")
+                
             
 GENSHIN_CHARACTERS = ({
     "푸리나": {"rarity": 5, "dialogue": "자, 박수! 오늘의 무대에 오른 건 바로 이 푸리나님이야!"},
@@ -6712,6 +6828,9 @@ async def on_ready():
     if not voice_kick_check.is_running():
         voice_kick_check.start()
 
+    if not voice_xp_loop.is_running():
+        voice_xp_loop.start()
+        
     synced = await bot.tree.sync(guild=GUILD)
 
     print(f"로그인됨: {bot.user}")
