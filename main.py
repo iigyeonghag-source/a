@@ -150,6 +150,9 @@ hunt_users = {}
 
 levels = {}
 
+RANKING_CHANNEL_ID = 1518922787828531312
+ranking_message_id = None
+
 LEVEL_LOG_CHANNEL_ID = 1518910263682662451
 CHAT_XP_COOLDOWN = timedelta(seconds=5)
 last_chat_xp = {}
@@ -218,7 +221,8 @@ async def add_xp(member, amount, reason="채팅"):
     if leveled_up:
         await update_level_nickname(member)
         await give_level_roles(member)
-    
+        await update_ranking_message(member.guild)
+        
         channel = member.guild.get_channel(LEVEL_LOG_CHANNEL_ID)
         if channel:
             need = required_xp(info["level"])
@@ -6927,6 +6931,53 @@ async def give_level_roles(member):
         if channel:
             roles_text = ", ".join(role.mention for role in given_roles)
             await channel.send(f"{member.mention} {roles_text}")
+
+def build_ranking_embed(guild):
+    ranking = sorted(
+        levels.items(),
+        key=lambda item: (
+            item[1].get("level", 1),
+            item[1].get("xp", 0)
+        ),
+        reverse=True
+    )
+
+    text = ""
+
+    for rank, (uid, info) in enumerate(ranking[:10], start=1):
+        member = guild.get_member(int(uid))
+        name = member.display_name if member else f"알 수 없는 유저"
+
+        medal = "🥇" if rank == 1 else "🥈" if rank == 2 else "🥉" if rank == 3 else f"{rank}위"
+        text += f"{medal} **{name}** - Lv.{info.get('level', 1)} / {info.get('xp', 0)} XP\n"
+
+    if not text:
+        text = "아직 랭킹 데이터가 없어!"
+
+    return discord.Embed(
+        title="🏆 실시간 레벨 랭킹 TOP 10",
+        description=text,
+        color=discord.Color.gold()
+
+async def update_ranking_message(guild):
+    global ranking_message_id
+
+    channel = guild.get_channel(RANKING_CHANNEL_ID)
+    if not channel:
+        return
+
+    embed = build_ranking_embed(guild)
+
+    if ranking_message_id:
+        try:
+            msg = await channel.fetch_message(ranking_message_id)
+            await msg.edit(embed=embed)
+            return
+        except:
+            ranking_message_id = None
+
+    msg = await channel.send(embed=embed)
+    ranking_message_id = msg.id
 
 
 
