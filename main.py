@@ -6934,6 +6934,13 @@ async def give_level_roles(member):
             roles_text = ", ".join(role.mention for role in given_roles)
             await channel.send(f"{member.mention} {roles_text}")
 
+@tasks.loop(seconds=5)
+async def ranking_update_loop():
+    guild = bot.get_guild(GUILD_ID)
+
+    if guild:
+        await update_ranking_message(guild)
+        
 def build_ranking_embed(guild):
     ranking = sorted(
         levels.items(),
@@ -6946,7 +6953,7 @@ def build_ranking_embed(guild):
 
     text = ""
 
-    for rank, (uid, info) in enumerate(ranking[:10], start=1):
+    for rank, (uid, info) in enumerate(ranking[:50], start=1):
         member = guild.get_member(int(uid))
         name = member.display_name if member else f"알 수 없는 유저"
 
@@ -6991,6 +6998,9 @@ async def update_ranking_message(guild):
 
 @bot.event
 async def on_ready():
+    if not ranking_update_loop.is_running():
+        ranking_update_loop.start()
+    
     if not birthday_check.is_running():
         birthday_check.start()
 
