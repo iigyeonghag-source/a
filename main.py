@@ -6957,7 +6957,7 @@ def build_ranking_embed(guild):
     return discord.Embed(
         title="🏆 실시간 레벨 랭킹 TOP 10",
         description=text,
-        color=discord.Color.gold()
+        color=discord.Color.gold())
 
 async def update_ranking_message(guild):
     global ranking_message_id
