@@ -10,7 +10,27 @@ from discord import app_commands
 import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont, ImageOps
+from PIL import Image, ImageDraw, ImageFont, ImageOps@bot.event
+async def on_ready():
+    if not birthday_check.is_running():
+        birthday_check.start()
+
+    if not voice_kick_check.is_running():
+        voice_kick_check.start()
+
+    if not voice_xp_loop.is_running():
+        voice_xp_loop.start()
+        
+    synced = await bot.tree.sync(guild=GUILD)
+
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        await update_ranking_message(guild)
+    else:
+        print("길드를 못 찾음")
+
+    print(f"로그인됨: {bot.user}")
+    print(f"길드 명령어 {len(synced)}개 동기화")
 from io import BytesIO
 import google.generativeai as genai
 
@@ -6955,7 +6975,7 @@ def build_ranking_embed(guild):
         text = "아직 랭킹 데이터가 없어!"
 
     return discord.Embed(
-        title="🏆 실시간 레벨 랭킹 TOP 10",
+        title="🏆 실시간 레벨 랭킹 TOP 50",
         description=text,
         color=discord.Color.gold())
 
