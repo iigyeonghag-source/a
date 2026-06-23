@@ -10,8 +10,9 @@ from discord import app_commands
 import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
-from PIL import Image, ImageDraw, ImageFont, ImageOps@bot.event
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
+@bot.event
 async def on_ready():
     if not birthday_check.is_running():
         birthday_check.start()
