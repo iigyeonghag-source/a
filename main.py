@@ -1545,7 +1545,7 @@ async def voice_xp_loop():
                 info = get_level_data(member.id)
                 info["voice_minutes"] += 1
 
-                await add_xp(member, 10, "음성 채팅 1분")
+                await add_xp(member, 3, "음성 채팅 1분")
                 
             
 GENSHIN_CHARACTERS = ({
