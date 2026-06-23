@@ -11,6 +11,7 @@ import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont, ImageOps@bot.event
+
 async def on_ready():
     if not birthday_check.is_running():
         birthday_check.start()
@@ -68,6 +69,7 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "ranking_message_id": None,
     "levels": {},
     "poker_money": {},
     "poker_last_claim": {},
@@ -108,6 +110,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["ranking_message_id"] = loaded.get("ranking_message_id")
         data["levels"] = loaded.get("levels", {})
         data["character_pity"] = loaded.get("character_pity", {})
         data["poker_money"] = loaded.get("poker_money", {})
@@ -140,6 +143,7 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["ranking_message_id"] = data.get("ranking_message_id")
     data["levels"] = levels
     data["character_pity"] = character_pity
     data["primogems"] = primogems
@@ -171,7 +175,6 @@ hunt_users = {}
 levels = {}
 
 RANKING_CHANNEL_ID = 1518922787828531312
-ranking_message_id = None
 
 LEVEL_LOG_CHANNEL_ID = 1518910263682662451
 CHAT_XP_COOLDOWN = timedelta(seconds=5)
@@ -6980,26 +6983,32 @@ def build_ranking_embed(guild):
         color=discord.Color.gold())
 
 async def update_ranking_message(guild):
-    global ranking_message_id
-
     channel = guild.get_channel(RANKING_CHANNEL_ID)
     if not channel:
+        print("랭킹 채널을 못 찾음")
         return
 
     embed = build_ranking_embed(guild)
 
-    if ranking_message_id:
+    message_id = data.get("ranking_message_id")
+
+    if message_id:
         try:
-            msg = await channel.fetch_message(ranking_message_id)
+            msg = await channel.fetch_message(int(message_id))
             await msg.edit(embed=embed)
             return
-        except:
-            ranking_message_id = None
+        except discord.NotFound:
+            print("기존 랭킹 메시지를 못 찾음. 새로 생성함.")
+        except discord.Forbidden:
+            print("랭킹 메시지 수정 권한 없음")
+            return
+        except discord.HTTPException as e:
+            print(f"랭킹 메시지 수정 실패: {e}")
 
     msg = await channel.send(embed=embed)
-    ranking_message_id = msg.id
-
-
+    data["ranking_message_id"] = msg.id
+    save_data()
+    print(f"랭킹 메시지 생성됨: {msg.id}")
 
 @bot.event
 async def on_ready():
