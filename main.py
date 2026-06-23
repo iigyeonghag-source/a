@@ -215,7 +215,7 @@ async def add_xp(member, amount, reason="채팅"):
 
     save_data()
 
-       if leveled_up:
+    if leveled_up:
         await update_level_nickname(member)
         await give_level_roles(member)
     
