@@ -220,12 +220,15 @@ async def add_xp(member, amount, reason="채팅"):
 
         channel = member.guild.get_channel(LEVEL_LOG_CHANNEL_ID)
         if channel:
+            need = required_xp(info["level"])
+
             embed = discord.Embed(
                 title="🎉 레벨 업!",
                 description=(
-                    f"{member.mention} 레벨 상승!\n"
-                    f"**Lv.{old_level} → Lv.{info['level']}**\n"
-                    f"사유: `{reason}`"
+                    f"{member.mention} 레벨 상승!\n\n"
+                    f"📈 **Lv.{old_level} → Lv.{info['level']}**\n"
+                    f"⭐ 현재 경험치: **{info['xp']} / {need}**\n"
+                    f"📝 사유: `{reason}`"
                 ),
                 color=discord.Color.gold()
             )
