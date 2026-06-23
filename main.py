@@ -5989,7 +5989,7 @@ async def give_stat_point(
     )
 
 @bot.tree.command(
-    name="레벨",
+    name="사냥레벨관리",
     description="관리자 전용: 유저의 사냥 레벨을 올린다",
     guild=GUILD
 )
