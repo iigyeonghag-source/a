@@ -11,28 +11,6 @@ import asyncio
 from difflib import SequenceMatcher
 from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont, ImageOps
-
-@bot.event
-async def on_ready():
-    if not birthday_check.is_running():
-        birthday_check.start()
-
-    if not voice_kick_check.is_running():
-        voice_kick_check.start()
-
-    if not voice_xp_loop.is_running():
-        voice_xp_loop.start()
-        
-    synced = await bot.tree.sync(guild=GUILD)
-
-    guild = bot.get_guild(GUILD_ID)
-    if guild:
-        await update_ranking_message(guild)
-    else:
-        print("길드를 못 찾음")
-
-    print(f"로그인됨: {bot.user}")
-    print(f"길드 명령어 {len(synced)}개 동기화")
 from io import BytesIO
 import google.generativeai as genai
 
@@ -7021,16 +6999,14 @@ async def on_ready():
 
     if not voice_xp_loop.is_running():
         voice_xp_loop.start()
-        
+
     synced = await bot.tree.sync(guild=GUILD)
 
     guild = bot.get_guild(GUILD_ID)
     if guild:
         await update_ranking_message(guild)
-    else:
-        print("길드를 못 찾음")
 
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
-    
+
 bot.run(TOKEN)
