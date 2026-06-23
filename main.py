@@ -6868,7 +6868,7 @@ async def level_ranking(interaction: discord.Interaction):
 
     text = ""
 
-    for rank, (uid, info) in enumerate(ranking[:10], start=1):
+    for rank, (uid, info) in enumerate(ranking[:50], start=1):
         member = interaction.guild.get_member(int(uid))
 
         if member:
@@ -6993,6 +6993,12 @@ async def on_ready():
         voice_xp_loop.start()
         
     synced = await bot.tree.sync(guild=GUILD)
+
+    guild = bot.get_guild(GUILD_ID)
+    if guild:
+        await update_ranking_message(guild)
+    else:
+        print("길드를 못 찾음")
 
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
