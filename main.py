@@ -4853,7 +4853,7 @@ WEAPONS = {
     "안개를 가르는 회광": {"price": 18000, "bonus": 45},
     "고요히 샘솟는 빛": {"price": 25000, "bonus": 60},
     "서약의 자유": {"price": 100000, "bonus": 85},
-    "용사의 성검": {"price": 5000000, "bonus": 170}
+    "용사의 성검": {"price": 6500000, "bonus": 270}
 }
 
 ARMORS = {
@@ -4868,7 +4868,7 @@ ARMORS = {
     "그림자 사냥꾼": {"price": 15000, "bonus": 45},
     "황금 극단": {"price": 20000, "bonus": 60},
     "화려한 꿈의 껍데기": {"price": 100000, "bonus": 80},
-    "용사의 갑옷": {"price": 4500000, "bonus": 100}
+    "용사의 갑옷": {"price": 500000, "bonus": 200}
 }
 
 MONSTERS = [
@@ -4877,10 +4877,10 @@ MONSTERS = [
     {"name": "츄츄 폭도", "min": 5, "max": 20, "penalty": 14},
     {"name": "보물 사냥단", "min": 8, "max": 25, "penalty": 24},
     {"name": "심연 메이지", "min": 12, "max": 35, "penalty": 31},
-    {"name": "우인단 선발대", "min": 15, "max": 40, "penalty": 40},
-    {"name": "유적 가드", "min": 20, "max": 45, "penalty": 50},
-    {"name": "유적 헌터", "min": 25, "max": 50, "penalty": 63},
-    {"name": "거울의 여인", "min": 30, "max": 55, "penalty": 71},
+    {"name": "우인단 선발대", "min": 15, "max": 40, "penalty": 41},
+    {"name": "유적 가드", "min": 20, "max": 45, "penalty": 52},
+    {"name": "유적 헌터", "min": 25, "max": 50, "penalty": 64},
+    {"name": "거울의 여인", "min": 30, "max": 55, "penalty": 76},
     {"name": "검귀", "min": 35, "max": 60, "penalty": 84},
     {"name": "성해 짐승", "min": 40, "max": 70, "penalty": 96},
     {"name": "유적 드레이크", "min": 45, "max": 75, "penalty": 105},
