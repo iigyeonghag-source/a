@@ -2925,18 +2925,6 @@ async def favor_check(ctx):
         f"{ctx.author.display_name}의 푸리나 호감도: **{value}** / 단계: **{stage}**"
     )
 
-async def send_role_message(member, role_name, channel):
-    role = discord.utils.get(member.guild.roles, name=role_name)
-    if role is None:
-        return
-
-    msg = ROLE_MESSAGES[role_name].format(
-        user=member.mention,
-        role=role.mention
-    )
-
-    await channel.send(msg)
-
 SERVER_ID = 1510681614919794868
 CHANNEL_ID = 1512642190302777415
 
@@ -2954,41 +2942,39 @@ ROLE_MESSAGES = {
     "석유": "🎉🎉 축하해!! 우리 서버가 산유국이 됐어! 우리 서버도 {role}가 나온다니, {user}, 넌 정말 대단해!" 
 }
     
-@bot.event
+bot.event
 async def on_member_update(before, after):
-    # 다른 서버면 무시
-
-    desc = ROLE_MESSAGES[role.name].format(
-        user=after.mention,
-        role=f"**{role.name}**"
-    )
     if after.guild.id != SERVER_ID:
         return
 
-    before_roles = {role.id for role in before.roles}
-    
-    for role in after.roles:
-        if role.id not in before_roles:
+    before_roles = {r.id for r in before.roles}
 
-            if role.name not in ROLE_MESSAGES:
+    for new_role in after.roles:
+        if new_role.id not in before_roles:
+            if new_role.name not in ROLE_MESSAGES:
                 continue
 
             channel = after.guild.get_channel(CHANNEL_ID)
             if channel is None:
                 print("채널 못 찾음")
                 return
-            
+
+            desc = ROLE_MESSAGES[new_role.name].format(
+                user=after.mention,
+                role=f"**{new_role.name}**"
+            )
+
             embed = discord.Embed(
                 title="🎉 역할 획득!",
                 description=desc,
-                color=role.color if role.color.value != 0 else discord.Color.gold()
+                color=new_role.color if new_role.color.value != 0 else discord.Color.gold()
             )
 
             embed.set_thumbnail(url=after.display_avatar.url)
 
             embed.add_field(
                 name="획득한 역할",
-                value=f"🏷️ {role.name}",
+                value=f"🏷️ {new_role.name}",
                 inline=False
             )
 
@@ -3000,13 +2986,13 @@ async def on_member_update(before, after):
             await channel.send(
                 embed=embed,
                 allowed_mentions=discord.AllowedMentions(
-                    users=True,    # 장본인만 멘션
-                    roles=False,   # 역할 멘션 금지
-                    everyone=False # @everyone 금지
+                    users=True,
+                    roles=False,
+                    everyone=False
                 )
             )
 
-            print(f"{after} → {role.name} 역할 획득 알림 전송")
+            print(f"{after} → {new_role.name} 역할 획득 알림 전송")
             
 print(get_time_key())
 print(datetime.now())
