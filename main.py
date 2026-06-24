@@ -4803,7 +4803,7 @@ async def voice_kick_check():
 hunt_cooldowns = {}
 target_hunt_cooldowns = {}
 
-HUNT_COOLDOWN = timedelta(seconds=10)
+HUNT_COOLDOWN = timedelta(seconds=5)
 TARGET_HUNT_COOLDOWN = timedelta(hours=24)
 
 STAT_NAMES = {
