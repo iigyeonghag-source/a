@@ -2973,11 +2973,6 @@ async def on_member_update(before, after):
                 print("채널 못 찾음")
                 return
 
-            desc = ROLE_MESSAGES[role.name].format(
-                user=after.mention,
-                role=f"**{role.name}**"
-            )
-
             embed = discord.Embed(
                 title="🎉 역할 획득!",
                 description=desc,
