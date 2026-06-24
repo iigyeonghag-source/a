@@ -2942,57 +2942,63 @@ ROLE_MESSAGES = {
     "석유": "🎉🎉 축하해!! 우리 서버가 산유국이 됐어! 우리 서버도 {role}가 나온다니, {user}, 넌 정말 대단해!" 
 }
     
-bot.event
+@bot.event
 async def on_member_update(before, after):
     if after.guild.id != SERVER_ID:
         return
 
     before_roles = {r.id for r in before.roles}
+    after_roles = {r.id for r in after.roles}
 
-    for new_role in after.roles:
-        if new_role.id not in before_roles:
-            if new_role.name not in ROLE_MESSAGES:
-                continue
+    added_role_ids = after_roles - before_roles
 
-            channel = after.guild.get_channel(CHANNEL_ID)
-            if channel is None:
-                print("채널 못 찾음")
-                return
+    for role_id in added_role_ids:
+        new_role = after.guild.get_role(role_id)
+        if new_role is None:
+            continue
 
-            desc = ROLE_MESSAGES[new_role.name].format(
-                user=after.mention,
-                role=f"**{new_role.name}**"
+        if new_role.name not in ROLE_MESSAGES:
+            continue
+
+        channel = after.guild.get_channel(CHANNEL_ID)
+        if channel is None:
+            print("채널 못 찾음")
+            return
+
+        desc = ROLE_MESSAGES[new_role.name].format(
+            user=after.mention,
+            role=f"**{new_role.name}**"
+        )
+
+        embed = discord.Embed(
+            title="🎉 역할 획득!",
+            description=desc,
+            color=new_role.color if new_role.color.value != 0 else discord.Color.gold()
+        )
+
+        embed.set_thumbnail(url=after.display_avatar.url)
+
+        embed.add_field(
+            name="획득한 역할",
+            value=f"🏷️ {new_role.name}",
+            inline=False
+        )
+
+        embed.set_footer(
+            text=after.guild.name,
+            icon_url=after.guild.icon.url if after.guild.icon else None
+        )
+
+        await channel.send(
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(
+                users=True,
+                roles=False,
+                everyone=False
             )
+        )
 
-            embed = discord.Embed(
-                title="🎉 역할 획득!",
-                description=desc,
-                color=new_role.color if new_role.color.value != 0 else discord.Color.gold()
-            )
-
-            embed.set_thumbnail(url=after.display_avatar.url)
-
-            embed.add_field(
-                name="획득한 역할",
-                value=f"🏷️ {new_role.name}",
-                inline=False
-            )
-
-            embed.set_footer(
-                text=f"{after.guild.name}",
-                icon_url=after.guild.icon.url if after.guild.icon else None
-            )
-
-            await channel.send(
-                embed=embed,
-                allowed_mentions=discord.AllowedMentions(
-                    users=True,
-                    roles=False,
-                    everyone=False
-                )
-            )
-
-            print(f"{after} → {new_role.name} 역할 획득 알림 전송")
+        print(f"{after} → {new_role.name} 역할 획득 알림 전송")
             
 print(get_time_key())
 print(datetime.now())
