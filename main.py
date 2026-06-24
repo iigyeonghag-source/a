@@ -2953,15 +2953,20 @@ ROLE_MESSAGES = {
     "썩은물": "🎉 축하해! {user}가 {role} 역할을 얻어냈어!! 너 혹시 음성 채팅의 화신이니?",
     "석유": "🎉🎉 축하해!! 우리 서버가 산유국이 됐어! 우리 서버도 {role}가 나온다니, {user}, 넌 정말 대단해!" 
 }
-
+    
 @bot.event
 async def on_member_update(before, after):
     # 다른 서버면 무시
+
+    desc = ROLE_MESSAGES[role.name].format(
+        user=after.mention,
+        role=f"**{role.name}**"
+    )
     if after.guild.id != SERVER_ID:
         return
 
     before_roles = {role.id for role in before.roles}
-
+    
     for role in after.roles:
         if role.id not in before_roles:
 
@@ -2972,7 +2977,7 @@ async def on_member_update(before, after):
             if channel is None:
                 print("채널 못 찾음")
                 return
-
+            
             embed = discord.Embed(
                 title="🎉 역할 획득!",
                 description=desc,
