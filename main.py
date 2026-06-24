@@ -4872,32 +4872,32 @@ ARMORS = {
 }
 
 MONSTERS = [
-    {"name": "슬라임", "min": 1, "max": 10, "penalty": 3},
-    {"name": "츄츄족", "min": 1, "max": 15, "penalty": 5},
-    {"name": "츄츄 폭도", "min": 5, "max": 20, "penalty": 8},
-    {"name": "보물 사냥단", "min": 8, "max": 25, "penalty": 10},
-    {"name": "심연 메이지", "min": 12, "max": 35, "penalty": 15},
-    {"name": "우인단 선발대", "min": 15, "max": 40, "penalty": 18},
-    {"name": "유적 가드", "min": 20, "max": 45, "penalty": 22},
-    {"name": "유적 헌터", "min": 25, "max": 50, "penalty": 25},
-    {"name": "거울의 여인", "min": 30, "max": 55, "penalty": 28},
-    {"name": "검귀", "min": 35, "max": 60, "penalty": 32},
-    {"name": "성해 짐승", "min": 40, "max": 70, "penalty": 36},
-    {"name": "유적 드레이크", "min": 45, "max": 75, "penalty": 40},
-    {"name": "심연 사도", "min": 50, "max": 85, "penalty": 45},
-    {"name": "심연 영창자", "min": 60, "max": 100, "penalty": 52},
-    {"name": "원해 짐승", "min": 65, "max": 110, "penalty": 60},
-    {"name": "자율 초정밀 태엽장치", "min": 70, "max": 120, "penalty": 70},
-    {"name": "유적 서펜트", "min": 80, "max": 130, "penalty": 80},
-    {"name": "영겁의 드레이크", "min": 90, "max": 140, "penalty": 90},
-    {"name": "반영구 제어 매트릭스", "min": 100, "max": 150, "penalty": 105},
-    {"name": "수계 사냥개 무리", "min": 110, "max": 165, "penalty": 120},
-    {"name": "철갑 용 도마뱀", "min": 120, "max": 180, "penalty": 150},
-    {"name": "황금 늑대왕", "min": 135, "max": 200, "penalty": 170},
-    {"name": "아펩의 수호자", "min": 150, "max": 220, "penalty": 190},
-    {"name": "타르탈리아", "min": 170, "max": 250, "penalty": 250},
-    {"name": "라이덴 쇼군", "min": 190, "max": 280, "penalty": 300},
-    {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 500}
+    {"name": "슬라임", "min": 1, "max": 10, "penalty": 5},
+    {"name": "츄츄족", "min": 1, "max": 15, "penalty": 9},
+    {"name": "츄츄 폭도", "min": 5, "max": 20, "penalty": 14},
+    {"name": "보물 사냥단", "min": 8, "max": 25, "penalty": 24},
+    {"name": "심연 메이지", "min": 12, "max": 35, "penalty": 31},
+    {"name": "우인단 선발대", "min": 15, "max": 40, "penalty": 40},
+    {"name": "유적 가드", "min": 20, "max": 45, "penalty": 50},
+    {"name": "유적 헌터", "min": 25, "max": 50, "penalty": 63},
+    {"name": "거울의 여인", "min": 30, "max": 55, "penalty": 71},
+    {"name": "검귀", "min": 35, "max": 60, "penalty": 84},
+    {"name": "성해 짐승", "min": 40, "max": 70, "penalty": 96},
+    {"name": "유적 드레이크", "min": 45, "max": 75, "penalty": 105},
+    {"name": "심연 사도", "min": 50, "max": 85, "penalty": 116},
+    {"name": "심연 영창자", "min": 60, "max": 100, "penalty": 125},
+    {"name": "원해 짐승", "min": 65, "max": 110, "penalty": 145},
+    {"name": "자율 초정밀 태엽장치", "min": 70, "max": 120, "penalty": 165},
+    {"name": "유적 서펜트", "min": 80, "max": 130, "penalty": 200},
+    {"name": "영겁의 드레이크", "min": 90, "max": 140, "penalty": 235},
+    {"name": "반영구 제어 매트릭스", "min": 100, "max": 150, "penalty": 305},
+    {"name": "수계 사냥개 무리", "min": 110, "max": 165, "penalty": 420},
+    {"name": "철갑 용 도마뱀", "min": 120, "max": 180, "penalty": 550},
+    {"name": "황금 늑대왕", "min": 135, "max": 200, "penalty": 670},
+    {"name": "아펩의 수호자", "min": 150, "max": 220, "penalty": 790},
+    {"name": "타르탈리아", "min": 170, "max": 250, "penalty": 850},
+    {"name": "라이덴 쇼군", "min": 190, "max": 280, "penalty": 900},
+    {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 1500}
 ]
 
 
@@ -6927,7 +6927,7 @@ async def give_level_roles(member):
             roles_text = ", ".join(role.mention for role in given_roles)
             await channel.send(f"{member.mention} {roles_text}")
 
-@tasks.loop(seconds=5)
+@tasks.loop(seconds=15)
 async def ranking_update_loop():
     guild = bot.get_guild(GUILD_ID)
 
