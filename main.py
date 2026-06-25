@@ -6988,6 +6988,78 @@ async def update_ranking_message(guild):
     save_data()
     print(f"랭킹 메시지 생성됨: {msg.id}")
 
+@bot.tree.command(
+    name="레벨증가",
+    description="관리자 전용: 유저의 채팅 레벨을 올린다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="레벨을 올릴 유저",
+    수치="올릴 레벨 수"
+)
+async def add_chat_level(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    if 수치 <= 0:
+        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
+        return
+
+    info = get_level_data(유저.id)
+    old_level = info["level"]
+
+    info["level"] += 수치
+    info["xp"] = 0
+
+    save_data()
+
+    await update_level_nickname(유저)
+    await give_level_roles(유저)
+    await update_ranking_message(interaction.guild)
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention} 채팅 레벨 증가 완료!\n"
+        f"📈 **Lv.{old_level} → Lv.{info['level']}**"
+    )
+
+
+@bot.tree.command(
+    name="레벨감소",
+    description="관리자 전용: 유저의 채팅 레벨을 낮춘다",
+    guild=GUILD
+)
+@app_commands.checks.has_permissions(administrator=True)
+@app_commands.describe(
+    유저="레벨을 낮출 유저",
+    수치="낮출 레벨 수"
+)
+async def remove_chat_level(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    수치: int
+):
+    if 수치 <= 0:
+        await interaction.response.send_message("❌ 1 이상만 가능.", ephemeral=True)
+        return
+
+    info = get_level_data(유저.id)
+    old_level = info["level"]
+
+    info["level"] = max(1, info["level"] - 수치)
+    info["xp"] = 0
+
+    save_data()
+
+    await update_level_nickname(유저)
+    await update_ranking_message(interaction.guild)
+
+    await interaction.response.send_message(
+        f"✅ {유저.mention} 채팅 레벨 감소 완료!\n"
+        f"📉 **Lv.{old_level} → Lv.{info['level']}**"
+    )
+    
 @bot.event
 async def on_ready():
     if not ranking_update_loop.is_running():
