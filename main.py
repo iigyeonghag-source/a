@@ -6925,7 +6925,6 @@ async def give_level_roles(member):
 
         if channel:
             roles_text = ", ".join(role.mention for role in given_roles)
-            await channel.send(f"{member.mention} {roles_text}")
 
 @tasks.loop(seconds=15)
 async def ranking_update_loop():
