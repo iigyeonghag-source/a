@@ -61,7 +61,8 @@ data = {
     "primogems": {},
     "quests": {},
     "achievements": {},
-    "character_pity": {}
+    "character_pity": {},
+    "warnings": {}
 }
 
 characters = {}
@@ -70,6 +71,7 @@ primogems = {}
 quests = {}
 achievements = {}
 character_pity = {}
+warnings = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -82,7 +84,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -90,6 +92,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
         data["ranking_message_id"] = loaded.get("ranking_message_id")
         data["levels"] = loaded.get("levels", {})
@@ -105,6 +108,7 @@ def load_data():
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
 
+    warnings = data["warnings"]
     checkin = data["checkin"]
     levels = data["levels"]
     poker_money = data["poker_money"]
@@ -125,6 +129,7 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
     data["levels"] = levels
     data["character_pity"] = character_pity
@@ -161,6 +166,9 @@ RANKING_CHANNEL_ID = 1518922787828531312
 LEVEL_LOG_CHANNEL_ID = 1518910263682662451
 CHAT_XP_COOLDOWN = timedelta(seconds=5)
 last_chat_xp = {}
+
+WARNING_LOG_CHANNEL_ID = 1512443122532225144  # 경고 3개 추방 확인 보낼 채널
+WARNING_TIMEOUT = timedelta(hours=1)
 
 load_data()
         
@@ -2931,6 +2939,7 @@ async def favor_check(ctx):
 
 SERVER_ID = 1510681614919794868
 CHANNEL_ID = 1512642190302777415
+TIMEOUT_LOG_CHANNEL_ID = 1510693532208464052
 
 ROLE_MESSAGES = {
     "오타쿠": "🎉 축하해! {user} 너도 이제 {role}가 되었구나!",
@@ -2945,12 +2954,160 @@ ROLE_MESSAGES = {
     "썩은물": "🎉 축하해! {user}가 {role} 역할을 얻어냈어!! 너 혹시 음성 채팅의 화신이니?",
     "석유": "🎉🎉 축하해!! 우리 서버가 산유국이 됐어! 우리 서버도 {role}가 나온다니, {user}, 넌 정말 대단해!" 
 }
+
+def format_duration(delta: timedelta):
+    seconds = int(delta.total_seconds())
+
+    days, seconds = divmod(seconds, 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+
+    parts = []
+    if days:
+        parts.append(f"{days}일")
+    if hours:
+        parts.append(f"{hours}시간")
+    if minutes:
+        parts.append(f"{minutes}분")
+    if seconds:
+        parts.append(f"{seconds}초")
+
+    return " ".join(parts) if parts else "0초"
+
+
+async def find_timeout_audit(guild, target):
+    await asyncio.sleep(1)  # 감사 로그 반영 대기
+
+    try:
+        async for entry in guild.audit_logs(
+            limit=5,
+            action=discord.AuditLogAction.member_update
+        ):
+            if entry.target and entry.target.id == target.id:
+                return entry
+    except discord.Forbidden:
+        return None
+
+    return None
     
+
 @bot.event
 async def on_member_update(before, after):
     if after.guild.id != SERVER_ID:
         return
 
+        # =========================
+    # 타임아웃 로그
+    # =========================
+    before_timeout = before.timed_out_until
+    after_timeout = after.timed_out_until
+
+    if before_timeout != after_timeout:
+        channel = after.guild.get_channel(TIMEOUT_LOG_CHANNEL_ID)
+
+        if channel:
+            audit = await find_timeout_audit(after.guild, after)
+
+            moderator = audit.user if audit else None
+            reason = audit.reason if audit and audit.reason else "사유 없음"
+
+            now = datetime.now(timezone.utc)
+
+            # 타임아웃이 새로 걸림
+            if after_timeout is not None:
+                duration = after_timeout - now
+
+                # =========================
+    # 타임아웃 로그
+    # =========================
+    before_timeout = before.timed_out_until
+    after_timeout = after.timed_out_until
+
+    if before_timeout != after_timeout:
+        channel = after.guild.get_channel(TIMEOUT_LOG_CHANNEL_ID)
+
+        if channel:
+            audit = await find_timeout_audit(after.guild, after)
+
+            moderator = audit.user if audit else None
+            reason = audit.reason if audit and audit.reason else "사유 없음"
+
+            now = datetime.now(timezone.utc)
+
+            # 타임아웃이 새로 걸림
+            if after_timeout is not None:
+                duration = after_timeout - now
+
+                embed = discord.Embed(
+                    title="⛔ 타임아웃 적용",
+                    color=discord.Color.orange()
+                )
+
+                embed.add_field(
+                    name="걸린 유저",
+                    value=f"{after.mention}\n`{after}` / `{after.id}`",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="처리한 관리자",
+                    value=moderator.mention if moderator else "알 수 없음",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="기간",
+                    value=format_duration(duration),
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="해제 시간",
+                    value=f"<t:{int(after_timeout.timestamp())}:F>\n<t:{int(after_timeout.timestamp())}:R>",
+                    inline=True
+                )
+
+                embed.add_field(
+                    name="사유",
+                    value=reason,
+                    inline=False
+                )
+
+                embed.set_thumbnail(url=after.display_avatar.url)
+                embed.set_footer(text=f"User ID: {after.id}")
+
+                await channel.send(embed=embed)
+
+            # 타임아웃이 풀림
+            else:
+                embed = discord.Embed(
+                    title="✅ 타임아웃 해제",
+                    color=discord.Color.green()
+                )
+
+                embed.add_field(
+                    name="해제된 유저",
+                    value=f"{after.mention}\n`{after}` / `{after.id}`",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="처리한 관리자",
+                    value=moderator.mention if moderator else "알 수 없음",
+                    inline=False
+                )
+
+                embed.add_field(
+                    name="사유",
+                    value=reason,
+                    inline=False
+                )
+
+                embed.set_thumbnail(url=after.display_avatar.url)
+                embed.set_footer(text=f"User ID: {after.id}")
+
+                await channel.send(embed=embed)
+                
     before_roles = {r.id for r in before.roles}
     after_roles = {r.id for r in after.roles}
 
@@ -7138,6 +7295,359 @@ async def checkin_command(interaction: discord.Interaction):
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
     await interaction.followup.send(embed=embed)
+
+def get_warning_data(user_id):
+    uid = str(user_id)
+    warnings.setdefault(uid, [])
+    return warnings[uid]
+
+
+def is_admin_member(member: discord.Member):
+    return member.guild_permissions.administrator or member.guild_permissions.manage_guild
+
+
+class KickConfirmView(discord.ui.View):
+    def __init__(self, target_id: int):
+        super().__init__(timeout=None)
+        self.target_id = target_id
+
+    @discord.ui.button(label="추방하기", style=discord.ButtonStyle.danger)
+    async def kick_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.kick_members:
+            await interaction.response.send_message("❌ 추방 권한이 없어.", ephemeral=True)
+            return
+
+        member = interaction.guild.get_member(self.target_id)
+
+        if member is None:
+            await interaction.response.edit_message(
+                content="❌ 유저가 서버에 없어서 추방할 수 없어.",
+                embed=None,
+                view=None
+            )
+            return
+
+        try:
+            await member.kick(reason=f"경고 3개 이상으로 {interaction.user}가 추방 버튼 클릭")
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ 봇 권한이 부족해서 추방 실패.", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(
+            content=f"✅ {member.mention} 추방 완료.",
+            embed=None,
+            view=None
+        )
+
+    @discord.ui.button(label="취소", style=discord.ButtonStyle.secondary)
+    async def cancel_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.kick_members:
+            await interaction.response.send_message("❌ 권한이 없어.", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(
+            content="✅ 추방을 취소했어.",
+            embed=None,
+            view=None
+        )
+
+
+@bot.tree.command(name="경고", description="유저에게 경고를 부여한다", guild=GUILD)
+@app_commands.describe(유저="경고를 줄 유저", 사유="경고 사유")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def warn_command(interaction: discord.Interaction, 유저: discord.Member, 사유: str = "사유 없음"):
+    if 유저.bot:
+        await interaction.response.send_message("❌ 봇한테는 경고를 줄 수 없어.", ephemeral=True)
+        return
+
+    uid = str(유저.id)
+    warn_list = get_warning_data(uid)
+
+    warn_list.append({
+        "reason": 사유,
+        "moderator_id": interaction.user.id,
+        "moderator_name": str(interaction.user),
+        "created_at": datetime.now(KST).isoformat()
+    })
+
+    save_data()
+
+    warn_count = len(warn_list)
+    timeout_skipped = False
+
+    if is_admin_member(유저):
+        timeout_skipped = True
+    else:
+        try:
+            until = datetime.now(timezone.utc) + WARNING_TIMEOUT
+            await 유저.timeout(until, reason=f"경고 부여: {사유}")
+        except discord.Forbidden:
+            timeout_skipped = True
+
+    embed = discord.Embed(
+        title="⚠️ 경고 부여",
+        color=discord.Color.red()
+    )
+    embed.add_field(name="대상", value=f"{유저.mention}\n`{유저}` / `{유저.id}`", inline=False)
+    embed.add_field(name="관리자", value=interaction.user.mention, inline=False)
+    embed.add_field(name="현재 경고", value=f"**{warn_count}개**", inline=True)
+    embed.add_field(name="사유", value=사유, inline=False)
+
+    if timeout_skipped:
+        embed.add_field(name="타임아웃", value="생략됨", inline=True)
+    else:
+        embed.add_field(name="타임아웃", value="1시간", inline=True)
+
+    await interaction.response.send_message(embed=embed)
+
+    if warn_count >= 3:
+        channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
+
+        if channel:
+            kick_embed = discord.Embed(
+                title="🚨 경고 3개 이상",
+                description=(
+                    f"{유저.mention}의 경고가 **{warn_count}개**가 됐어.\n"
+                    f"이 유저를 추방할 거야?"
+                ),
+                color=discord.Color.dark_red()
+            )
+            kick_embed.add_field(name="최근 사유", value=사유, inline=False)
+            kick_embed.add_field(name="처리 관리자", value=interaction.user.mention, inline=False)
+            kick_embed.set_thumbnail(url=유저.display_avatar.url)
+
+            await channel.send(embed=kick_embed, view=KickConfirmView(유저.id))
+
+
+@warn_command.error
+async def warn_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ 관리자 전용 명령어야.", ephemeral=True)
+
+@bot.tree.command(name="경고목록", description="경고 목록을 확인한다", guild=GUILD)
+@app_commands.describe(유저="특정 유저만 확인")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def warning_list_command(interaction: discord.Interaction, 유저: discord.Member = None):
+    if 유저:
+        warn_list = get_warning_data(유저.id)
+
+        if not warn_list:
+            await interaction.response.send_message(f"✅ {유저.mention}은/는 경고가 없어.", ephemeral=True)
+            return
+
+        desc = ""
+        for i, warn in enumerate(warn_list, start=1):
+            desc += (
+                f"**{i}.** {warn.get('reason', '사유 없음')}\n"
+                f"관리자: <@{warn.get('moderator_id')}>\n"
+                f"시간: `{warn.get('created_at', '알 수 없음')}`\n\n"
+            )
+
+        embed = discord.Embed(
+            title=f"⚠️ {유저.display_name} 경고 목록",
+            description=desc[:4000],
+            color=discord.Color.orange()
+        )
+
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    if not warnings:
+        await interaction.response.send_message("✅ 경고 먹은 유저가 없어.", ephemeral=True)
+        return
+
+    desc = ""
+    for uid, warn_list in warnings.items():
+        member = interaction.guild.get_member(int(uid))
+        name = member.mention if member else f"`알 수 없음 ({uid})`"
+        desc += f"{name} - **{len(warn_list)}개**\n"
+
+    embed = discord.Embed(
+        title="⚠️ 전체 경고 목록",
+        description=desc[:4000],
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+def build_user_db_embed(member: discord.Member):
+    uid = str(member.id)
+    level_info = levels.get(uid, {})
+    warn_list = warnings.get(uid, [])
+
+    joined = member.joined_at
+    joined_text = f"<t:{int(joined.timestamp())}:F>\n<t:{int(joined.timestamp())}:R>" if joined else "알 수 없음"
+
+    embed = discord.Embed(
+        title=f"📁 {member.display_name} 데이터베이스",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(name="유저", value=f"{member.mention}\n`{member}` / `{member.id}`", inline=False)
+    embed.add_field(name="서버 접속 시간", value=joined_text, inline=False)
+    embed.add_field(name="레벨", value=str(level_info.get("level", 1)), inline=True)
+    embed.add_field(name="경험치", value=str(level_info.get("xp", 0)), inline=True)
+    embed.add_field(name="메시지 수", value=str(level_info.get("messages", 0)), inline=True)
+    embed.add_field(name="글자 수", value=str(level_info.get("chars", 0)), inline=True)
+    embed.add_field(name="음성 시간", value=f"{level_info.get('voice_minutes', 0)}분", inline=True)
+    embed.add_field(name="경고 횟수", value=f"{len(warn_list)}개", inline=True)
+    embed.add_field(name="모라 잔액", value=f"{int(poker_money.get(uid, 0)):,}모라", inline=True)
+    embed.add_field(name="원석", value=f"{int(primogems.get(uid, 0)):,}개", inline=True)
+
+    embed.set_thumbnail(url=member.display_avatar.url)
+    return embed
+
+
+class DatabaseUserButton(discord.ui.Button):
+    def __init__(self, member: discord.Member):
+        super().__init__(
+            label=member.display_name[:80],
+            style=discord.ButtonStyle.secondary
+        )
+        self.member_id = member.id
+
+    async def callback(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.manage_guild:
+            await interaction.response.send_message("❌ 권한이 없어.", ephemeral=True)
+            return
+
+        member = interaction.guild.get_member(self.member_id)
+
+        if member is None:
+            await interaction.response.send_message("❌ 유저를 찾을 수 없어.", ephemeral=True)
+            return
+
+        await interaction.response.edit_message(
+            embed=build_user_db_embed(member),
+            view=DatabaseDetailView()
+        )
+
+
+class DatabaseListView(discord.ui.View):
+    def __init__(self, members, page=0):
+        super().__init__(timeout=180)
+        self.members = members
+        self.page = page
+        self.per_page = 20
+
+        start = page * self.per_page
+        end = start + self.per_page
+
+        for member in members[start:end]:
+            self.add_item(DatabaseUserButton(member))
+
+        if page > 0:
+            self.add_item(DatabasePrevButton())
+
+        if end < len(members):
+            self.add_item(DatabaseNextButton())
+
+        self.add_item(DatabaseCloseButton())
+
+
+class DatabasePrevButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="이전", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        await interaction.response.edit_message(
+            embed=build_database_list_embed(view.members, view.page - 1, view.per_page),
+            view=DatabaseListView(view.members, view.page - 1)
+        )
+
+
+class DatabaseNextButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="다음", style=discord.ButtonStyle.primary)
+
+    async def callback(self, interaction: discord.Interaction):
+        view = self.view
+        await interaction.response.edit_message(
+            embed=build_database_list_embed(view.members, view.page + 1, view.per_page),
+            view=DatabaseListView(view.members, view.page + 1)
+        )
+
+
+class DatabaseDetailView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=180)
+
+    @discord.ui.button(label="뒤로가기", style=discord.ButtonStyle.primary)
+    async def back_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        members = sorted(
+            [m for m in interaction.guild.members if not m.bot],
+            key=lambda m: m.display_name
+        )
+
+        await interaction.response.edit_message(
+            embed=build_database_list_embed(members, 0, 20),
+            view=DatabaseListView(members, 0)
+        )
+
+    @discord.ui.button(label="닫기", style=discord.ButtonStyle.danger)
+    async def close_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            content="✅ 데이터베이스를 닫았어.",
+            embed=None,
+            view=None
+        )
+
+
+class DatabaseCloseButton(discord.ui.Button):
+    def __init__(self):
+        super().__init__(label="닫기", style=discord.ButtonStyle.danger)
+
+    async def callback(self, interaction: discord.Interaction):
+        await interaction.response.edit_message(
+            content="✅ 데이터베이스를 닫았어.",
+            embed=None,
+            view=None
+        )
+
+
+def build_database_list_embed(members, page, per_page):
+    start = page * per_page
+    end = start + per_page
+    page_members = members[start:end]
+
+    desc = "\n".join(
+        f"• {member.mention} `({member.id})`"
+        for member in page_members
+    )
+
+    embed = discord.Embed(
+        title="📁 서버 데이터베이스",
+        description=desc if desc else "표시할 유저가 없어.",
+        color=discord.Color.blurple()
+    )
+
+    max_page = max(1, (len(members) + per_page - 1) // per_page)
+    embed.set_footer(text=f"{page + 1} / {max_page} 페이지")
+
+    return embed
+
+
+@bot.tree.command(name="데이터베이스", description="서버 유저 데이터베이스를 확인한다", guild=GUILD)
+@app_commands.checks.has_permissions(manage_guild=True)
+async def database_command(interaction: discord.Interaction):
+    members = sorted(
+        [m for m in interaction.guild.members if not m.bot],
+        key=lambda m: m.display_name
+    )
+
+    await interaction.response.send_message(
+        embed=build_database_list_embed(members, 0, 20),
+        view=DatabaseListView(members, 0),
+        ephemeral=True
+    )
+
+
+@database_command.error
+async def database_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ 관리자 전용 명령어야.", ephemeral=True)
+
 
 
 @bot.event
