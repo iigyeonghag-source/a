@@ -7428,6 +7428,7 @@ async def warn_command_error(interaction: discord.Interaction, error):
 @app_commands.describe(유저="특정 유저만 확인")
 @app_commands.checks.has_permissions(manage_messages=True)
 async def warning_list_command(interaction: discord.Interaction, 유저: discord.Member = None):
+    cleanup_left_warning_users(interaction.guild)
     if 유저:
         warn_list = get_warning_data(유저.id)
 
@@ -7648,7 +7649,80 @@ async def database_command_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("❌ 관리자 전용 명령어야.", ephemeral=True)
 
+def cleanup_left_warning_users(guild: discord.Guild):
+    removed = []
 
+    for uid in list(warnings.keys()):
+        member = guild.get_member(int(uid))
+
+        # 서버에 없는 유저면 경고 데이터 삭제
+        if member is None:
+            removed.append(uid)
+            del warnings[uid]
+
+    if removed:
+        save_data()
+
+    return removed
+
+@bot.tree.command(name="경고차감", description="유저의 경고를 차감한다", guild=GUILD)
+@app_commands.describe(
+    유저="경고를 차감할 유저",
+    개수="차감할 경고 개수",
+    사유="차감 사유"
+)
+@app_commands.checks.has_permissions(manage_messages=True)
+async def warning_remove_command(
+    interaction: discord.Interaction,
+    유저: discord.Member,
+    개수: int = 1,
+    사유: str = "사유 없음"
+):
+    if 개수 <= 0:
+        await interaction.response.send_message("❌ 차감 개수는 1 이상이어야 해.", ephemeral=True)
+        return
+
+    uid = str(유저.id)
+    warn_list = warnings.get(uid, [])
+
+    if not warn_list:
+        await interaction.response.send_message(
+            f"✅ {유저.mention}은/는 차감할 경고가 없어.",
+            ephemeral=True
+        )
+        return
+
+    before_count = len(warn_list)
+    remove_count = min(개수, before_count)
+
+    # 최신 경고부터 제거
+    for _ in range(remove_count):
+        warn_list.pop()
+
+    if warn_list:
+        warnings[uid] = warn_list
+    else:
+        warnings.pop(uid, None)
+
+    save_data()
+
+    embed = discord.Embed(
+        title="✅ 경고 차감",
+        color=discord.Color.green()
+    )
+    embed.add_field(name="대상", value=f"{유저.mention}\n`{유저}` / `{유저.id}`", inline=False)
+    embed.add_field(name="처리 관리자", value=interaction.user.mention, inline=False)
+    embed.add_field(name="차감 개수", value=f"{remove_count}개", inline=True)
+    embed.add_field(name="기존 경고", value=f"{before_count}개", inline=True)
+    embed.add_field(name="현재 경고", value=f"{len(warn_list)}개", inline=True)
+    embed.add_field(name="사유", value=사유, inline=False)
+
+    await interaction.response.send_message(embed=embed)
+
+@warning_remove_command.error
+async def warning_remove_command_error(interaction: discord.Interaction, error):
+    if isinstance(error, app_commands.MissingPermissions):
+        await interaction.response.send_message("❌ 관리자 전용 명령어야.", ephemeral=True)
 
 @bot.event
 async def on_ready():
