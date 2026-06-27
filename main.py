@@ -7746,7 +7746,31 @@ async def on_app_command_completion(
         return
 
     command_name = command.qualified_name
-    is_admin = command_name in ADMIN_COMMAND_NAMES
+    admin_perms = (
+        interaction.user.guild_permissions.administrator
+        or interaction.user.guild_permissions.manage_guild
+        or interaction.user.guild_permissions.manage_messages
+        or interaction.user.guild_permissions.kick_members
+        or interaction.user.guild_permissions.ban_members
+    )
+    
+    command_name = interaction.command.qualified_name if interaction.command else command.qualified_name
+    
+    ADMIN_COMMAND_NAMES = {
+        "경고",
+        "경고차감",
+        "경고목록",
+        "데이터베이스",
+        "레벨증가",
+        "레벨감소",
+        "돈넣기",
+        "돈빼기",
+    }
+    
+    is_admin_command = (
+        command_name in ADMIN_COMMAND_NAMES
+        or command_name.split()[-1] in ADMIN_COMMAND_NAMES
+    )
 
     embed = discord.Embed(
         title="📜 푸리나 명령어 로그",
@@ -7767,7 +7791,7 @@ async def on_app_command_completion(
 
     embed.add_field(
         name="관리자 명령어 여부",
-        value="✅ 관리자 명령어" if is_admin else "❌ 일반 명령어",
+        value="✅ 관리자 명령어" if is_admin_command else "❌ 일반 명령어"
         inline=True
     )
 
