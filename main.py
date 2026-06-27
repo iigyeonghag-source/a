@@ -7791,7 +7791,7 @@ async def on_app_command_completion(
 
     embed.add_field(
         name="관리자 명령어 여부",
-        value="✅ 관리자 명령어" if is_admin_command else "❌ 일반 명령어"
+        value="✅ 관리자 명령어" if is_admin_command else "❌ 일반 명령어",
         inline=True
     )
 
