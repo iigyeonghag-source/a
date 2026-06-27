@@ -162,13 +162,22 @@ hunt_users = {}
 levels = {}
 
 RANKING_CHANNEL_ID = 1518922787828531312
-
+COMMAND_LOG_CHANNEL_ID = 1520309389364428830  
 LEVEL_LOG_CHANNEL_ID = 1518910263682662451
 CHAT_XP_COOLDOWN = timedelta(seconds=5)
 last_chat_xp = {}
 
-WARNING_LOG_CHANNEL_ID = 1512443122532225144  # 경고 3개 추방 확인 보낼 채널
+WARNING_LOG_CHANNEL_ID = 1512443122532225144 
 WARNING_TIMEOUT = timedelta(hours=1)
+
+ADMIN_COMMAND_NAMES = {
+    "경고",
+    "경고차감",
+    "경고목록",
+    "데이터베이스",
+    "레벨증가",
+    "레벨감소",
+}
 
 load_data()
         
@@ -7723,6 +7732,56 @@ async def warning_remove_command(
 async def warning_remove_command_error(interaction: discord.Interaction, error):
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("❌ 관리자 전용 명령어야.", ephemeral=True)
+
+@bot.event
+async def on_app_command_completion(
+    interaction: discord.Interaction,
+    command: app_commands.Command
+):
+    if not interaction.guild:
+        return
+
+    channel = interaction.guild.get_channel(COMMAND_LOG_CHANNEL_ID)
+    if not channel:
+        return
+
+    command_name = command.qualified_name
+    is_admin = command_name in ADMIN_COMMAND_NAMES
+
+    embed = discord.Embed(
+        title="📜 푸리나 명령어 로그",
+        color=discord.Color.blurple()
+    )
+
+    embed.add_field(
+        name="사용된 명령어",
+        value=f"`/{command_name}`",
+        inline=True
+    )
+
+    embed.add_field(
+        name="사용자",
+        value=f"{interaction.user.mention}\n`{interaction.user}` / `{interaction.user.id}`",
+        inline=False
+    )
+
+    embed.add_field(
+        name="관리자 명령어 여부",
+        value="✅ 관리자 명령어" if is_admin else "❌ 일반 명령어",
+        inline=True
+    )
+
+    embed.add_field(
+        name="사용 채널",
+        value=interaction.channel.mention if interaction.channel else "알 수 없음",
+        inline=True
+    )
+
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+    embed.timestamp = datetime.now(timezone.utc)
+
+    await channel.send(embed=embed)
+
 
 @bot.event
 async def on_ready():
