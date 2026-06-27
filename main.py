@@ -170,22 +170,6 @@ last_chat_xp = {}
 WARNING_LOG_CHANNEL_ID = 1512443122532225144 
 WARNING_TIMEOUT = timedelta(hours=1)
 
-ADMIN_COMMAND_NAMES = {
-    "경고",
-    "경고차감",
-    "경고목록",
-    "데이터베이스",
-    "레벨증가",
-    "레벨감소",
-    "돈주기",
-    "돈차감",
-    "레벨증가",
-    "레벨감소",
-    "스탯포인트",
-    "스탯포인트차감",
-    "스탯차감"
-}
-
 load_data()
         
 KST = timezone(timedelta(hours=9))
@@ -7770,8 +7754,13 @@ async def on_app_command_completion(
         "데이터베이스",
         "레벨증가",
         "레벨감소",
-        "돈넣기",
-        "돈빼기",
+        "돈주기",
+        "돈차감",
+        "레벨증가",
+        "레벨감소",
+        "스탯포인트",
+        "스탯포인트차감",
+        "스탯차감"
     }
     
     is_admin_command = (
