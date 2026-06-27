@@ -48,6 +48,7 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "checkin": {},
     "ranking_message_id": None,
     "levels": {},
     "poker_money": {},
@@ -81,7 +82,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -89,6 +90,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["checkin"] = loaded.get("checkin", {})
         data["ranking_message_id"] = loaded.get("ranking_message_id")
         data["levels"] = loaded.get("levels", {})
         data["character_pity"] = loaded.get("character_pity", {})
@@ -103,6 +105,7 @@ def load_data():
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
 
+    checkin = data["checkin"]
     levels = data["levels"]
     poker_money = data["poker_money"]
     favor = data["favor"]
@@ -143,7 +146,7 @@ def save_data():
         json.dump(data, f, ensure_ascii=False, indent=4)
 
 poker_rooms = {}
-
+checkin = {}
 poker_money = {}
 poker_last_claim = {}
 user_memory = {}
@@ -7059,7 +7062,84 @@ async def remove_chat_level(
         f"✅ {유저.mention} 채팅 레벨 감소 완료!\n"
         f"📉 **Lv.{old_level} → Lv.{info['level']}**"
     )
-    
+
+CHECKIN_COOLDOWN = timedelta(hours=24)
+CHECKIN_MAX_STREAK = 100
+
+def get_checkin_data(user_id):
+    uid = str(user_id)
+    checkin.setdefault(uid, {
+        "last_checkin": None,
+        "streak": 0
+    })
+    return checkin[uid]
+
+
+@bot.tree.command(name="출첵", description="24시간마다 출석 체크하고 경험치와 모라를 받는다", guild=GUILD)
+async def checkin_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    now = datetime.now(KST)
+
+    info = get_checkin_data(uid)
+
+    last_raw = info.get("last_checkin")
+    last_time = datetime.fromisoformat(last_raw) if last_raw else None
+
+    if last_time and now - last_time < CHECKIN_COOLDOWN:
+        left = CHECKIN_COOLDOWN - (now - last_time)
+        hours = int(left.total_seconds() // 3600)
+        minutes = int((left.total_seconds() % 3600) // 60)
+
+        await interaction.response.send_message(
+            f"⏳ 아직 출첵 못 함!\n남은 시간: **{hours}시간 {minutes}분**",
+            ephemeral=True
+        )
+        return
+
+    # 100일 찍고 다음 출첵부터 초기화
+    if info.get("streak", 0) >= CHECKIN_MAX_STREAK:
+        info["streak"] = 0
+
+    info["streak"] = info.get("streak", 0) + 1
+    info["last_checkin"] = now.isoformat()
+
+    streak = info["streak"]
+
+    xp_reward = 100 + (streak - 1) * 10
+
+    mora_reward = 0
+    if streak >= 10:
+        mora_reward = 1000 + (streak - 10) * 100
+        add_poker_money(uid, mora_reward)
+
+    await add_xp(interaction.user, xp_reward, "출석 체크")
+
+    save_data()
+
+    desc = (
+        f"{interaction.user.mention} 출석 완료!\n\n"
+        f"🔥 연속 출석: **{streak}일**\n"
+        f"⭐ 획득 경험치: **{xp_reward} EXP**"
+    )
+
+    if mora_reward > 0:
+        desc += f"\n💰 획득 모라: **{mora_reward:,}모라**"
+    else:
+        desc += "\n💰 모라 보상: **10일 연속 출석부터 지급**"
+
+    if streak >= CHECKIN_MAX_STREAK:
+        desc += "\n\n👑 **100일 연속 출석 달성! 다음 출첵부터 연속 출석이 초기화됨.**"
+
+    embed = discord.Embed(
+        title="📅 출석 체크",
+        description=desc,
+        color=discord.Color.green()
+    )
+    embed.set_thumbnail(url=interaction.user.display_avatar.url)
+
+    await interaction.response.send_message(embed=embed)
+
+
 @bot.event
 async def on_ready():
     if not ranking_update_loop.is_running():
