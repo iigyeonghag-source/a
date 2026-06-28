@@ -7398,7 +7398,7 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
     else:
         embed.add_field(name="타임아웃", value="1시간", inline=True)
 
-       await interaction.response.send_message(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
     log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
 
@@ -7419,7 +7419,6 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
             kick_embed.set_thumbnail(url=유저.display_avatar.url)
 
             await log_channel.send(embed=kick_embed, view=KickConfirmView(유저.id))
-
 
 @warn_command.error
 async def warn_command_error(interaction: discord.Interaction, error):
