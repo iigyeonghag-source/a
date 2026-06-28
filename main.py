@@ -7294,7 +7294,7 @@ async def checkin_command(interaction: discord.Interaction):
     )
     embed.set_thumbnail(url=interaction.user.display_avatar.url)
 
-    await interaction.followup.send(embed=embed)
+    await interaction.response.send_message(embed=embed)
 
 def get_warning_data(user_id):
     uid = str(user_id)
