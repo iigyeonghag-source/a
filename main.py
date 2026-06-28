@@ -167,7 +167,7 @@ LEVEL_LOG_CHANNEL_ID = 1518910263682662451
 CHAT_XP_COOLDOWN = timedelta(seconds=5)
 last_chat_xp = {}
 
-WARNING_LOG_CHANNEL_ID = 1512443122532225144 
+WARNING_LOG_CHANNEL_ID = 1512443019314597999
 WARNING_TIMEOUT = timedelta(hours=1)
 
 load_data()
@@ -7416,7 +7416,15 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
             kick_embed.add_field(name="처리 관리자", value=interaction.user.mention, inline=False)
             kick_embed.set_thumbnail(url=유저.display_avatar.url)
 
-            await channel.send(embed=kick_embed, view=KickConfirmView(유저.id))
+              await interaction.response.send_message(embed=embed)
+
+            log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
+        
+            if log_channel:
+                await log_channel.send(embed=embed)
+        
+            if warn_count >= 3:
+                channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
 
 
 @warn_command.error
@@ -7718,6 +7726,12 @@ async def warning_remove_command(
     embed.add_field(name="사유", value=사유, inline=False)
 
     await interaction.response.send_message(embed=embed)
+
+    # 여기 추가
+    log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
+
+    if log_channel:
+        await log_channel.send(embed=embed)
 
 @warning_remove_command.error
 async def warning_remove_command_error(interaction: discord.Interaction, error):
