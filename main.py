@@ -7398,12 +7398,14 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
     else:
         embed.add_field(name="타임아웃", value="1시간", inline=True)
 
-    await interaction.response.send_message(embed=embed)
+       await interaction.response.send_message(embed=embed)
 
-    if warn_count >= 3:
-        channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
+    log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
 
-        if channel:
+    if log_channel:
+        await log_channel.send(embed=embed)
+
+        if warn_count >= 3:
             kick_embed = discord.Embed(
                 title="🚨 경고 3개 이상",
                 description=(
@@ -7416,15 +7418,7 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
             kick_embed.add_field(name="처리 관리자", value=interaction.user.mention, inline=False)
             kick_embed.set_thumbnail(url=유저.display_avatar.url)
 
-            await interaction.response.send_message(embed=embed)
-
-            log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
-        
-            if log_channel:
-                await log_channel.send(embed=embed)
-        
-            if warn_count >= 3:
-                channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
+            await log_channel.send(embed=kick_embed, view=KickConfirmView(유저.id))
 
 
 @warn_command.error
