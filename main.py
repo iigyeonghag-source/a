@@ -7416,7 +7416,7 @@ async def warn_command(interaction: discord.Interaction, 유저: discord.Member,
             kick_embed.add_field(name="처리 관리자", value=interaction.user.mention, inline=False)
             kick_embed.set_thumbnail(url=유저.display_avatar.url)
 
-              await interaction.response.send_message(embed=embed)
+            await interaction.response.send_message(embed=embed)
 
             log_channel = interaction.guild.get_channel(WARNING_LOG_CHANNEL_ID)
         
