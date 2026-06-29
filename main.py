@@ -7236,19 +7236,27 @@ def get_checkin_data(user_id):
 async def checkin_command(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     now = datetime.now(KST)
-
     info = get_checkin_data(uid)
-
+    
     last_raw = info.get("last_checkin")
     last_time = datetime.fromisoformat(last_raw) if last_raw else None
 
-    if last_time and now - last_time < CHECKIN_COOLDOWN:
-        left = CHECKIN_COOLDOWN - (now - last_time)
+    now_reset = now.replace(hour=6, minute=0, second=0, microsecond=0)
+
+    # 오전 6시 이전이면 아직 오늘 리셋 전이므로 어제 6시를 기준으로
+    if now < now_reset:
+        now_reset -= timedelta(days=1)
+
+    if last_time and last_time >= now_reset:
+        next_reset = now_reset + timedelta(days=1)
+        left = next_reset - now
+
         hours = int(left.total_seconds() // 3600)
         minutes = int((left.total_seconds() % 3600) // 60)
 
         await interaction.response.send_message(
-            f"⏳ 아직 출첵 못 함!\n남은 시간: **{hours}시간 {minutes}분**",
+            f"⏳ 오늘은 이미 출첵했어!\n"
+            f"다음 초기화까지 **{hours}시간 {minutes}분**",
             ephemeral=True
         )
         return
