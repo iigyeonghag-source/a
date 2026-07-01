@@ -7023,7 +7023,7 @@ async def level_ranking(interaction: discord.Interaction):
 
     text = ""
 
-    for rank, (uid, info) in enumerate(ranking[:50], start=1):
+    for rank, (uid, info) in enumerate(ranking[:10], start=1):
         member = interaction.guild.get_member(int(uid))
 
         if member:
