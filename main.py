@@ -2194,6 +2194,28 @@ def furina_decide_no_bet(strength):
 
     return "check"
     
+
+class SlashContext:
+    def __init__(self, interaction: discord.Interaction):
+        self.interaction = interaction
+        self.author = interaction.user
+        self.user = interaction.user
+        self.guild = interaction.guild
+        self.channel = interaction.channel
+
+    async def reply(self, content=None, **kwargs):
+        if not self.interaction.response.is_done():
+            await self.interaction.response.send_message(content, **kwargs)
+        else:
+            await self.interaction.followup.send(content, **kwargs)
+
+    async def send(self, content=None, **kwargs):
+        if not self.interaction.response.is_done():
+            await self.interaction.response.send_message(content, **kwargs)
+        else:
+            await self.interaction.followup.send(content, **kwargs)
+
+
 def poker_name(ctx, user_id):
     if user_id == FURINA_ID:
         return "푸리나"
@@ -2523,15 +2545,16 @@ async def furina_auto(ctx, room):
             f"❌ 푸리나 AI 오류:\n```{e}```"
         )
 
-@bot.tree.command(name="잔액", description="현재 보유한 모라를 확인합니다.", guild=GUILD)
+@bot.tree.command(name="지갑", description="현재 보유한 모라를 확인합니다.", guild=GUILD)
 async def poker_money_command(interaction: discord.Interaction):
     await interaction.response.send_message(
         f"{interaction.user.mention}의 잔액: **{get_poker_money(interaction.user.id):,} 모라**"
     )
-    
-@bot.tree.command(name="돈받기", description="24시간마다 1500모라를 받습니다.", guild=GUILD)
+
+
+@bot.tree.command(name="돈받기", description="12시간마다 1500모라를 받습니다.", guild=GUILD)
 async def poker_claim(interaction: discord.Interaction):
-    uid = str(ctx.author.id)
+    uid = str(interaction.user.id)
     now = datetime.now(timezone.utc)
 
     last = poker_last_claim.get(uid)
@@ -2540,7 +2563,7 @@ async def poker_claim(interaction: discord.Interaction):
         hours = int(left.total_seconds() // 3600)
         minutes = int((left.total_seconds() % 3600) // 60)
 
-        await ctx.reply(
+        await interaction.response.send_message(
             f"아직 못 받아! 남은 시간: **{hours}시간 {minutes}분**"
         )
         return
@@ -2548,56 +2571,79 @@ async def poker_claim(interaction: discord.Interaction):
     poker_last_claim[uid] = now
     save_data()
     money = add_poker_money(uid, 1500)
-    await ctx.reply(f"1500모라 지급 완료! 현재 돈: **{money}모라**")
 
-@bot.command(name="포커")
-async def poker_lobby(ctx):
-    room = get_room(ctx)
-
-    if room and room["started"]:
-        await ctx.reply("이미 이 채널에서 포커가 진행 중이야!")
-        return
-
-    room = new_poker_room(ctx)
-
-    await ctx.reply(
-        f"포커 방 생성!\n"
-        f"참가자: **푸리나**, **{ctx.author.display_name}**\n\n"
-        f"`!참가`로 참가 가능\n"
-        f"`!시작`으로 시작"
+    await interaction.response.send_message(
+        f"1500모라 지급 완료! 현재 돈: **{money}모라**"
     )
 
-@bot.command(name="참가")
-async def poker_join(ctx):
-    room = get_room(ctx)
+
+@bot.tree.command(name="포커", description="포커 방을 생성합니다.", guild=GUILD)
+async def poker_lobby(interaction: discord.Interaction):
+    cid = str(interaction.channel.id)
+    room = poker_rooms.get(cid)
+
+    if room and room["started"]:
+        await interaction.response.send_message("이미 이 채널에서 포커가 진행 중이야!")
+        return
+
+    poker_rooms[cid] = {
+        "host": str(interaction.user.id),
+        "players": [FURINA_ID, str(interaction.user.id)],
+        "dealer_index": 0,
+        "started": False,
+        "deck": [],
+        "hands": {},
+        "community": [],
+        "pot": 0,
+        "current_bet": 0,
+        "bets": {},
+        "folded": set(),
+        "acted": set(),
+        "turn_index": 0,
+        "stage": "lobby",
+        "all_in": set()
+    }
+
+    await interaction.response.send_message(
+        f"포커 방 생성!\n"
+        f"참가자: **푸리나**, **{interaction.user.display_name}**\n\n"
+        f"`/참가`로 참가 가능\n"
+        f"`/시작`으로 시작"
+    )
+
+
+@bot.tree.command(name="참가", description="현재 포커 방에 참가합니다.", guild=GUILD)
+async def poker_join(interaction: discord.Interaction):
+    room = poker_rooms.get(str(interaction.channel.id))
 
     if not room:
-        await ctx.reply("포커 방이 없어! `!포커`로 먼저 만들어!")
+        await interaction.response.send_message("포커 방이 없어! `/포커`로 먼저 만들어!")
         return
 
     if room["started"]:
-        await ctx.reply("이미 게임 시작했어!")
+        await interaction.response.send_message("이미 게임 시작했어!")
         return
 
-    uid = str(ctx.author.id)
+    uid = str(interaction.user.id)
 
     if uid in room["players"]:
-        await ctx.reply("이미 참가했잖아!")
+        await interaction.response.send_message("이미 참가했잖아!")
         return
 
     room["players"].append(uid)
 
-    await ctx.reply(
-        f"{ctx.author.display_name} 참가 완료!\n"
+    await interaction.response.send_message(
+        f"{interaction.user.display_name} 참가 완료!\n"
         f"현재 참가자: **{len(room['players'])}명**"
     )
 
-@bot.command(name="시작")
-async def poker_start(ctx):
-    room = get_room(ctx)
+
+@bot.tree.command(name="시작", description="포커 게임을 시작합니다.")
+async def poker_start(interaction: discord.Interaction):
+    room = get_room.get(str(interaction.channel.id))
 
     if room is None:
-        await ctx.reply("❌ 먼저 `!포커`로 방을 만들어!")
+        await ctx.reply("❌ 먼저 `/포커`로 방을 만들어!")
         return
 
     if room["started"]:
@@ -2608,9 +2654,6 @@ async def poker_start(ctx):
         await ctx.reply("❌ 플레이어가 부족해!")
         return
 
-    # =====================
-    # 기본 초기화
-    # =====================
     room["started"] = True
     room["stage"] = "preflop"
 
@@ -2626,6 +2669,65 @@ async def poker_start(ctx):
 
     room["pot"] = 0
     room["current_bet"] = 0
+
+    for p in room["players"]:
+        room["hands"][p] = [
+            room["deck"].pop(),
+            room["deck"].pop()
+        ]
+        room["bets"][p] = 0
+
+    sb = room["players"][room["dealer_index"]]
+    bb = room["players"][
+        (room["dealer_index"] + 1) % len(room["players"])
+    ]
+
+    sb_pay = min(SMALL_BLIND, poker_stack(sb))
+    bb_pay = min(BIG_BLIND, poker_stack(bb))
+
+    room["bets"][sb] = sb_pay
+    room["bets"][bb] = bb_pay
+
+    room["pot"] = sb_pay + bb_pay
+    room["current_bet"] = bb_pay
+
+    if sb_pay >= poker_stack(sb):
+        room["all_in"].add(sb)
+
+    if bb_pay >= poker_stack(bb):
+        room["all_in"].add(bb)
+
+    room["turn_index"] = room["dealer_index"]
+
+    for p in room["players"]:
+        if p == FURINA_ID:
+            continue
+
+        member = ctx.guild.get_member(int(p))
+        if member is None:
+            continue
+
+        try:
+            await member.send(
+                f"🃏 포커 시작!\n"
+                f"네 패: **{card_text(room['hands'][p])}**"
+            )
+        except:
+            await ctx.send(
+                f"⚠️ {member.mention} DM을 보낼 수 없어. "
+                f"DM 설정을 확인해줘."
+            )
+
+    await ctx.send(
+        "🃏 **포커 게임 시작!**\n"
+        f"스몰 블라인드: **{poker_name(ctx, sb)} {sb_pay}모라**\n"
+        f"빅 블라인드: **{poker_name(ctx, bb)} {bb_pay}모라**\n"
+        f"판돈: **{room['pot']}모라**\n"
+        f"현재 베팅: **{room['current_bet']}모라**\n"
+        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+    )
+
+    await furina_auto(ctx, room)
 
     # =====================
     # 카드 지급
@@ -2701,8 +2803,9 @@ async def poker_start(ctx):
     # 푸리나가 선턴이면 자동 행동
     await furina_auto(ctx, room)
 
-@bot.command(name="체크")
-async def poker_check(ctx):
+@bot.tree.command(name="체크", description="포커에서 체크합니다.", guild=GUILD)
+async def poker_check(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
@@ -2715,7 +2818,7 @@ async def poker_check(ctx):
         return
 
     if room["current_bet"] > room["bets"].get(uid, 0):
-        await ctx.reply("상대 베팅이 있어서 체크 못 해! `!콜` 또는 `!폴드` 해야 해.")
+        await ctx.reply("상대 베팅이 있어서 체크 못 해! `/콜` 또는 `/폴드` 해야 해.")
         return
 
     room["acted"].add(uid)
@@ -2723,8 +2826,9 @@ async def poker_check(ctx):
 
     await after_action(ctx, room)
 
-@bot.command(name="콜")
-async def poker_call(ctx):
+@bot.tree.command(name="콜", description="포커에서 콜합니다.", guild=GUILD)
+async def poker_call(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
@@ -2757,8 +2861,9 @@ async def poker_call(ctx):
 
     await after_action(ctx, room)
 
-@bot.command(name="레이즈")
-async def poker_raise(ctx, amount: int = 10):
+@bot.tree.command(name="레이즈", description="포커에서 레이즈합니다.", guild=GUILD)
+async def poker_raise(interaction: discord.Interaction, amount: int = 10):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
@@ -2790,8 +2895,9 @@ async def poker_raise(ctx, amount: int = 10):
 
     await after_action(ctx, room)
 
-@bot.command(name="폴드")
-async def poker_fold(ctx):
+@bot.tree.command(name="폴드", description="포커에서 폴드합니다.", guild=GUILD)
+async def poker_fold(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
@@ -2811,8 +2917,9 @@ async def poker_fold(ctx):
     await after_action(ctx, room)
 
 
-@bot.command(name="패")
-async def poker_my_hand(ctx):
+@bot.tree.command(name="패", description="DM으로 내 패와 현재 족보를 확인합니다.", guild=GUILD)
+async def poker_my_hand(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
@@ -2850,8 +2957,9 @@ async def poker_my_hand(ctx):
         await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
 
 
-@bot.command(name="포커랭킹")
-async def poker_ranking(ctx):
+@bot.tree.command(name="포커랭킹", description="포커 모라 랭킹을 확인합니다.", guild=GUILD)
+async def poker_ranking(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     if not poker_money:
         await ctx.reply("아직 포커 돈 기록이 없어!")
         return
@@ -2868,8 +2976,9 @@ async def poker_ranking(ctx):
 
     await ctx.reply("포커 랭킹!\n" + "\n".join(lines))
 
-@bot.command(name="올인")
-async def poker_all_in(ctx):
+@bot.tree.command(name="올인", description="포커에서 올인합니다.", guild=GUILD)
+async def poker_all_in(interaction: discord.Interaction):
+    ctx = SlashContext(interaction)
     room = get_room(ctx)
     uid = str(ctx.author.id)
 
