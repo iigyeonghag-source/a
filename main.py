@@ -2716,7 +2716,16 @@ async def poker_start(interaction: discord.Interaction):
         f"현재 턴: **{poker_name(interaction, current_player(room))}**"
     )
 
-    await furina_auto(interaction, room)
+    class PokerInteractionCtx:
+        def __init__(self, interaction):
+            self.guild = interaction.guild
+            self.channel = interaction.channel
+            self.author = interaction.user
+
+        async def send(self, *args, **kwargs):
+            return await interaction.followup.send(*args, **kwargs)
+
+    await furina_auto(PokerInteractionCtx(interaction), room)
 
     # =====================
     # 카드 지급
