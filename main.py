@@ -2687,7 +2687,7 @@ async def poker_start(interaction: discord.Interaction):
     if bb_pay >= poker_stack(bb):
         room["all_in"].add(bb)
 
-    room["turn_index"] = room["dealer_index"]
+    room["turn_index"] = next_index(room, room["dealer_index"])
 
     for p in room["players"]:
         if p == FURINA_ID:
