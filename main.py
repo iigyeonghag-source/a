@@ -2523,12 +2523,14 @@ async def furina_auto(ctx, room):
             f"❌ 푸리나 AI 오류:\n```{e}```"
         )
 
-@bot.command(name="돈")
-async def poker_money_command(ctx):
-    await ctx.reply(f"{ctx.author.mention}의 잔액: **{get_poker_money(ctx.author.id):,} 모라**")
-
-@bot.command(name="돈받기")
-async def poker_claim(ctx):
+@bot.tree.command(name="잔액", description="현재 보유한 모라를 확인합니다.", guild=GUILD)
+async def poker_money_command(interaction: discord.Interaction):
+    await interaction.response.send_message(
+        f"{interaction.user.mention}의 잔액: **{get_poker_money(interaction.user.id):,} 모라**"
+    )
+    
+@bot.tree.command(name="돈받기", description="24시간마다 1500모라를 받습니다.", guild=GUILD)
+async def poker_claim(interaction: discord.Interaction):
     uid = str(ctx.author.id)
     now = datetime.now(timezone.utc)
 
