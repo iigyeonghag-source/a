@@ -2637,21 +2637,20 @@ async def poker_join(interaction: discord.Interaction):
         f"현재 참가자: **{len(room['players'])}명**"
     )
 
-
-@bot.tree.command(name="시작", description="포커 게임을 시작합니다.")
+@bot.tree.command(name="시작", description="포커 게임을 시작합니다.", guild=GUILD)
 async def poker_start(interaction: discord.Interaction):
-    room = get_room.get(str(interaction.channel.id))
+    room = poker_rooms.get(str(interaction.channel.id))
 
     if room is None:
-        await ctx.reply("❌ 먼저 `/포커`로 방을 만들어!")
+        await interaction.response.send_message("❌ 먼저 `/포커`로 방을 만들어!")
         return
 
     if room["started"]:
-        await ctx.reply("❌ 이미 게임이 진행 중이야!")
+        await interaction.response.send_message("❌ 이미 게임이 진행 중이야!")
         return
 
     if len(room["players"]) < 2:
-        await ctx.reply("❌ 플레이어가 부족해!")
+        await interaction.response.send_message("❌ 플레이어가 부족해!")
         return
 
     room["started"] = True
@@ -2659,35 +2658,26 @@ async def poker_start(interaction: discord.Interaction):
 
     room["deck"] = make_deck()
     room["community"] = []
-
     room["folded"] = set()
     room["acted"] = set()
     room["all_in"] = set()
-
     room["hands"] = {}
     room["bets"] = {}
-
     room["pot"] = 0
     room["current_bet"] = 0
 
     for p in room["players"]:
-        room["hands"][p] = [
-            room["deck"].pop(),
-            room["deck"].pop()
-        ]
+        room["hands"][p] = [room["deck"].pop(), room["deck"].pop()]
         room["bets"][p] = 0
 
     sb = room["players"][room["dealer_index"]]
-    bb = room["players"][
-        (room["dealer_index"] + 1) % len(room["players"])
-    ]
+    bb = room["players"][(room["dealer_index"] + 1) % len(room["players"])]
 
     sb_pay = min(SMALL_BLIND, poker_stack(sb))
     bb_pay = min(BIG_BLIND, poker_stack(bb))
 
     room["bets"][sb] = sb_pay
     room["bets"][bb] = bb_pay
-
     room["pot"] = sb_pay + bb_pay
     room["current_bet"] = bb_pay
 
@@ -2703,7 +2693,7 @@ async def poker_start(interaction: discord.Interaction):
         if p == FURINA_ID:
             continue
 
-        member = ctx.guild.get_member(int(p))
+        member = interaction.guild.get_member(int(p))
         if member is None:
             continue
 
@@ -2713,21 +2703,20 @@ async def poker_start(interaction: discord.Interaction):
                 f"네 패: **{card_text(room['hands'][p])}**"
             )
         except:
-            await ctx.send(
-                f"⚠️ {member.mention} DM을 보낼 수 없어. "
-                f"DM 설정을 확인해줘."
+            await interaction.channel.send(
+                f"⚠️ {member.mention} DM을 보낼 수 없어. DM 설정을 확인해줘."
             )
 
-    await ctx.send(
+    await interaction.response.send_message(
         "🃏 **포커 게임 시작!**\n"
-        f"스몰 블라인드: **{poker_name(ctx, sb)} {sb_pay}모라**\n"
-        f"빅 블라인드: **{poker_name(ctx, bb)} {bb_pay}모라**\n"
+        f"스몰 블라인드: **{poker_name(interaction, sb)} {sb_pay}모라**\n"
+        f"빅 블라인드: **{poker_name(interaction, bb)} {bb_pay}모라**\n"
         f"판돈: **{room['pot']}모라**\n"
         f"현재 베팅: **{room['current_bet']}모라**\n"
-        f"현재 턴: **{poker_name(ctx, current_player(room))}**"
+        f"현재 턴: **{poker_name(interaction, current_player(room))}**"
     )
 
-    await furina_auto(ctx, room)
+    await furina_auto(interaction, room)
 
     # =====================
     # 카드 지급
