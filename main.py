@@ -5142,7 +5142,9 @@ def apply_trait_to_monster_level(monster_level, trait):
     if trait is None:
         return monster_level
 
-    return max(1, int(monster_level * trait["power"]))
+    power = trait.get("power", trait.get("monster_power", 1))
+
+    return max(1, int(monster_level * power))
 
 
 def apply_trait_reward(reward, exp, trait):
