@@ -5096,7 +5096,7 @@ MONSTERS = [
     {"name": "천리의 유지자", "min": 310, "max": 420, "penalty": 1200}
 ]
 
-MONSTER_TRAIT_RATE = 100  # 몬스터에게 특성 붙을 기본 확률 30%
+MONSTER_TRAIT_RATE = 40 
 
 MONSTER_TRAITS = [
     {"name": "💤 잠이 덜 깬", "chance": 1, "monster_power": 0.25, "money": 4.5, "exp": 4.5},
