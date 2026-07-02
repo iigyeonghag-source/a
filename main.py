@@ -295,7 +295,7 @@ def remember_user_value(user_id, key, value):
 def get_user_memory(user_id, key, default=None):
     return user_memory.get(str(user_id), {}).get(key, default)
 
-TIME_NOTICE_CHANNEL_ID = 123456789012345678  # 보낼 채널 ID
+TIME_NOTICE_CHANNEL_ID = 1510681615528103988
 
 TIME_MESSAGES = {
     "아침": [
@@ -7998,7 +7998,7 @@ async def on_ready():
     synced = await bot.tree.sync(guild=GUILD)
 
     if not time_notice_loop.is_running():
-    time_notice_loop.start()
+        time_notice_loop.start()
     
     guild = bot.get_guild(GUILD_ID)
     if guild:
