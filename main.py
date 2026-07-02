@@ -5139,8 +5139,7 @@ def pick_monster_trait():
 
 
 def apply_trait_to_monster_level(monster_level, trait):
-    if trait is None:
-        return monster_level
+    return monster_level
 
     power = trait.get("power", trait.get("monster_power", 1))
 
@@ -5473,7 +5472,7 @@ def find_monster_by_name(name):
     return None
 
 
-def calc_win_chance(user, monster, monster_level):
+def calc_win_chance(user, monster, monster_level, trait=None):
     player_level = user["level"]
     weapon_bonus = WEAPONS[user["weapon"]]["bonus"]
     armor_bonus = ARMORS[user["armor"]]["bonus"]
@@ -5491,7 +5490,13 @@ def calc_win_chance(user, monster, monster_level):
     chance += strength // 5
     chance += dex // 15
 
-    return max(8, min(92, int(chance)))
+    if trait:
+    power = trait.get("monster_power", 1)
+
+    # 특성이 강할수록 승률 감소
+    chance /= power
+    
+    return max(5, min(95, int(chance)))
 
 
 def apply_magic_double_chance(user, win_chance):
@@ -5560,7 +5565,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, trait=None,
     
     battle_monster_level = apply_trait_to_monster_level(monster_level, trait)
     
-    win_chance = calc_win_chance(user, monster, battle_monster_level)
+    win_chance = calc_win_chance(user, monster, monster_level, trait)
     win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
 
     add_quest_progress(uid, "hunt_count", 1)
