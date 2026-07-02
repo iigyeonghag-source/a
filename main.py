@@ -5755,7 +5755,44 @@ class HuntStartView(discord.ui.View):
             except:
                 pass
 
+@bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
+async def hunt(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+    now = datetime.now(timezone.utc)
 
+    cooldown_until = hunt_cooldowns.get(uid)
+
+    if cooldown_until and cooldown_until > now:
+        left = (cooldown_until - now).total_seconds()
+        await interaction.response.send_message(
+            f"⏳ 아직 사냥 못 해!\n남은 시간: **{left:.1f}초**",
+            ephemeral=True
+        )
+        return
+
+    monster, monster_level = pick_monster(user["level"], user)
+    win_chance = calc_win_chance(user, monster, monster_level)
+    preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+
+    view = HuntStartView(uid, monster, monster_level)
+
+    embed = discord.Embed(
+        title="⚔️ 사냥 준비",
+        description=(
+            f"{interaction.user.mention} 사냥을 시작할까?\n\n"
+            f"예상 상대: **Lv.{monster_level} {monster['name']}**\n"
+            f"예상 승률: **{int(preview_chance)}%**\n"
+            f"마력 폭주 미리보기: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
+            "아래 버튼을 눌러야 전투가 시작됨.\n"
+            "30초 동안 안 누르면 자동 취소."
+        ),
+        color=discord.Color.orange()
+    )
+
+    await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
+    
 @bot.tree.command(name="지정사냥", description="마력 80 이상이면 원하는 몬스터와 싸운다", guild=GUILD)
 @app_commands.describe(몬스터="싸우고 싶은 몬스터 이름")
 async def target_hunt(interaction: discord.Interaction, 몬스터: str):
@@ -5812,6 +5849,7 @@ async def target_hunt(interaction: discord.Interaction, 몬스터: str):
     )
 
     await interaction.response.send_message(embed=embed, view=view)
+    view.message = await interaction.original_response()
 
 def make_stat_embed(interaction, user):
     strength = get_stat(user, "str")
