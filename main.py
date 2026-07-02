@@ -5086,14 +5086,14 @@ MONSTERS = [
     {"name": "자율 초정밀 태엽장치", "min": 70, "max": 120, "penalty": 165},
     {"name": "유적 서펜트", "min": 80, "max": 130, "penalty": 200},
     {"name": "영겁의 드레이크", "min": 90, "max": 140, "penalty": 235},
-    {"name": "반영구 제어 매트릭스", "min": 100, "max": 150, "penalty": 295},
-    {"name": "수계 사냥개 무리", "min": 110, "max": 165, "penalty": 370},
-    {"name": "철갑 용 도마뱀", "min": 120, "max": 180, "penalty": 450},
-    {"name": "황금 늑대왕", "min": 135, "max": 200, "penalty": 590},
-    {"name": "아펩의 수호자", "min": 150, "max": 220, "penalty": 690},
-    {"name": "타르탈리아", "min": 170, "max": 250, "penalty": 850},
-    {"name": "라이덴 쇼군", "min": 190, "max": 280, "penalty": 900},
-    {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 1500}
+    {"name": "반영구 제어 매트릭스", "min": 110, "max": 150, "penalty": 295},
+    {"name": "수계 사냥개 무리", "min": 135, "max": 165, "penalty": 370},
+    {"name": "철갑 용 도마뱀", "min": 150, "max": 180, "penalty": 450},
+    {"name": "황금 늑대왕", "min": 180, "max": 200, "penalty": 590},
+    {"name": "아펩의 수호자", "min": 200, "max": 230, "penalty": 690},
+    {"name": "타르탈리아", "min": 230, "max": 270, "penalty": 850},
+    {"name": "라이덴 쇼군", "min": 270, "max": 310, "penalty": 900},
+    {"name": "천리의 유지자", "min": 310, "max": 420, "penalty": 1200}
 ]
 
 MONSTER_TRAIT_RATE = 30  # 몬스터에게 특성 붙을 기본 확률 30%
@@ -5705,6 +5705,7 @@ class HuntStartView(discord.ui.View):
         self.monster = monster
         self.monster_level = monster_level
         self.is_target = is_target
+        self.message = None
 
     @discord.ui.button(label="⚔️ 전투 시작", style=discord.ButtonStyle.danger)
     async def start_hunt(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -5745,43 +5746,14 @@ class HuntStartView(discord.ui.View):
         for item in self.children:
             item.disabled = True
 
-
-@bot.tree.command(name="사냥", description="몬스터를 사냥한다", guild=GUILD)
-async def hunt(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
-    now = datetime.now(timezone.utc)
-
-    cooldown_until = hunt_cooldowns.get(uid)
-
-    if cooldown_until and cooldown_until > now:
-        left = (cooldown_until - now).total_seconds()
-        await interaction.response.send_message(
-            f"⏳ 아직 사냥 못 해!\n남은 시간: **{left:.1f}초**",
-            ephemeral=True
-        )
-        return
-
-    monster, monster_level = pick_monster(user["level"], user)
-    win_chance = calc_win_chance(user, monster, monster_level)
-    preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
-
-    view = HuntStartView(uid, monster, monster_level)
-
-    embed = discord.Embed(
-        title="⚔️ 사냥 준비",
-        description=(
-            f"{interaction.user.mention} 사냥을 시작할까?\n\n"
-            f"예상 상대: **Lv.{monster_level} {monster['name']}**\n"
-            f"예상 승률: **{int(preview_chance)}%**\n"
-            f"마력 폭주 미리보기: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
-            "아래 버튼을 눌러야 전투가 시작됨.\n"
-            "30초 동안 안 누르면 자동 취소."
-        ),
-        color=discord.Color.orange()
-    )
-
-    await interaction.response.send_message(embed=embed, view=view)
+        if self.message:
+            try:
+                await self.message.edit(
+                    content="⏰ 사냥이 자동 취소됐어.",
+                    view=self
+                )
+            except:
+                pass
 
 
 @bot.tree.command(name="지정사냥", description="마력 80 이상이면 원하는 몬스터와 싸운다", guild=GUILD)
