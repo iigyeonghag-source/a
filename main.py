@@ -5665,7 +5665,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, trait=None,
 
     embed.title = "⚔️ 사냥 결과"
     embed.description = (
-        f"상대: **Lv.{monster_level} {monster['name']}**\n"
+        f"상대: **Lv.{battle_monster_level} {monster_name}**\n"
         f"최종 승률: **{int(win_chance)}%**\n"
         f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
         f"{result}\n\n"
