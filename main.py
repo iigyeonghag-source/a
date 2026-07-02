@@ -5491,7 +5491,7 @@ def calc_win_chance(user, monster, monster_level, trait=None):
     chance += dex // 15
 
     if trait:
-    power = trait.get("monster_power", 1)
+        power = trait.get("monster_power", 1)
 
     # 특성이 강할수록 승률 감소
     chance /= power
