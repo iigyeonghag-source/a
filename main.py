@@ -295,6 +295,51 @@ def remember_user_value(user_id, key, value):
 def get_user_memory(user_id, key, default=None):
     return user_memory.get(str(user_id), {}).get(key, default)
 
+TIME_NOTICE_CHANNEL_ID = 123456789012345678  # 보낼 채널 ID
+
+TIME_MESSAGES = {
+    "아침": [
+        "좋은 아침이야! 흠흠, 오늘도 이 푸리나님이 하루의 시작을 알려주도록 하지! 잠은 푹 잤어?",
+        "일어날 시간이야! 늦잠을 자다니... 설마 물의 신보다 늦게 일어난 건 아니겠지?",
+        "아침은 든든하게 먹어야 해! 따뜻한 차 한 잔과 함께라면 오늘 하루도 분명 멋질 거야."
+    ],
+
+    "점심": [
+        "점심 시간이야! 오늘은 뭘 먹을 예정이야? 흠흠, 특별히 내게도 알려주는 걸 허락해 주도록 하지!",
+        "벌써 해가 중천에 떴네! 식사도 하고 잠깐 산책이라도 하면 기분이 좋아질지도?",
+        "전투든 공부든 든든하게 먹어야 힘이 나는 법이야! 그러니까 점심은 거르지 말라고?"
+    ],
+
+    "저녁": [
+        "좋은 저녁이야! 오늘 하루는 어땠어? 분명 재미있는 일도 있었겠지?",
+        "저녁도 맛있게 먹어! 디저트까지 챙기면... 흠흠, 그건 더욱 완벽한 식사가 될 거야!",
+        "오늘도 정말 수고 많았어. 나도 하루 종일 바빴지만... 이렇게 다시 만났으니 그걸로 됐어. 후후!"
+    ]
+}
+last_period = None
+
+@tasks.loop(minutes=1)
+async def time_notice_loop():
+    global last_period
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    if 5 <= now.hour < 12:
+        period = "아침"
+    elif 12 <= now.hour < 18:
+        period = "점심"
+    else:
+        period = "저녁"
+
+    if period != last_period:
+        last_period = period
+
+        channel = bot.get_channel(TIME_NOTICE_CHANNEL_ID)
+        if channel:
+            await channel.send(
+                random.choice(TIME_MESSAGES[period])
+            )
+            
 # =========================
 # 메뉴 추천 시스템
 # =========================
@@ -7952,10 +7997,13 @@ async def on_ready():
 
     synced = await bot.tree.sync(guild=GUILD)
 
+    if not time_notice_loop.is_running():
+    time_notice_loop.start()
+    
     guild = bot.get_guild(GUILD_ID)
     if guild:
         await update_ranking_message(guild)
-
+    
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
 
