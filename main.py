@@ -5066,6 +5066,7 @@ ARMORS = {
     "용사의 갑옷": {"price": 500000, "bonus": 200}
 }
 
+
 MONSTERS = [
     {"name": "슬라임", "min": 1, "max": 10, "penalty": 5},
     {"name": "츄츄족", "min": 1, "max": 15, "penalty": 9},
@@ -5095,6 +5096,60 @@ MONSTERS = [
     {"name": "천리의 유지자", "min": 220, "max": 320, "penalty": 1500}
 ]
 
+MONSTER_TRAIT_RATE = 30  # 몬스터에게 특성 붙을 기본 확률 30%
+
+MONSTER_TRAITS = [
+    {"name": "💤 잠이 덜 깬", "chance": 1, "monster_power": 0.25, "money": 4.5, "exp": 4.5},
+    {"name": "🩸 죽어가는", "chance": 1, "monster_power": 0.2, "money": 4.5, "exp": 4.5},
+
+    {"name": "🤕 상처를 입은", "chance": 4, "monster_power": 0.5, "money": 3.0, "exp": 3.0},
+
+    {"name": "😵 겁먹은", "chance": 10, "monster_power": 0.75, "money": 1.8, "exp": 1.8},
+    {"name": "🦴 허약한", "chance": 10, "monster_power": 0.8, "money": 1.8, "exp": 1.8},
+
+    {"name": "✨ 단련된", "chance": 18, "monster_power": 1.2, "money": 1.3, "exp": 1.3},
+    {"name": "⚔️ 분노의", "chance": 18, "monster_power": 1.2, "money": 1.3, "exp": 1.3},
+
+    {"name": "💪 강화된", "chance": 12, "monster_power": 1.45, "money": 1.6, "exp": 1.6},
+    {"name": "🛡️ 철갑을 두른", "chance": 12, "monster_power": 1.45, "money": 1.6, "exp": 1.6},
+
+    {"name": "👹 광폭한", "chance": 5, "monster_power": 1.9, "money": 2.3, "exp": 2.3},
+    {"name": "🌋 불굴의", "chance": 5, "monster_power": 1.9, "money": 2.3, "exp": 2.3},
+    {"name": "⚡ 돌격의", "chance": 5, "monster_power": 1.9, "money": 2.3, "exp": 2.3},
+
+    {"name": "💀 악몽의", "chance": 2, "monster_power": 2.8, "money": 4.0, "exp": 4.0},
+    {"name": "👑 군주", "chance": 2, "monster_power": 2.8, "money": 4.0, "exp": 4.0},
+
+    {"name": "☠️ 재앙의", "chance": 0.5, "monster_power": 5.0, "money": 8.0, "exp": 8.0},
+
+    {"name": "💎 황금의", "chance": 0.25, "monster_power": 1.2, "money": 20.0, "exp": 10.0},
+    {"name": "🌈 빛나는", "chance": 0.2, "monster_power": 1.3, "money": 15.0, "exp": 35.0},
+]
+
+
+def pick_monster_trait():
+    if random.randint(1, 100) > MONSTER_TRAIT_RATE:
+        return None
+
+    return random.choices(
+        MONSTER_TRAITS,
+        weights=[t["chance"] for t in MONSTER_TRAITS],
+        k=1
+    )[0]
+
+
+def apply_trait_to_monster_level(monster_level, trait):
+    if trait is None:
+        return monster_level
+
+    return max(1, int(monster_level * trait["power"]))
+
+
+def apply_trait_reward(reward, exp, trait):
+    if trait is None:
+        return reward, exp
+
+    return int(reward * trait["money"]), int(exp * trait["exp"])
 
 STAT_BG_PATH = "stat_bg.png"
 
@@ -5496,7 +5551,16 @@ def give_hunt_exp(user, amount):
 async def run_hunt_battle(interaction, user, monster, monster_level, is_target=False):
     uid = str(interaction.user.id)
 
-    win_chance = calc_win_chance(user, monster, monster_level)
+    trait = pick_monster_trait()
+    
+    monster_name = monster["name"]
+    
+    if trait:
+        monster_name = f"{trait['name']} {monster_name}"
+    
+    battle_monster_level = apply_trait_to_monster_level(monster_level, trait)
+    
+    win_chance = calc_win_chance(user, monster, battle_monster_level)
     win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
 
     add_quest_progress(uid, "hunt_count", 1)
@@ -5532,6 +5596,8 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
         reward = random.randint(80, 160) + monster_level * 20
         exp = random.randint(30, 60) + monster_level * 5
 
+        reward, exp = apply_trait_reward(reward, exp, trait)
+        
         reward, exp = apply_int_reward_bonus(user, reward, exp)
 
         add_poker_money(uid, reward)
