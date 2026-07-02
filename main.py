@@ -5571,7 +5571,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, is_target=F
     embed = discord.Embed(
         title="⚔️ 사냥 시작",
         description=(
-            f"**Lv.{monster_level} {monster['name']}** 등장!\n"
+            f"**Lv.{battle_monster_level} {monster_name}** 등장!\n"
             f"승률: **{int(win_chance)}%**\n"
             f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
             "전투 중."
