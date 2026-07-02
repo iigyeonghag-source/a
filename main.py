@@ -5492,9 +5492,7 @@ def calc_win_chance(user, monster, monster_level, trait=None):
 
     if trait:
         power = trait.get("monster_power", 1)
-
-    # 특성이 강할수록 승률 감소
-    chance /= power
+        chance /= power
     
     return max(5, min(95, int(chance)))
 
@@ -5779,7 +5777,7 @@ async def hunt(interaction: discord.Interaction):
     
     battle_monster_level = apply_trait_to_monster_level(monster_level, trait)
     
-    win_chance = calc_win_chance(user, monster, battle_monster_level)
+    win_chance = calc_win_chance(user, monster, battle_monster_level, trait)
     preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
     
     view = HuntStartView(uid, monster, monster_level, trait)
