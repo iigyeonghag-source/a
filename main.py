@@ -5550,10 +5550,8 @@ def give_hunt_exp(user, amount):
     return leveled
 
 
-async def run_hunt_battle(interaction, user, monster, monster_level, is_target=False):
+async def run_hunt_battle(interaction, user, monster, monster_level, trait=None, is_target=False):
     uid = str(interaction.user.id)
-
-    trait = pick_monster_trait()
     
     monster_name = monster["name"]
     
@@ -5698,12 +5696,13 @@ async def set_profile_desc(interaction: discord.Interaction, 내용: str):
     await interaction.response.send_message("✅ 프로필 설명 저장 완료!")
     
 class HuntStartView(discord.ui.View):
-    def __init__(self, user_id, monster=None, monster_level=None, is_target=False):
+    def __init__(self, user_id, monster=None, monster_level=None, trait=None, is_target=False):
         super().__init__(timeout=30)
         self.user_id = str(user_id)
         self.started = False
         self.monster = monster
         self.monster_level = monster_level
+        self.trait = trait
         self.is_target = is_target
         self.message = None
 
@@ -5731,13 +5730,7 @@ class HuntStartView(discord.ui.View):
         if monster is None or monster_level is None:
             monster, monster_level = pick_monster(user["level"], user)
 
-        await run_hunt_battle(
-            interaction,
-            user,
-            monster,
-            monster_level,
-            is_target=self.is_target
-        )
+        await run_hunt_battle(interaction, user, monster, monster_level, self.trait, is_target=self.is_target)
 
     async def on_timeout(self):
         if self.started:
@@ -5772,16 +5765,25 @@ async def hunt(interaction: discord.Interaction):
         return
 
     monster, monster_level = pick_monster(user["level"], user)
-    win_chance = calc_win_chance(user, monster, monster_level)
-    preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
 
-    view = HuntStartView(uid, monster, monster_level)
+    trait = pick_monster_trait()
+    
+    monster_name = monster["name"]
+    if trait:
+        monster_name = f"{trait['name']} {monster_name}"
+    
+    battle_monster_level = apply_trait_to_monster_level(monster_level, trait)
+    
+    win_chance = calc_win_chance(user, monster, battle_monster_level)
+    preview_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+    
+    view = HuntStartView(uid, monster, monster_level, trait)
 
     embed = discord.Embed(
         title="⚔️ 사냥 준비",
         description=(
             f"{interaction.user.mention} 사냥을 시작할까?\n\n"
-            f"예상 상대: **Lv.{monster_level} {monster['name']}**\n"
+            f"예상 상대: **Lv.{battle_monster_level} {monster_name}**\n"
             f"예상 승률: **{int(preview_chance)}%**\n"
             f"마력 폭주 미리보기: **{'발동됨' if magic_activated else '발동 안 됨'}**\n\n"
             "아래 버튼을 눌러야 전투가 시작됨.\n"
