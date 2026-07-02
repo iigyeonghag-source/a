@@ -2926,7 +2926,7 @@ async def poker_my_hand(interaction: discord.Interaction):
         await ctx.reply("DM을 보낼 수 없어! 디스코드 개인 메시지 허용해줘.")
 
 
-@bot.tree.command(name="포커랭킹", description="포커 모라 랭킹을 확인합니다.", guild=GUILD)
+@bot.tree.command(name="모라랭킹", description="모라 랭킹을 확인합니다.", guild=GUILD)
 async def poker_ranking(interaction: discord.Interaction):
     ctx = SlashContext(interaction)
     if not poker_money:
@@ -2943,7 +2943,7 @@ async def poker_ranking(interaction: discord.Interaction):
     for i, (uid, money) in enumerate(ranking, start=1):
         lines.append(f"{i}위. **{poker_name(ctx, uid)}** - {money}모라")
 
-    await ctx.reply("포커 랭킹!\n" + "\n".join(lines))
+    await ctx.reply("랭킹!\n" + "\n".join(lines))
 
 @bot.tree.command(name="올인", description="포커에서 올인합니다.", guild=GUILD)
 async def poker_all_in(interaction: discord.Interaction):
