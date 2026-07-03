@@ -48,6 +48,7 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "sticky_message_id": None,
     "checkin": {},
     "ranking_message_id": None,
     "levels": {},
@@ -92,6 +93,7 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
         data["ranking_message_id"] = loaded.get("ranking_message_id")
@@ -108,6 +110,7 @@ def load_data():
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
 
+    data["sticky_message_id"] = data.get("sticky_message_id")
     warnings = data["warnings"]
     checkin = data["checkin"]
     levels = data["levels"]
@@ -169,6 +172,15 @@ last_chat_xp = {}
 
 WARNING_LOG_CHANNEL_ID = 1512443019314597999
 WARNING_TIMEOUT = timedelta(hours=1)
+
+STICKY_CHANNEL_ID = 1510692438480523494
+
+STICKY_MESSAGE = """📌 **범프 안내**
+
+/bump하면 /up도 해주셈. 안하면 종훈이 ㅅㄱ
+"""
+
+sticky_message_lock = asyncio.Lock()
 
 load_data()
         
@@ -7981,6 +7993,62 @@ async def on_app_command_completion(
 
     await channel.send(embed=embed)
 
+async def refresh_sticky_message(channel):
+    async with sticky_message_lock:
+        old_message_id = data.get("sticky_message_id")
+
+        # 이전에 보냈던 안내 메시지 삭제
+        if old_message_id:
+            try:
+                old_message = await channel.fetch_message(
+                    int(old_message_id)
+                )
+                await old_message.delete()
+
+            except discord.NotFound:
+                # 이미 삭제된 경우
+                pass
+
+            except discord.Forbidden:
+                print("스티키 메시지를 삭제할 권한이 없음")
+                return
+
+            except discord.HTTPException as e:
+                print(f"스티키 메시지 삭제 실패: {e}")
+                return
+
+        # 새로운 안내 메시지를 맨 아래에 전송
+        try:
+            new_message = await channel.send(
+                STICKY_MESSAGE,
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+
+            data["sticky_message_id"] = new_message.id
+            save_data()
+
+        except discord.Forbidden:
+            print("스티키 메시지를 보낼 권한이 없음")
+
+        except discord.HTTPException as e:
+            print(f"스티키 메시지 전송 실패: {e}")
+
+
+@bot.listen("on_message")
+async def sticky_message_listener(message):
+    if message.channel.id != STICKY_CHANNEL_ID:
+        return
+
+    # 방금 봇이 전송한 스티키 메시지에는 다시 반응하지 않음
+    if (
+        bot.user
+        and message.author.id == bot.user.id
+        and message.id == data.get("sticky_message_id")
+    ):
+        return
+
+    await refresh_sticky_message(message.channel)
+    
 
 @bot.event
 async def on_ready():
@@ -8004,6 +8072,11 @@ async def on_ready():
     guild = bot.get_guild(GUILD_ID)
     if guild:
         await update_ranking_message(guild)
+
+    sticky_channel = bot.get_channel(STICKY_CHANNEL_ID)
+
+    if sticky_channel:
+        await refresh_sticky_message(sticky_channel)
     
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
