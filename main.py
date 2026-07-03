@@ -1427,8 +1427,6 @@ async def generate_furina_ai_response(user_id, user_text):
         
 @bot.event
 async def on_message(message):
-    if message.author.bot:
-        return
 
     now = datetime.now(KST)
     uid = str(message.author.id)
@@ -8036,13 +8034,17 @@ async def refresh_sticky_message(channel):
 
 @bot.listen("on_message")
 async def sticky_message_listener(message):
-    # 지정 채널이 아니면 무시
+    # 지정된 채널만 감지
     if message.channel.id != STICKY_CHANNEL_ID:
         return
 
-    # 봇이 보낸 메시지는 전부 무시
-    # 안내 메시지가 자기 자신을 다시 감지하는 무한 반복 방지
-    if message.author.bot:
+    # 봇이 직접 보낸 '안내 메시지'만 무시
+    # 메시지 ID 저장 타이밍과 관계없이 내용으로 확실하게 구분
+    if (
+        bot.user
+        and message.author.id == bot.user.id
+        and message.content == STICKY_MESSAGE
+    ):
         return
 
     await refresh_sticky_message(message.channel)
