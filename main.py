@@ -175,12 +175,13 @@ WARNING_TIMEOUT = timedelta(hours=1)
 
 STICKY_CHANNEL_ID = 1510692438480523494
 
-STICKY_MESSAGE = """📌 **범프 안내**
+STICKY_MESSAGE = """📌**범프 안내**
 
 /bump하면 /up도 해주셈. 안하면 종훈이 ㅅㄱ
 """
 
 sticky_message_lock = asyncio.Lock()
+sticky_message_sending = False
 
 load_data()
         
@@ -7992,44 +7993,51 @@ async def on_app_command_completion(
     await channel.send(embed=embed)
 
 async def refresh_sticky_message(channel):
+    global sticky_message_sending
+
     async with sticky_message_lock:
-        old_message_id = data.get("sticky_message_id")
+        sticky_message_sending = True
 
-        # 이전에 보냈던 안내 메시지 삭제
-        if old_message_id:
-            try:
-                old_message = await channel.fetch_message(
-                    int(old_message_id)
-                )
-                await old_message.delete()
-
-            except discord.NotFound:
-                # 이미 삭제된 경우
-                pass
-
-            except discord.Forbidden:
-                print("스티키 메시지를 삭제할 권한이 없음")
-                return
-
-            except discord.HTTPException as e:
-                print(f"스티키 메시지 삭제 실패: {e}")
-                return
-
-        # 새로운 안내 메시지를 맨 아래에 전송
         try:
+            old_message_id = data.get("sticky_message_id")
+
+            # 이전 안내 메시지 삭제
+            if old_message_id:
+                try:
+                    old_message = await channel.fetch_message(
+                        int(old_message_id)
+                    )
+                    await old_message.delete()
+
+                except discord.NotFound:
+                    pass
+
+                except discord.Forbidden:
+                    print("스티키 메시지 삭제 권한 없음")
+                    return
+
+                except discord.HTTPException as e:
+                    print(f"스티키 메시지 삭제 실패: {e}")
+                    return
+
+            # 새로운 안내 메시지 전송
             new_message = await channel.send(
                 STICKY_MESSAGE,
                 allowed_mentions=discord.AllowedMentions.none()
             )
 
+            # send 다음에는 await가 없어서 바로 ID가 저장됨
             data["sticky_message_id"] = new_message.id
             save_data()
 
         except discord.Forbidden:
-            print("스티키 메시지를 보낼 권한이 없음")
+            print("스티키 메시지 전송 권한 없음")
 
         except discord.HTTPException as e:
             print(f"스티키 메시지 전송 실패: {e}")
+
+        finally:
+            sticky_message_sending = False
 
 
 @bot.listen("on_message")
@@ -8038,12 +8046,26 @@ async def sticky_message_listener(message):
     if message.channel.id != STICKY_CHANNEL_ID:
         return
 
-    # 봇이 직접 보낸 '안내 메시지'만 무시
-    # 메시지 ID 저장 타이밍과 관계없이 내용으로 확실하게 구분
+    current_sticky_id = data.get("sticky_message_id")
+
+    # 현재 안내 메시지 자체는 무시
+    if current_sticky_id:
+        if message.id == int(current_sticky_id):
+            return
+
+    # 안내 메시지를 보내는 도중 발생한 자기 메시지는 무시
     if (
         bot.user
         and message.author.id == bot.user.id
-        and message.content == STICKY_MESSAGE
+        and sticky_message_sending
+    ):
+        return
+
+    # 저장 타이밍이나 재시작 상황을 위한 보조 검사
+    if (
+        bot.user
+        and message.author.id == bot.user.id
+        and message.content.strip() == STICKY_MESSAGE.strip()
     ):
         return
 
