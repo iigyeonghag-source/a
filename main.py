@@ -8101,10 +8101,11 @@ ADVENTURE_INVENTORY_PAGE_SIZE = 10
 ADVENTURE_RELIC_PAGE_SIZE = 10
 
 # 한 번 이동했을 때 일반 몬스터를 만날 기본 확률.
-# 몬스터가 너무 연속해서 나오지 않도록 18%로 낮췄다.
+# 기본 35%이며, 몬스터가 나오지 않은 턴마다 15%p씩 올라 최대 80%가 된다.
 # 보스 출현 판정은 이 확률과 별개로 매 턴 진행된다.
-# 일반 몬스터는 꽤 뜸하게 등장한다. 보스 판정은 이 확률과 별개다.
-ADVENTURE_MONSTER_EVENT_RATE = 10.0
+ADVENTURE_MONSTER_EVENT_RATE = 35.0
+ADVENTURE_MONSTER_PITY_PER_TURN = 15.0
+ADVENTURE_MONSTER_EVENT_RATE_MAX = 80.0
 
 # 모험 한 턴은 실제로 1~5분 동안 진행된다.
 # 긴 asyncio.sleep 대신 완료 시각을 저장하고, 유저가 상황 확인 버튼으로 결과를 연다.
@@ -8456,6 +8457,7 @@ def get_adventure(uid):
         "pending_name_item_id": None,
         "terrain": None,
         "terrain_steps": 0,
+        "quiet_turns": 0,  # 몬스터 없이 지나간 연속 턴 수
         "visited_terrains": [],
         "defeated_bosses": [],
         "best_terrain_rank": 0,
@@ -8661,6 +8663,20 @@ def get_adventure_boss_spawn_rate(adventure, next_turn=False):
         ADVENTURE_BOSS_MAX_RATE,
         ADVENTURE_BOSS_BASE_RATE + max(0, extra_turns) * ADVENTURE_BOSS_RATE_PER_STEP,
     )
+
+
+def get_adventure_monster_spawn_rate(adventure):
+    """다음 일반 몬스터 조우 확률. 평화로운 턴이 이어질수록 확률이 오른다."""
+    quiet_turns = max(0, int(adventure.get("quiet_turns", 0)))
+    boosts = adventure.get("boosts", {})
+    good_event_shift = min(12.0, boosts.get("luck", 0) * 0.6)
+
+    rate = (
+        ADVENTURE_MONSTER_EVENT_RATE
+        + quiet_turns * ADVENTURE_MONSTER_PITY_PER_TURN
+        - good_event_shift * 0.20
+    )
+    return max(5.0, min(ADVENTURE_MONSTER_EVENT_RATE_MAX, rate))
 
 
 def get_adventure_equipment_text(adventure):
@@ -8937,6 +8953,7 @@ def start_new_adventure(uid, terrain_key):
         "pending_name_item_id": None,
         "terrain": terrain_key,
         "terrain_steps": 0,
+        "quiet_turns": 0,
         "visited_terrains": [terrain_key],
         "defeated_bosses": [],
         "boosts": boosts,
@@ -8976,6 +8993,7 @@ def finish_adventure(uid):
     adventure["lives"] = 3
     adventure["max_lives"] = 3
     adventure["terrain"] = None
+    adventure["quiet_turns"] = 0
     adventure["terrain_steps"] = 0
     adventure["visited_terrains"] = []
     adventure["defeated_bosses"] = []
@@ -9279,6 +9297,7 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
             f"👣 전체 진행: **{adventure['steps']}회**\n"
             f"🥾 현재 지형 진행: **{adventure.get('terrain_steps', 0)}회**\n"
             f"{turn_status}\n"
+            f"👹 다음 턴 일반 몬스터 확률: **{get_adventure_monster_spawn_rate(adventure):.1f}%**\n"
             f"👑 다음 턴 보스 확률: **{get_adventure_boss_spawn_rate(adventure, next_turn=True):.1f}%**\n"
             f"⚔️ 처치 수: **{adventure['kills']}마리**\n"
             f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**\n"
@@ -9614,6 +9633,8 @@ async def roll_adventure_event(message, member):
     # 보스는 5턴을 넘긴 뒤부터 매 턴 독립적으로 판정된다.
     boss_rate = get_adventure_boss_spawn_rate(adventure)
     if boss_rate > 0 and random.random() * 100 < boss_rate:
+        adventure["quiet_turns"] = 0
+        save_data()
         await show_adventure_monster_encounter(
             message,
             member,
@@ -9630,6 +9651,7 @@ async def roll_adventure_event(message, member):
         if len(destinations) > 2:
             destinations = random.sample(destinations, k=random.randint(2, min(3, len(destinations))))
         if queue_terrain_choice(adventure, destinations, "random"):
+            adventure["quiet_turns"] = min(10, adventure.get("quiet_turns", 0) + 1)
             save_data()
             await show_terrain_choice(message, member)
             return
@@ -9651,6 +9673,7 @@ async def roll_adventure_event(message, member):
         if is_new:
             adventure["pending_name_item_id"] = item_id
 
+        adventure["quiet_turns"] = min(10, adventure.get("quiet_turns", 0) + 1)
         save_data()
 
         rarity = ADVENTURE_RARITIES[ADVENTURE_ITEM_CATALOG[item_id]["rarity"]]
@@ -9680,13 +9703,15 @@ async def roll_adventure_event(message, member):
         await message.edit(embed=embed, view=view)
         return
 
-    # 일반 몬스터는 약 18%로 낮췄다. 강적 10%, 재앙급 1% 판정은 그대로 유지한다.
-    monster_border = max(5.0, ADVENTURE_MONSTER_EVENT_RATE - good_event_shift * 0.20)
+    # 기본 35%. 몬스터가 안 나온 턴마다 15%p씩 증가하고, 조우하면 다시 초기화된다.
+    monster_border = get_adventure_monster_spawn_rate(adventure)
     item_border = monster_border + 22 + good_event_shift * 0.55
     money_border = item_border + 13 + good_event_shift * 0.25
     heal_border = money_border + 7 + good_event_shift * 0.15
 
     if roll < relic_rate + monster_border:
+        adventure["quiet_turns"] = 0
+        save_data()
         await show_adventure_monster_encounter(
             message,
             member,
@@ -9695,6 +9720,9 @@ async def roll_adventure_event(message, member):
             force_boss=False,
         )
         return
+
+    # 이번 턴에도 몬스터가 나오지 않았다면 다음 턴 조우 확률을 높인다.
+    adventure["quiet_turns"] = min(10, adventure.get("quiet_turns", 0) + 1)
 
     adjusted_roll = roll - relic_rate
 
@@ -9752,6 +9780,7 @@ async def roll_adventure_event(message, member):
         title=f"{terrain['emoji']} {terrain['name']}을 계속 걷고 있다...",
         description=(
             f"{terrain['description']}\n그래도 조금 더 깊은 곳까지 들어왔어.\n\n"
+            f"다음 턴 일반 몬스터 확률: **{get_adventure_monster_spawn_rate(adventure):.1f}%**\n"
             f"다음 턴 보스 확률: **{get_adventure_boss_spawn_rate(adventure, next_turn=True):.1f}%**"
         ),
         color=discord.Color(terrain["color"]),
@@ -10980,6 +11009,7 @@ async def adventure_record_command(interaction: discord.Interaction):
         color=discord.Color.purple(),
     )
     await interaction.response.send_message(embed=embed)
+
 
 
 @bot.event
