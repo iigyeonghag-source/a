@@ -8092,6 +8092,7 @@ async def sticky_message_listener(message):
     await refresh_sticky_message(message.channel)
 
 
+
 # =========================
 # 모험 / 전리품 / 유물 시스템
 # =========================
@@ -9942,10 +9943,15 @@ async def resolve_adventure_battle(message, member):
         color=victory_color,
     )
 
+    pending_after_battle = adventure.get("pending_event") or {}
+
     if relic_is_new:
         view = RelicNamingView(uid)
-    elif adventure.get("pending_event", {}).get("type") == "terrain_choice":
-        view = AdventureTerrainChoiceView(uid, adventure["pending_event"].get("destinations", []))
+    elif pending_after_battle.get("type") == "terrain_choice":
+        view = AdventureTerrainChoiceView(
+            uid,
+            pending_after_battle.get("destinations", []),
+        )
     else:
         view = AdventureTravelView(uid)
     await message.edit(embed=embed, view=view)
