@@ -63,7 +63,11 @@ data = {
     "quests": {},
     "achievements": {},
     "character_pity": {},
-    "warnings": {}
+    "warnings": {},
+    "adventures": {},
+    "inventories": {},
+    "discovered_items": {},
+    "shop_items": {}
 }
 
 characters = {}
@@ -73,6 +77,10 @@ quests = {}
 achievements = {}
 character_pity = {}
 warnings = {}
+adventures = {}
+inventories = {}
+discovered_items = {}
+shop_items = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -93,6 +101,10 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["adventures"] = loaded.get("adventures", {})
+        data["inventories"] = loaded.get("inventories", {})
+        data["discovered_items"] = loaded.get("discovered_items", {})
+        data["shop_items"] = loaded.get("shop_items", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
@@ -124,6 +136,10 @@ def load_data():
     quests = data["quests"]
     achievements = data["achievements"]
     character_pity = data["character_pity"]
+    adventures = data["adventures"]
+    inventories = data["inventories"]
+    discovered_items = data["discovered_items"]
+    shop_items = data["shop_items"]
 
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
@@ -132,6 +148,10 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["adventures"] = adventures
+    data["inventories"] = inventories
+    data["discovered_items"] = discovered_items
+    data["shop_items"] = shop_items
     data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
     data["levels"] = levels
@@ -8070,8 +8090,1545 @@ async def sticky_message_listener(message):
         return
 
     await refresh_sticky_message(message.channel)
-    
 
+
+# =========================
+# 모험 / 전리품 / 유물 시스템
+# =========================
+
+ADVENTURE_MAX_EQUIPPED = 3
+ADVENTURE_INVENTORY_PAGE_SIZE = 10
+ADVENTURE_RELIC_PAGE_SIZE = 10
+
+ADVENTURE_RARITIES = {
+    "common": {"name": "일반", "emoji": "⚪", "value_mul": 1.0},
+    "uncommon": {"name": "고급", "emoji": "🟢", "value_mul": 1.8},
+    "rare": {"name": "희귀", "emoji": "🔵", "value_mul": 3.2},
+    "epic": {"name": "영웅", "emoji": "🟣", "value_mul": 6.0},
+    "legendary": {"name": "전설", "emoji": "🟡", "value_mul": 12.0},
+    "mythic": {"name": "신화", "emoji": "🔴", "value_mul": 25.0},
+}
+
+ADVENTURE_RARITY_ORDER = {
+    "common": 0,
+    "uncommon": 1,
+    "rare": 2,
+    "epic": 3,
+    "legendary": 4,
+    "mythic": 5,
+}
+
+ADVENTURE_DROP_WEIGHTS = {
+    "common": 70,
+    "uncommon": 35,
+    "rare": 13,
+    "epic": 4,
+    "legendary": 0.8,
+    "mythic": 0.12,
+}
+
+ADVENTURE_SHOP_CATALOG = {
+    "낡은 나침반": {
+        "price": 800,
+        "desc": "좋은 사건과 재료를 만날 확률이 조금 증가한다.",
+        "luck": 5,
+    },
+    "철제 숫돌": {
+        "price": 1200,
+        "desc": "모험 전투 승률이 증가한다.",
+        "battle": 6,
+    },
+    "행운 부적": {
+        "price": 1800,
+        "desc": "높은 등급 전리품 확률이 증가한다.",
+        "loot": 9,
+    },
+    "연막탄": {
+        "price": 2200,
+        "desc": "도주 성공률이 증가한다.",
+        "escape": 18,
+    },
+    "응급 약초": {
+        "price": 2800,
+        "desc": "패배 시 목숨을 지킬 확률이 증가한다.",
+        "life_save": 12,
+    },
+    "수상한 지도": {
+        "price": 4500,
+        "desc": "이름 없는 유물을 발견할 확률이 증가한다.",
+        "relic": 3.5,
+    },
+    "푸리나의 찻잔": {
+        "price": 9000,
+        "desc": "전투와 행운을 함께 조금 올려준다.",
+        "battle": 5,
+        "luck": 5,
+        "loot": 5,
+    },
+    "심해의 등불": {
+        "price": 16000,
+        "desc": "유물 발견률과 도주 성공률을 크게 올린다.",
+        "relic": 5.0,
+        "escape": 12,
+    },
+}
+
+adventure_action_locks = {}
+
+
+def get_adventure_lock(uid):
+    uid = str(uid)
+    if uid not in adventure_action_locks:
+        adventure_action_locks[uid] = asyncio.Lock()
+    return adventure_action_locks[uid]
+
+
+def get_adventure(uid):
+    uid = str(uid)
+
+    if uid not in adventures or not isinstance(adventures[uid], dict):
+        adventures[uid] = {}
+
+    adventure = adventures[uid]
+
+    defaults = {
+        "active": False,
+        "started_at": None,
+        "steps": 0,
+        "kills": 0,
+        "earned_mora": 0,
+        "lives": 3,
+        "pending_event": None,
+        "pending_name_item_id": None,
+        "best_steps": 0,
+        "best_kills": 0,
+        "total_runs": 0,
+        "total_kills": 0,
+        "boosts": {
+            "battle": 0,
+            "luck": 0,
+            "loot": 0,
+            "escape": 0,
+            "life_save": 0,
+            "relic": 0,
+        },
+    }
+
+    for key, value in defaults.items():
+        if key not in adventure:
+            if isinstance(value, dict):
+                adventure[key] = value.copy()
+            else:
+                adventure[key] = value
+
+    return adventure
+
+
+def get_adventure_inventory(uid):
+    uid = str(uid)
+
+    if uid not in inventories or not isinstance(inventories[uid], dict):
+        inventories[uid] = {}
+
+    return inventories[uid]
+
+
+def get_adventure_shop_user(uid):
+    uid = str(uid)
+
+    if uid not in shop_items or not isinstance(shop_items[uid], dict):
+        shop_items[uid] = {
+            "owned": [],
+            "equipped": [],
+        }
+
+    info = shop_items[uid]
+    info.setdefault("owned", [])
+    info.setdefault("equipped", [])
+
+    # 예전 형식이나 잘못된 데이터가 있어도 복구
+    if not isinstance(info["owned"], list):
+        info["owned"] = list(info["owned"])
+    if not isinstance(info["equipped"], list):
+        info["equipped"] = list(info["equipped"])
+
+    info["owned"] = [name for name in info["owned"] if name in ADVENTURE_SHOP_CATALOG]
+    info["equipped"] = [
+        name
+        for name in info["equipped"]
+        if name in info["owned"] and name in ADVENTURE_SHOP_CATALOG
+    ][:ADVENTURE_MAX_EQUIPPED]
+
+    return info
+
+
+def get_equipped_adventure_boosts(uid):
+    info = get_adventure_shop_user(uid)
+
+    boosts = {
+        "battle": 0,
+        "luck": 0,
+        "loot": 0,
+        "escape": 0,
+        "life_save": 0,
+        "relic": 0,
+    }
+
+    for item_name in info["equipped"]:
+        item = ADVENTURE_SHOP_CATALOG.get(item_name, {})
+        for key in boosts:
+            boosts[key] += item.get(key, 0)
+
+    return boosts
+
+
+def build_adventure_item_catalog():
+    """코드 몇 줄로 400종이 넘는 전리품을 만든다."""
+    catalog = {}
+
+    monster_parts = [
+        ("흔적", "common", 12),
+        ("파편", "common", 18),
+        ("핵", "uncommon", 35),
+        ("정수", "rare", 80),
+        ("심장", "epic", 180),
+        ("왕관", "legendary", 450),
+    ]
+
+    for monster_index, monster in enumerate(MONSTERS):
+        for part_index, (part_name, rarity, base_value) in enumerate(monster_parts):
+            item_id = f"monster_{monster_index:03d}_{part_index:02d}"
+            catalog[item_id] = {
+                "name": f"{monster['name']}의 {part_name}",
+                "kind": "monster_loot",
+                "rarity": rarity,
+                "value": base_value + monster_index * 8,
+                "source_monster": monster["name"],
+                "custom_name": False,
+            }
+
+    prefixes = [
+        "새벽빛", "해질녘", "푸른", "붉은", "은빛", "금빛",
+        "고요한", "울부짖는", "메마른", "축축한", "별무늬", "심해의",
+    ]
+
+    world_materials = [
+        ("약초", "herb"),
+        ("버섯", "herb"),
+        ("꽃잎", "herb"),
+        ("뿌리", "herb"),
+        ("광석", "ore"),
+        ("결정", "ore"),
+        ("모래", "material"),
+        ("깃털", "material"),
+        ("나뭇가지", "material"),
+        ("물방울", "material"),
+        ("조개", "material"),
+        ("유리조각", "material"),
+    ]
+
+    for prefix_index, prefix in enumerate(prefixes):
+        for material_index, (base_name, kind) in enumerate(world_materials):
+            item_id = f"world_{prefix_index:02d}_{material_index:02d}"
+            score = prefix_index + material_index
+
+            if score >= 20:
+                rarity = "epic"
+            elif score >= 15:
+                rarity = "rare"
+            elif score >= 8:
+                rarity = "uncommon"
+            else:
+                rarity = "common"
+
+            catalog[item_id] = {
+                "name": f"{prefix} {base_name}",
+                "kind": kind,
+                "rarity": rarity,
+                "value": 10 + score * 6,
+                "source_monster": None,
+                "custom_name": False,
+            }
+
+    # 이름을 최초 발견자가 붙이는 유물 120종
+    for relic_number in range(1, 121):
+        if relic_number % 97 == 0:
+            rarity = "mythic"
+        elif relic_number % 29 == 0:
+            rarity = "legendary"
+        elif relic_number % 11 == 0:
+            rarity = "epic"
+        elif relic_number % 4 == 0:
+            rarity = "rare"
+        else:
+            rarity = "uncommon"
+
+        item_id = f"relic_{relic_number:03d}"
+        catalog[item_id] = {
+            "name": None,
+            "kind": "relic",
+            "rarity": rarity,
+            "value": int(250 * ADVENTURE_RARITIES[rarity]["value_mul"]),
+            "source_monster": None,
+            "custom_name": True,
+        }
+
+    return catalog
+
+
+ADVENTURE_ITEM_CATALOG = build_adventure_item_catalog()
+
+
+def get_adventure_item_name(item_id):
+    item = ADVENTURE_ITEM_CATALOG.get(item_id)
+    if not item:
+        return "알 수 없는 물건"
+
+    if item.get("custom_name"):
+        discovered = discovered_items.get(item_id, {})
+        return discovered.get("name") or "이름 없는 유물"
+
+    return item["name"]
+
+
+def get_adventure_item_line(item_id, count=1):
+    item = ADVENTURE_ITEM_CATALOG.get(item_id)
+    if not item:
+        return f"❔ 알 수 없는 물건 ×{count}"
+
+    rarity = ADVENTURE_RARITIES[item["rarity"]]
+    return f"{rarity['emoji']} **{get_adventure_item_name(item_id)}** ×{count}"
+
+
+def add_adventure_item(uid, item_id, amount=1):
+    if item_id not in ADVENTURE_ITEM_CATALOG:
+        return
+
+    inventory = get_adventure_inventory(uid)
+    inventory[item_id] = max(0, int(inventory.get(item_id, 0)) + int(amount))
+
+    if inventory[item_id] <= 0:
+        inventory.pop(item_id, None)
+
+
+def adventure_elapsed_minutes(adventure):
+    started_at = adventure.get("started_at")
+    if not started_at:
+        return 0.0
+
+    try:
+        started = datetime.fromisoformat(started_at)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=KST)
+        return max(0.0, (datetime.now(KST) - started).total_seconds() / 60)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def adventure_danger(adventure):
+    # 실제 시간과 진행 횟수가 모두 위험도에 반영됨
+    return adventure_elapsed_minutes(adventure) + adventure.get("steps", 0) * 1.4
+
+
+def start_new_adventure(uid):
+    adventure = get_adventure(uid)
+    adventure.update({
+        "active": True,
+        "started_at": datetime.now(KST).isoformat(),
+        "steps": 0,
+        "kills": 0,
+        "earned_mora": 0,
+        "lives": 3,
+        "pending_event": None,
+        "pending_name_item_id": None,
+        "boosts": get_equipped_adventure_boosts(uid),
+    })
+    save_data()
+    return adventure
+
+
+def finish_adventure(uid):
+    adventure = get_adventure(uid)
+
+    summary = {
+        "steps": adventure.get("steps", 0),
+        "kills": adventure.get("kills", 0),
+        "earned_mora": adventure.get("earned_mora", 0),
+        "minutes": adventure_elapsed_minutes(adventure),
+    }
+
+    adventure["best_steps"] = max(adventure.get("best_steps", 0), summary["steps"])
+    adventure["best_kills"] = max(adventure.get("best_kills", 0), summary["kills"])
+    adventure["total_runs"] = adventure.get("total_runs", 0) + 1
+    adventure["active"] = False
+    adventure["started_at"] = None
+    adventure["pending_event"] = None
+    adventure["pending_name_item_id"] = None
+    adventure["lives"] = 3
+
+    save_data()
+    return summary
+
+
+def get_trait_by_name(name):
+    if not name:
+        return None
+
+    for trait in MONSTER_TRAITS:
+        if trait["name"] == name:
+            return trait
+
+    return None
+
+
+def pick_adventure_monster(user, adventure):
+    danger = adventure_danger(adventure)
+    target_level = max(1, user["level"] + int(danger * 0.75))
+
+    possible = [
+        monster
+        for monster in MONSTERS
+        if monster["min"] <= target_level <= monster["max"]
+    ]
+
+    if not possible:
+        possible = sorted(
+            MONSTERS,
+            key=lambda monster: abs(((monster["min"] + monster["max"]) / 2) - target_level),
+        )[:4]
+
+    monster = random.choice(possible)
+    low = max(monster["min"], target_level - 3)
+    high = min(monster["max"], target_level + 3)
+
+    if low > high:
+        low, high = monster["min"], monster["max"]
+
+    monster_level = random.randint(low, high)
+    trait = pick_monster_trait()
+
+    return monster, monster_level, trait
+
+
+def weighted_adventure_item(items, danger=0.0, loot_bonus=0.0):
+    if not items:
+        return None
+
+    weights = []
+
+    for item_id in items:
+        item = ADVENTURE_ITEM_CATALOG[item_id]
+        rarity = item["rarity"]
+        rarity_rank = ADVENTURE_RARITY_ORDER[rarity]
+        weight = ADVENTURE_DROP_WEIGHTS[rarity]
+
+        # 깊이와 장비 효과가 높은 등급에 조금 더 유리하게 작용
+        weight *= 1 + min(2.5, danger / 80) * (rarity_rank * 0.18)
+        weight *= 1 + (loot_bonus / 100) * rarity_rank
+        weights.append(max(0.001, weight))
+
+    return random.choices(items, weights=weights, k=1)[0]
+
+
+def pick_monster_loot(monster_name, adventure):
+    candidates = [
+        item_id
+        for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+        if item.get("source_monster") == monster_name
+    ]
+
+    return weighted_adventure_item(
+        candidates,
+        danger=adventure_danger(adventure),
+        loot_bonus=adventure.get("boosts", {}).get("loot", 0),
+    )
+
+
+def pick_world_loot(adventure):
+    candidates = [
+        item_id
+        for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+        if item["kind"] in {"herb", "ore", "material"}
+    ]
+
+    return weighted_adventure_item(
+        candidates,
+        danger=adventure_danger(adventure),
+        loot_bonus=adventure.get("boosts", {}).get("loot", 0),
+    )
+
+
+def pick_mystery_relic():
+    all_relics = [
+        item_id
+        for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+        if item["kind"] == "relic"
+    ]
+
+    undiscovered = [
+        item_id
+        for item_id in all_relics
+        if item_id not in discovered_items
+    ]
+
+    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나오게 함
+    if undiscovered and random.random() < 0.78:
+        return random.choice(undiscovered)
+
+    return random.choice(all_relics)
+
+
+def format_adventure_boosts(boosts):
+    labels = {
+        "battle": "전투",
+        "luck": "행운",
+        "loot": "전리품",
+        "escape": "도주",
+        "life_save": "생존",
+        "relic": "유물",
+    }
+
+    parts = []
+    for key, label in labels.items():
+        value = boosts.get(key, 0)
+        if value:
+            suffix = "%" if key != "relic" else "%p"
+            parts.append(f"{label} +{value:g}{suffix}")
+
+    return ", ".join(parts) if parts else "없음"
+
+
+def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
+    elapsed = adventure_elapsed_minutes(adventure)
+    danger = adventure_danger(adventure)
+
+    embed = discord.Embed(
+        title=title,
+        description=(
+            f"{member.mention}은(는) 현재 모험 중이야.\n\n"
+            f"⏱️ 경과 시간: **{elapsed:.1f}분**\n"
+            f"👣 진행 횟수: **{adventure['steps']}회**\n"
+            f"⚔️ 처치 수: **{adventure['kills']}마리**\n"
+            f"❤️ 목숨: **{adventure['lives']}/3**\n"
+            f"💰 이번 모험 수익: **{adventure['earned_mora']:,}모라**\n"
+            f"☠️ 위험도: **{danger:.1f}**\n\n"
+            f"🎒 적용 효과: {format_adventure_boosts(adventure.get('boosts', {}))}"
+        ),
+        color=discord.Color.blurple(),
+    )
+
+    embed.set_footer(text="시간과 진행 횟수가 늘수록 더 강한 적이 나타난다.")
+    return embed
+
+
+def normalize_item_name_for_filter(name):
+    import re
+    return re.sub(r"[^가-힣a-zA-Z0-9]", "", name).lower()
+
+
+def validate_relic_name(name):
+    import re
+
+    clean_name = name.strip()
+
+    if not 1 <= len(clean_name) <= 6:
+        return False, "이름은 1~6자로 지어야 해."
+
+    if not re.fullmatch(r"[가-힣a-zA-Z0-9 ]+", clean_name):
+        return False, "한글, 영어, 숫자, 공백만 사용할 수 있어."
+
+    normalized = normalize_item_name_for_filter(clean_name)
+    if not normalized:
+        return False, "사용할 수 없는 이름이야."
+
+    banned_words = set(ANGRY_WORDS + DIRTY_WORDS)
+    for banned in banned_words:
+        banned_normalized = normalize_item_name_for_filter(banned)
+        if banned_normalized and banned_normalized in normalized:
+            return False, "금지어가 들어간 이름은 사용할 수 없어."
+
+    meaningless = {
+        "ㅋㅋ", "ㅋㅋㅋ", "ㅎㅎ", "ㅎㅎㅎ", "ㄹㅇ", "ㅁㄴㅇㄹ",
+        "123", "1234", "aaaa", "asdf", "test", "테스트",
+    }
+    if normalized in {normalize_item_name_for_filter(v) for v in meaningless}:
+        return False, "조금 더 제대로 된 이름을 지어줘."
+
+    for info in discovered_items.values():
+        old_name = str(info.get("name", ""))
+        if normalize_item_name_for_filter(old_name) == normalized:
+            return False, "이미 다른 유물이 쓰고 있는 이름이야."
+
+    return True, clean_name
+
+
+async def check_adventure_owner(interaction, owner_id):
+    if str(interaction.user.id) == str(owner_id):
+        return True
+
+    await interaction.response.send_message("❌ 네 모험이 아니야.", ephemeral=True)
+    return False
+
+
+async def send_adventure_travel_animation(interaction, uid):
+    adventure = get_adventure(uid)
+
+    embed = build_adventure_status_embed(
+        interaction.user,
+        adventure,
+        title="🌲 모험을 떠나는 중...",
+    )
+    embed.description += "\n\n낯선 길을 따라 앞으로 나아가고 있어..."
+
+    await interaction.response.edit_message(embed=embed, view=None)
+    message = interaction.message
+
+    await asyncio.sleep(random.uniform(1.2, 2.0))
+    await roll_adventure_event(message, interaction.user)
+
+
+async def apply_adventure_life_loss(message, member, adventure, reason_text):
+    uid = str(member.id)
+    user = get_hunt_user(uid)
+
+    vit_saved = check_life_save(user)
+    shop_save_chance = adventure.get("boosts", {}).get("life_save", 0)
+    shop_saved = random.random() * 100 < shop_save_chance
+
+    if vit_saved or shop_saved:
+        save_data()
+        embed = discord.Embed(
+            title="💥 간신히 살아남았다!",
+            description=(
+                f"{reason_text}\n\n"
+                "하지만 생존 효과가 발동해서 목숨은 줄지 않았어!\n"
+                f"❤️ 남은 목숨: **{adventure['lives']}/3**"
+            ),
+            color=discord.Color.orange(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    adventure["lives"] -= 1
+
+    if adventure["lives"] > 0:
+        save_data()
+        embed = discord.Embed(
+            title="💀 패배...",
+            description=(
+                f"{reason_text}\n\n"
+                "목숨을 하나 잃었어.\n"
+                f"❤️ 남은 목숨: **{adventure['lives']}/3**"
+            ),
+            color=discord.Color.red(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    money = get_poker_money(uid)
+    hospital_fee, final_rate = calc_hospital_fee(user, money)
+    remove_poker_money(uid, hospital_fee)
+    summary = finish_adventure(uid)
+
+    embed = discord.Embed(
+        title="🏥 병원에서 눈을 떴다...",
+        description=(
+            f"{reason_text}\n\n"
+            "목숨을 전부 잃어서 이번 모험은 처음부터 다시 해야 해.\n"
+            f"치료비: **{hospital_fee:,}모라** ({final_rate * 100:.1f}%)\n\n"
+            f"👣 진행: **{summary['steps']}회**\n"
+            f"⚔️ 처치: **{summary['kills']}마리**\n"
+            f"💰 획득: **{summary['earned_mora']:,}모라**\n"
+            f"⏱️ 생존 시간: **{summary['minutes']:.1f}분**"
+        ),
+        color=discord.Color.dark_red(),
+    )
+    await message.edit(embed=embed, view=None)
+
+
+async def roll_adventure_event(message, member):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+
+    if not adventure["active"]:
+        await message.edit(content="이 모험은 이미 끝났어.", embed=None, view=None)
+        return
+
+    if adventure.get("pending_name_item_id"):
+        item_id = adventure["pending_name_item_id"]
+        embed = discord.Embed(
+            title="✨ 이름을 기다리는 유물",
+            description=(
+                f"{get_adventure_item_line(item_id)}\n\n"
+                "이 유물은 네가 최초로 발견했어. 계속 가기 전에 이름을 지어줘!"
+            ),
+            color=discord.Color.gold(),
+        )
+        await message.edit(embed=embed, view=RelicNamingView(uid))
+        return
+
+    adventure["steps"] += 1
+    danger = adventure_danger(adventure)
+    boosts = adventure.get("boosts", {})
+
+    relic_rate = min(12.0, 1.5 + boosts.get("relic", 0) + danger * 0.018)
+    good_event_shift = min(12.0, boosts.get("luck", 0) * 0.6)
+    roll = random.random() * 100
+
+    if roll < relic_rate:
+        item_id = pick_mystery_relic()
+        add_adventure_item(uid, item_id, 1)
+
+        item_name = get_adventure_item_name(item_id)
+        is_new = item_id not in discovered_items
+
+        if is_new:
+            adventure["pending_name_item_id"] = item_id
+
+        save_data()
+
+        rarity = ADVENTURE_RARITIES[ADVENTURE_ITEM_CATALOG[item_id]["rarity"]]
+        embed = discord.Embed(
+            title="✨ 처음 보는 물건을 발견했다!" if is_new else "✨ 유물을 발견했다!",
+            description=(
+                f"{rarity['emoji']} **{item_name}**\n"
+                f"등급: **{rarity['name']}**\n\n"
+                + (
+                    "이 유물은 아직 이름이 없어. 최초 발견자인 네가 이름을 지을 수 있어!"
+                    if is_new
+                    else "이미 누군가 이름 붙인 유물이야."
+                )
+            ),
+            color=discord.Color.gold(),
+        )
+
+        view = RelicNamingView(uid) if is_new else AdventureTravelView(uid)
+        await message.edit(embed=embed, view=view)
+        return
+
+    monster_border = 58 - good_event_shift * 0.25
+    item_border = monster_border + 20 + good_event_shift * 0.55
+    money_border = item_border + 11 + good_event_shift * 0.25
+    heal_border = money_border + 6 + good_event_shift * 0.15
+
+    if roll < relic_rate + monster_border:
+        user = get_hunt_user(uid)
+        monster, monster_level, trait = pick_adventure_monster(user, adventure)
+        battle_level = apply_trait_to_monster_level(monster_level, trait)
+        monster_name = monster["name"]
+        display_name = f"{trait['name']} {monster_name}" if trait else monster_name
+
+        adventure["pending_event"] = {
+            "type": "monster",
+            "monster_name": monster_name,
+            "monster_level": monster_level,
+            "trait_name": trait["name"] if trait else None,
+        }
+        save_data()
+
+        preview_chance = calc_win_chance(user, monster, monster_level, trait)
+        preview_chance += adventure.get("boosts", {}).get("battle", 0)
+        preview_chance = max(3, min(97, int(preview_chance)))
+
+        embed = discord.Embed(
+            title="⚔️ 몬스터가 나타났다!",
+            description=(
+                f"**Lv.{battle_level} {display_name}** 등장!\n\n"
+                f"예상 승률: **{preview_chance}%**\n"
+                f"❤️ 목숨: **{adventure['lives']}/3**\n"
+                f"☠️ 현재 위험도: **{danger:.1f}**"
+            ),
+            color=discord.Color.orange(),
+        )
+        await message.edit(embed=embed, view=AdventureBattleView(uid))
+        return
+
+    adjusted_roll = roll - relic_rate
+
+    if adjusted_roll < item_border:
+        item_id = pick_world_loot(adventure)
+        amount = 1
+        if ADVENTURE_ITEM_CATALOG[item_id]["rarity"] in {"common", "uncommon"}:
+            amount = random.randint(1, 3)
+
+        add_adventure_item(uid, item_id, amount)
+        save_data()
+
+        embed = discord.Embed(
+            title="🎒 길에서 재료를 발견했다!",
+            description=(
+                f"{get_adventure_item_line(item_id, amount)}\n\n"
+                "가방에 넣었어."
+            ),
+            color=discord.Color.green(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    if adjusted_roll < money_border:
+        amount = random.randint(40, 100) + int(danger * random.randint(4, 8))
+        add_poker_money(uid, amount)
+        adventure["earned_mora"] += amount
+        save_data()
+
+        embed = discord.Embed(
+            title="💰 버려진 주머니를 발견했다!",
+            description=(
+                f"안에는 **{amount:,}모라**가 들어 있었어.\n\n"
+                f"이번 모험 수익: **{adventure['earned_mora']:,}모라**"
+            ),
+            color=discord.Color.gold(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    if adjusted_roll < heal_border:
+        old_lives = adventure["lives"]
+        adventure["lives"] = min(3, adventure["lives"] + 1)
+        save_data()
+
+        if adventure["lives"] > old_lives:
+            text = "샘물을 마시자 상처가 회복됐어!\n❤️ 목숨 **+1**"
+        else:
+            text = "맑은 샘물을 발견했지만 이미 멀쩡해서 별 효과는 없었어."
+
+        embed = discord.Embed(
+            title="💧 회복의 샘",
+            description=text,
+            color=discord.Color.blue(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    save_data()
+    embed = discord.Embed(
+        title="🍃 아무 일도 없었다...",
+        description=(
+            "바람 소리만 들릴 뿐이야.\n"
+            "그래도 조금 더 깊은 곳까지 들어왔어."
+        ),
+        color=discord.Color.light_grey(),
+    )
+    await message.edit(embed=embed, view=AdventureTravelView(uid))
+
+
+async def resolve_adventure_battle(message, member):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    pending = adventure.get("pending_event")
+
+    if not pending or pending.get("type") != "monster":
+        await message.edit(content="전투할 몬스터가 사라졌어.", embed=None, view=AdventureTravelView(uid))
+        return
+
+    user = get_hunt_user(uid)
+    monster = find_monster_by_name(pending["monster_name"])
+    trait = get_trait_by_name(pending.get("trait_name"))
+    monster_level = int(pending["monster_level"])
+
+    if monster is None:
+        adventure["pending_event"] = None
+        save_data()
+        await message.edit(content="몬스터 데이터를 찾지 못해서 전투가 취소됐어.", embed=None, view=AdventureTravelView(uid))
+        return
+
+    battle_level = apply_trait_to_monster_level(monster_level, trait)
+    display_name = f"{trait['name']} {monster['name']}" if trait else monster["name"]
+
+    win_chance = calc_win_chance(user, monster, monster_level, trait)
+    win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
+    win_chance += adventure.get("boosts", {}).get("battle", 0)
+    win_chance = max(3, min(97, int(win_chance)))
+
+    win = random.randint(1, 100) <= win_chance
+    adventure["pending_event"] = None
+
+    if not win:
+        save_data()
+        await apply_adventure_life_loss(
+            message,
+            member,
+            adventure,
+            f"**Lv.{battle_level} {display_name}**에게 패배했어.",
+        )
+        return
+
+    reward = random.randint(70, 150) + monster_level * 18
+    exp = random.randint(25, 55) + monster_level * 5
+    reward, exp = apply_trait_reward(reward, exp, trait)
+    reward, exp = apply_int_reward_bonus(user, reward, exp)
+
+    add_poker_money(uid, reward)
+    leveled = give_hunt_exp(user, exp)
+
+    adventure["kills"] += 1
+    adventure["total_kills"] += 1
+    adventure["earned_mora"] += reward
+
+    loot_id = pick_monster_loot(monster["name"], adventure)
+    loot_amount = 1
+    if ADVENTURE_ITEM_CATALOG[loot_id]["rarity"] in {"common", "uncommon"}:
+        loot_amount = random.randint(1, 2)
+    add_adventure_item(uid, loot_id, loot_amount)
+
+    # 전투 승리 후 별도의 유물 추가 드롭
+    relic_chance = min(
+        14.0,
+        1.2
+        + adventure.get("boosts", {}).get("relic", 0)
+        + adventure_danger(adventure) * 0.012,
+    )
+
+    relic_id = None
+    relic_is_new = False
+
+    if random.random() * 100 < relic_chance:
+        relic_id = pick_mystery_relic()
+        relic_is_new = relic_id not in discovered_items
+        add_adventure_item(uid, relic_id, 1)
+
+        if relic_is_new:
+            adventure["pending_name_item_id"] = relic_id
+
+    try:
+        add_quest_progress(uid, "hunt_count", 1)
+        add_quest_progress(uid, "hunt_win", 1)
+        add_quest_progress(uid, "mora_earned", reward)
+        add_quest_progress(uid, "level", user["level"], mode="max")
+        sync_hunt_level_quests(uid)
+    except Exception as error:
+        print("모험 퀘스트 반영 실패:", error)
+
+    save_data()
+
+    result_lines = [
+        f"✅ **Lv.{battle_level} {display_name}** 처치!",
+        f"승률: **{win_chance}%**",
+        f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**",
+        "",
+        f"💰 **{reward:,}모라**",
+        f"⭐ **{exp} EXP**",
+        f"🎒 {get_adventure_item_line(loot_id, loot_amount)}",
+    ]
+
+    if leveled:
+        result_lines.append(f"\n🎉 레벨 업! 현재 **Lv.{user['level']}**")
+        result_lines.append(f"스탯 포인트 **{leveled * 5}** 획득!")
+
+    if relic_id:
+        result_lines.append(f"\n✨ 추가 발견: {get_adventure_item_line(relic_id)}")
+        if relic_is_new:
+            result_lines.append("최초 발견 유물이야. 이름을 지어줘!")
+
+    embed = discord.Embed(
+        title="⚔️ 전투 승리!",
+        description="\n".join(result_lines),
+        color=discord.Color.green(),
+    )
+
+    view = RelicNamingView(uid) if relic_is_new else AdventureTravelView(uid)
+    await message.edit(embed=embed, view=view)
+
+
+async def resolve_adventure_escape(message, member):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    pending = adventure.get("pending_event")
+
+    if not pending or pending.get("type") != "monster":
+        await message.edit(content="도망칠 상대가 없어.", embed=None, view=AdventureTravelView(uid))
+        return
+
+    user = get_hunt_user(uid)
+    dex = get_stat(user, "dex")
+    escape_bonus = adventure.get("boosts", {}).get("escape", 0)
+    escape_chance = max(20, min(92, int(55 + dex * 0.25 + escape_bonus)))
+
+    adventure["pending_event"] = None
+
+    if random.randint(1, 100) <= escape_chance:
+        save_data()
+        embed = discord.Embed(
+            title="💨 도주 성공!",
+            description=(
+                f"도주 확률 **{escape_chance}%**\n\n"
+                "몬스터가 쫓아오기 전에 무사히 빠져나왔어."
+            ),
+            color=discord.Color.blue(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    save_data()
+    await apply_adventure_life_loss(
+        message,
+        member,
+        adventure,
+        f"도주에 실패했어. 성공 확률은 **{escape_chance}%**였어.",
+    )
+
+
+class AdventureTravelView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+
+    @discord.ui.button(label="👣 계속 모험", style=discord.ButtonStyle.primary)
+    async def continue_adventure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        adventure = get_adventure(uid)
+
+        if not adventure["active"]:
+            await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+            return
+
+        if adventure.get("pending_name_item_id"):
+            await interaction.response.send_message("먼저 발견한 유물의 이름을 지어줘.", ephemeral=True)
+            return
+
+        lock = get_adventure_lock(uid)
+        if lock.locked():
+            await interaction.response.send_message("이미 이동 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            await send_adventure_travel_animation(interaction, uid)
+
+    @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
+    async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        adventure = get_adventure(uid)
+
+        if not adventure["active"]:
+            await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+            return
+
+        summary = finish_adventure(uid)
+
+        embed = discord.Embed(
+            title="🏠 무사히 귀환했다!",
+            description=(
+                f"👣 진행: **{summary['steps']}회**\n"
+                f"⚔️ 처치: **{summary['kills']}마리**\n"
+                f"💰 획득: **{summary['earned_mora']:,}모라**\n"
+                f"⏱️ 모험 시간: **{summary['minutes']:.1f}분**\n\n"
+                "가방의 전리품은 그대로 보관돼."
+            ),
+            color=discord.Color.green(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
+class AdventureBattleView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+
+    @discord.ui.button(label="⚔️ 전투 시작", style=discord.ButtonStyle.danger)
+    async def battle(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        lock = get_adventure_lock(uid)
+
+        if lock.locked():
+            await interaction.response.send_message("이미 전투 처리 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            adventure = get_adventure(uid)
+            if not adventure["active"]:
+                await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+                return
+
+            embed = discord.Embed(
+                title="⚔️ 전투 중...",
+                description="무기를 들고 몬스터에게 달려들었다!",
+                color=discord.Color.orange(),
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+            message = interaction.message
+
+            await asyncio.sleep(1.4)
+            await resolve_adventure_battle(message, interaction.user)
+
+    @discord.ui.button(label="💨 도망가기", style=discord.ButtonStyle.secondary)
+    async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        lock = get_adventure_lock(uid)
+
+        if lock.locked():
+            await interaction.response.send_message("이미 행동 처리 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            embed = discord.Embed(
+                title="💨 도주 시도 중...",
+                description="몬스터의 시야에서 벗어나려고 달리고 있어!",
+                color=discord.Color.blue(),
+            )
+            await interaction.response.edit_message(embed=embed, view=None)
+            message = interaction.message
+
+            await asyncio.sleep(1.0)
+            await resolve_adventure_escape(message, interaction.user)
+
+
+class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
+    relic_name = discord.ui.TextInput(
+        label="유물 이름",
+        placeholder="6자 이하",
+        min_length=1,
+        max_length=6,
+        required=True,
+    )
+
+    def __init__(self, user_id):
+        super().__init__()
+        self.user_id = str(user_id)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네가 발견한 유물이 아니야.", ephemeral=True)
+            return
+
+        uid = self.user_id
+        adventure = get_adventure(uid)
+        item_id = adventure.get("pending_name_item_id")
+
+        if not item_id:
+            await interaction.response.send_message("이름을 기다리는 유물이 없어.", ephemeral=True)
+            return
+
+        if item_id in discovered_items:
+            adventure["pending_name_item_id"] = None
+            save_data()
+
+            embed = discord.Embed(
+                title="이미 이름이 등록됐어!",
+                description=f"이 유물의 이름은 **{get_adventure_item_name(item_id)}**(으)로 정해졌어.",
+                color=discord.Color.gold(),
+            )
+            await interaction.response.edit_message(embed=embed, view=AdventureTravelView(uid))
+            return
+
+        valid, result = validate_relic_name(str(self.relic_name.value))
+
+        if not valid:
+            await interaction.response.send_message(f"❌ {result}", ephemeral=True)
+            return
+
+        clean_name = result
+        discovered_items[item_id] = {
+            "name": clean_name,
+            "discoverer_id": uid,
+            "discoverer_name": interaction.user.display_name,
+            "discovered_at": datetime.now(KST).isoformat(),
+        }
+        adventure["pending_name_item_id"] = None
+        save_data()
+
+        rarity = ADVENTURE_RARITIES[ADVENTURE_ITEM_CATALOG[item_id]["rarity"]]
+        embed = discord.Embed(
+            title="📖 새로운 유물이 도감에 등록됐다!",
+            description=(
+                f"{rarity['emoji']} 이름: **{clean_name}**\n"
+                f"등급: **{rarity['name']}**\n"
+                f"최초 발견자: {interaction.user.mention}\n\n"
+                "이제 모든 유저에게 이 이름으로 보여."
+            ),
+            color=discord.Color.gold(),
+        )
+        await interaction.response.edit_message(embed=embed, view=AdventureTravelView(uid))
+
+
+class RelicNamingView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+
+    @discord.ui.button(label="✍️ 이름 짓기", style=discord.ButtonStyle.success)
+    async def name_relic(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        item_id = adventure.get("pending_name_item_id")
+
+        if not item_id:
+            await interaction.response.send_message("이름을 기다리는 유물이 없어.", ephemeral=True)
+            return
+
+        if item_id in discovered_items:
+            adventure["pending_name_item_id"] = None
+            save_data()
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="이름 등록 완료",
+                    description=f"누군가 먼저 **{get_adventure_item_name(item_id)}**(으)로 등록했어.",
+                    color=discord.Color.gold(),
+                ),
+                view=AdventureTravelView(self.user_id),
+            )
+            return
+
+        await interaction.response.send_modal(RelicNameModal(self.user_id))
+
+
+class AdventureInventoryView(discord.ui.View):
+    def __init__(self, user_id, member, page=0):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+        self.member = member
+        self.page = max(0, page)
+        _, total_pages = build_adventure_inventory_embed(member, self.user_id, self.page)
+        self.previous_page.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= total_pages - 1
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        self.page = max(0, self.page - 1)
+        embed, _ = build_adventure_inventory_embed(self.member, self.user_id, self.page)
+        await interaction.response.edit_message(
+            embed=embed,
+            view=AdventureInventoryView(self.user_id, self.member, self.page),
+        )
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        self.page += 1
+        embed, total_pages = build_adventure_inventory_embed(self.member, self.user_id, self.page)
+        self.page = min(self.page, total_pages - 1)
+        await interaction.response.edit_message(
+            embed=embed,
+            view=AdventureInventoryView(self.user_id, self.member, self.page),
+        )
+
+
+def build_adventure_inventory_embed(member, uid, page=0):
+    inventory = get_adventure_inventory(uid)
+    entries = [
+        (item_id, count)
+        for item_id, count in inventory.items()
+        if count > 0 and item_id in ADVENTURE_ITEM_CATALOG
+    ]
+
+    entries.sort(
+        key=lambda pair: (
+            -ADVENTURE_RARITY_ORDER[ADVENTURE_ITEM_CATALOG[pair[0]]["rarity"]],
+            get_adventure_item_name(pair[0]),
+        )
+    )
+
+    total_pages = max(1, (len(entries) + ADVENTURE_INVENTORY_PAGE_SIZE - 1) // ADVENTURE_INVENTORY_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADVENTURE_INVENTORY_PAGE_SIZE
+    page_entries = entries[start:start + ADVENTURE_INVENTORY_PAGE_SIZE]
+
+    embed = discord.Embed(
+        title=f"🎒 {member.display_name}의 모험 가방",
+        color=discord.Color.dark_teal(),
+    )
+
+    if not page_entries:
+        embed.description = "아직 모험에서 얻은 물건이 없어."
+    else:
+        lines = []
+        for item_id, count in page_entries:
+            item = ADVENTURE_ITEM_CATALOG[item_id]
+            rarity = ADVENTURE_RARITIES[item["rarity"]]
+            lines.append(
+                f"{rarity['emoji']} **{get_adventure_item_name(item_id)}** ×{count}\n"
+                f"└ {rarity['name']} · 기준 가치 {item['value']:,}모라"
+            )
+        embed.description = "\n\n".join(lines)
+
+    embed.set_footer(
+        text=(
+            f"페이지 {page + 1}/{total_pages} · 보유 종류 {len(entries)}종 · "
+            f"전체 아이템 {len(ADVENTURE_ITEM_CATALOG)}종"
+        )
+    )
+    return embed, total_pages
+
+
+class RelicDexView(discord.ui.View):
+    def __init__(self, page=0):
+        super().__init__(timeout=180)
+        self.page = max(0, page)
+        _, total_pages = build_relic_dex_embed(self.page)
+        self.previous_page.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= total_pages - 1
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page = max(0, self.page - 1)
+        embed, _ = build_relic_dex_embed(self.page)
+        await interaction.response.edit_message(embed=embed, view=RelicDexView(self.page))
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        self.page += 1
+        embed, total_pages = build_relic_dex_embed(self.page)
+        self.page = min(self.page, total_pages - 1)
+        await interaction.response.edit_message(embed=embed, view=RelicDexView(self.page))
+
+
+def build_relic_dex_embed(page=0):
+    entries = []
+
+    for item_id, info in discovered_items.items():
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+        if not item or item.get("kind") != "relic":
+            continue
+        entries.append((item_id, info))
+
+    entries.sort(key=lambda pair: pair[1].get("discovered_at", ""))
+
+    total_pages = max(1, (len(entries) + ADVENTURE_RELIC_PAGE_SIZE - 1) // ADVENTURE_RELIC_PAGE_SIZE)
+    page = max(0, min(page, total_pages - 1))
+    start = page * ADVENTURE_RELIC_PAGE_SIZE
+    page_entries = entries[start:start + ADVENTURE_RELIC_PAGE_SIZE]
+
+    embed = discord.Embed(
+        title="📖 서버 유물 도감",
+        color=discord.Color.gold(),
+    )
+
+    if not page_entries:
+        embed.description = "아직 이름 붙은 유물이 하나도 없어."
+    else:
+        lines = []
+        for item_id, info in page_entries:
+            item = ADVENTURE_ITEM_CATALOG[item_id]
+            rarity = ADVENTURE_RARITIES[item["rarity"]]
+            discoverer = info.get("discoverer_name", "알 수 없음")
+            lines.append(
+                f"{rarity['emoji']} **{info.get('name', '이름 없음')}**\n"
+                f"└ {rarity['name']} · 최초 발견자: {discoverer}"
+            )
+        embed.description = "\n\n".join(lines)
+
+    total_relics = sum(
+        1 for item in ADVENTURE_ITEM_CATALOG.values() if item["kind"] == "relic"
+    )
+    embed.set_footer(
+        text=f"페이지 {page + 1}/{total_pages} · 발견 {len(entries)}/{total_relics}종"
+    )
+    return embed, total_pages
+
+
+@bot.tree.command(name="모험", description="푸리나와 함께 모험을 시작하거나 이어간다", guild=GUILD)
+async def adventure_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    adventure = get_adventure(uid)
+
+    if adventure["active"]:
+        pending_name = adventure.get("pending_name_item_id")
+        pending_event = adventure.get("pending_event")
+
+        if pending_name:
+            embed = discord.Embed(
+                title="✨ 이름을 기다리는 유물",
+                description=(
+                    f"{get_adventure_item_line(pending_name)}\n\n"
+                    "계속 모험하기 전에 이름을 지어줘."
+                ),
+                color=discord.Color.gold(),
+            )
+            await interaction.response.send_message(embed=embed, view=RelicNamingView(uid))
+            return
+
+        if pending_event and pending_event.get("type") == "monster":
+            monster = find_monster_by_name(pending_event.get("monster_name"))
+            trait = get_trait_by_name(pending_event.get("trait_name"))
+
+            if monster:
+                display_name = f"{trait['name']} {monster['name']}" if trait else monster["name"]
+                embed = discord.Embed(
+                    title="⚔️ 전투가 아직 끝나지 않았어!",
+                    description=(
+                        f"**Lv.{pending_event['monster_level']} {display_name}**\n\n"
+                        "전투를 시작하거나 도망가야 해."
+                    ),
+                    color=discord.Color.orange(),
+                )
+                await interaction.response.send_message(embed=embed, view=AdventureBattleView(uid))
+                return
+
+            adventure["pending_event"] = None
+            save_data()
+
+        embed = build_adventure_status_embed(interaction.user, adventure)
+        await interaction.response.send_message(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    adventure = start_new_adventure(uid)
+
+    embed = build_adventure_status_embed(
+        interaction.user,
+        adventure,
+        title="🌲 모험을 떠나는 중...",
+    )
+    embed.description += "\n\n푸리나와 함께 도시 밖으로 발걸음을 옮겼어..."
+
+    await interaction.response.send_message(embed=embed)
+    message = await interaction.original_response()
+
+    await asyncio.sleep(random.uniform(1.5, 2.3))
+    await roll_adventure_event(message, interaction.user)
+
+
+@bot.tree.command(name="가방", description="모험에서 얻은 전리품을 확인한다", guild=GUILD)
+async def adventure_inventory_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    embed, _ = build_adventure_inventory_embed(interaction.user, uid, 0)
+    await interaction.response.send_message(
+        embed=embed,
+        view=AdventureInventoryView(uid, interaction.user, 0),
+    )
+
+
+@bot.tree.command(name="유물도감", description="서버에서 발견된 이름 있는 유물을 확인한다", guild=GUILD)
+async def relic_dex_command(interaction: discord.Interaction):
+    embed, _ = build_relic_dex_embed(0)
+    await interaction.response.send_message(embed=embed, view=RelicDexView(0))
+
+
+@bot.tree.command(name="모험상점", description="모험용 아이템을 구매하거나 장착한다", guild=GUILD)
+@app_commands.describe(아이템="구매 또는 장착할 아이템 이름. 비워두면 목록 표시")
+async def adventure_shop_command(interaction: discord.Interaction, 아이템: str = None):
+    uid = str(interaction.user.id)
+    info = get_adventure_shop_user(uid)
+    adventure = get_adventure(uid)
+
+    if 아이템 is None:
+        lines = []
+        for name, item in ADVENTURE_SHOP_CATALOG.items():
+            if name in info["equipped"]:
+                state = "✅ 장착 중"
+            elif name in info["owned"]:
+                state = "📦 보유 중"
+            else:
+                state = f"💰 {item['price']:,}모라"
+
+            lines.append(f"**{name}** — {state}\n└ {item['desc']}")
+
+        embed = discord.Embed(
+            title="🧭 모험 상점",
+            description="\n\n".join(lines),
+            color=discord.Color.dark_gold(),
+        )
+        embed.set_footer(
+            text=(
+                f"최대 {ADVENTURE_MAX_EQUIPPED}개 장착 가능 · "
+                "이름을 입력하면 구매 → 장착 → 해제 순서로 작동"
+            )
+        )
+        await interaction.response.send_message(embed=embed)
+        return
+
+    if 아이템 not in ADVENTURE_SHOP_CATALOG:
+        await interaction.response.send_message("❌ 그런 모험 아이템은 없어.", ephemeral=True)
+        return
+
+    if adventure["active"]:
+        await interaction.response.send_message(
+            "❌ 모험 중에는 장비를 바꿀 수 없어. 귀환한 뒤 바꿔줘.",
+            ephemeral=True,
+        )
+        return
+
+    item = ADVENTURE_SHOP_CATALOG[아이템]
+
+    if 아이템 in info["equipped"]:
+        info["equipped"].remove(아이템)
+        save_data()
+        await interaction.response.send_message(f"📦 **{아이템}** 장착 해제 완료.")
+        return
+
+    if 아이템 in info["owned"]:
+        if len(info["equipped"]) >= ADVENTURE_MAX_EQUIPPED:
+            await interaction.response.send_message(
+                f"❌ 최대 {ADVENTURE_MAX_EQUIPPED}개까지만 장착할 수 있어.",
+                ephemeral=True,
+            )
+            return
+
+        info["equipped"].append(아이템)
+        save_data()
+        await interaction.response.send_message(f"✅ **{아이템}** 장착 완료!")
+        return
+
+    money = get_poker_money(uid)
+    if money < item["price"]:
+        await interaction.response.send_message(
+            f"❌ 모라 부족!\n필요: **{item['price']:,}모라**\n보유: **{money:,}모라**",
+            ephemeral=True,
+        )
+        return
+
+    remove_poker_money(uid, item["price"])
+    info["owned"].append(아이템)
+
+    if len(info["equipped"]) < ADVENTURE_MAX_EQUIPPED:
+        info["equipped"].append(아이템)
+        equip_text = "구매하고 바로 장착했어!"
+    else:
+        equip_text = "구매했지만 장착 칸이 가득 차서 보관만 했어."
+
+    save_data()
+    await interaction.response.send_message(
+        f"🛒 **{아이템}** 구매 완료!\n{equip_text}"
+    )
+
+
+@adventure_shop_command.autocomplete("아이템")
+async def adventure_shop_autocomplete(interaction: discord.Interaction, current: str):
+    current = current.lower().strip()
+    names = [
+        name
+        for name in ADVENTURE_SHOP_CATALOG
+        if current in name.lower()
+    ][:25]
+
+    return [app_commands.Choice(name=name, value=name) for name in names]
+
+
+@bot.tree.command(name="모험기록", description="내 모험 기록을 확인한다", guild=GUILD)
+async def adventure_record_command(interaction: discord.Interaction):
+    adventure = get_adventure(interaction.user.id)
+
+    embed = discord.Embed(
+        title=f"🏆 {interaction.user.display_name}의 모험 기록",
+        description=(
+            f"최고 진행: **{adventure['best_steps']}회**\n"
+            f"한 모험 최고 처치: **{adventure['best_kills']}마리**\n"
+            f"누적 처치: **{adventure['total_kills']}마리**\n"
+            f"완료한 모험: **{adventure['total_runs']}회**\n"
+            f"현재 상태: **{'모험 중' if adventure['active'] else '대기 중'}**"
+        ),
+        color=discord.Color.purple(),
+    )
+    await interaction.response.send_message(embed=embed)
+
+    
 @bot.event
 async def on_ready():
     if not ranking_update_loop.is_running():
