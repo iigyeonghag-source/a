@@ -148,7 +148,7 @@ def load_data():
     discovered_items = data["discovered_items"]
     shop_items = data["shop_items"]
 
-     warehouses = data["warehouses"]
+    warehouses = data["warehouses"]
 
     warehouse_last_tax = {}
     for uid, value in data["warehouse_last_tax"].items():
