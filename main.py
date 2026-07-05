@@ -98,14 +98,14 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax
+    global (data,poker_money,poker_last_claim,favor,user_memory,characters,hunt_users,weapons,primogems,quests,achievements,character_pity,levels,checkin,warnings,warehouses,warehouse_last_tax,adventures,inventories,discovered_items,shop_items)
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
-
+        
         data["warehouses"] = loaded.get("warehouses", {})
         data["warehouse_last_tax"] = loaded.get("warehouse_last_tax", {})
         data["adventures"] = loaded.get("adventures", {})
@@ -147,7 +147,7 @@ def load_data():
     inventories = data["inventories"]
     discovered_items = data["discovered_items"]
     shop_items = data["shop_items"]
-
+    
     warehouses = data["warehouses"]
 
     warehouse_last_tax = {}
