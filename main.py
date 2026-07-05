@@ -10830,86 +10830,6 @@ async def relic_dex_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=RelicDexView(0))
 
 
-@bot.tree.command(name="모험무기", description="발견한 모험 전용 무기를 확인하거나 장착한다", guild=GUILD)
-@app_commands.describe(이름="장착할 모험 전용 무기")
-async def adventure_weapon_command(interaction: discord.Interaction, 이름: str = None):
-    uid = str(interaction.user.id)
-    adventure = get_adventure(uid)
-
-    if 이름 is None:
-        lines = []
-        for name, info in WEAPONS.items():
-            if adventure["weapon"] == name:
-                state = "✅ 장착 중"
-            elif name in adventure["owned_weapons"]:
-                state = "📦 발견함"
-            else:
-                state = "🔒 미발견"
-            lines.append(f"**{name}** — {state} / 승률 보너스 +{info['bonus']}")
-        embed = discord.Embed(title="🗡️ 모험 전용 무기", description="\n".join(lines), color=discord.Color.dark_gold())
-        embed.set_footer(text="무기는 구매 불가 · 모험 전투 보상으로만 발견 가능")
-        await interaction.response.send_message(embed=embed)
-        return
-
-    if 이름 not in WEAPONS:
-        await interaction.response.send_message("❌ 그런 모험 무기는 없어.", ephemeral=True)
-        return
-    if 이름 not in adventure["owned_weapons"]:
-        await interaction.response.send_message("🔒 아직 발견하지 못한 무기야. 모험에서 직접 찾아야 해.", ephemeral=True)
-        return
-    adventure["weapon"] = 이름
-    save_data()
-    await interaction.response.send_message(f"🗡️ 모험 무기를 **{이름}**(으)로 교체했어.")
-
-
-@adventure_weapon_command.autocomplete("이름")
-async def adventure_weapon_autocomplete(interaction: discord.Interaction, current: str):
-    adventure = get_adventure(interaction.user.id)
-    current = current.lower().strip()
-    names = [name for name in adventure.get("owned_weapons", ["무인검"]) if name in WEAPONS and current in name.lower()][:25]
-    return [app_commands.Choice(name=name, value=name) for name in names]
-
-
-@bot.tree.command(name="모험갑옷", description="발견한 모험 전용 갑옷을 확인하거나 장착한다", guild=GUILD)
-@app_commands.describe(이름="장착할 모험 전용 갑옷")
-async def adventure_armor_command(interaction: discord.Interaction, 이름: str = None):
-    uid = str(interaction.user.id)
-    adventure = get_adventure(uid)
-
-    if 이름 is None:
-        lines = []
-        for name, info in ARMORS.items():
-            if adventure["armor"] == name:
-                state = "✅ 장착 중"
-            elif name in adventure["owned_armors"]:
-                state = "📦 발견함"
-            else:
-                state = "🔒 미발견"
-            lines.append(f"**{name}** — {state} / 승률 보너스 +{info['bonus']}")
-        embed = discord.Embed(title="🛡️ 모험 전용 갑옷", description="\n".join(lines), color=discord.Color.dark_teal())
-        embed.set_footer(text="갑옷은 구매 불가 · 모험 전투 보상으로만 발견 가능")
-        await interaction.response.send_message(embed=embed)
-        return
-
-    if 이름 not in ARMORS:
-        await interaction.response.send_message("❌ 그런 모험 갑옷은 없어.", ephemeral=True)
-        return
-    if 이름 not in adventure["owned_armors"]:
-        await interaction.response.send_message("🔒 아직 발견하지 못한 갑옷이야. 모험에서 직접 찾아야 해.", ephemeral=True)
-        return
-    adventure["armor"] = 이름
-    save_data()
-    await interaction.response.send_message(f"🛡️ 모험 갑옷을 **{이름}**(으)로 교체했어.")
-
-
-@adventure_armor_command.autocomplete("이름")
-async def adventure_armor_autocomplete(interaction: discord.Interaction, current: str):
-    adventure = get_adventure(interaction.user.id)
-    current = current.lower().strip()
-    names = [name for name in adventure.get("owned_armors", ["모험가 세트"]) if name in ARMORS and current in name.lower()][:25]
-    return [app_commands.Choice(name=name, value=name) for name in names]
-
-
 @bot.tree.command(name="모험상점", description="모험용 아이템을 구매하거나 장착한다", guild=GUILD)
 @app_commands.describe(아이템="구매 또는 장착할 아이템 이름. 비워두면 목록 표시")
 async def adventure_shop_command(interaction: discord.Interaction, 아이템: str = None):
@@ -11034,6 +10954,297 @@ async def adventure_record_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
+# =========================
+# 모험 전리품 판매
+# =========================
+
+ADVENTURE_SELLABLE_KINDS = {
+    "monster_loot",
+    "herb",
+    "ore",
+    "material",
+}
+
+
+@bot.tree.command(
+    name="판매",
+    description="모험에서 획득한 전리품을 판매한다",
+    guild=GUILD
+)
+@app_commands.describe(
+    아이템="판매할 전리품",
+    수량="판매할 수량 또는 '전부'"
+)
+async def adventure_loot_sell(
+    interaction: discord.Interaction,
+    아이템: str,
+    수량: str = "전부"
+):
+    uid = str(interaction.user.id)
+
+    async with get_adventure_lock(uid):
+        inventory = get_adventure_inventory(uid)
+
+        # 자동완성으로 선택하면 item_id가 들어옴
+        item_id = 아이템.strip()
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+
+        # 직접 이름을 입력한 경우 이름으로 다시 검색
+        if item is None:
+            matching_items = [
+                catalog_id
+                for catalog_id, catalog_item
+                in ADVENTURE_ITEM_CATALOG.items()
+                if get_adventure_item_name(catalog_id) == 아이템.strip()
+            ]
+
+            if len(matching_items) == 1:
+                item_id = matching_items[0]
+                item = ADVENTURE_ITEM_CATALOG[item_id]
+
+            elif len(matching_items) > 1:
+                await interaction.response.send_message(
+                    "❌ 같은 이름의 아이템이 여러 개야. "
+                    "자동완성 목록에서 선택해 줘.",
+                    ephemeral=True
+                )
+                return
+
+        if item is None:
+            await interaction.response.send_message(
+                "❌ 그런 전리품은 가방에 없어.",
+                ephemeral=True
+            )
+            return
+
+        if item.get("kind") not in ADVENTURE_SELLABLE_KINDS:
+            await interaction.response.send_message(
+                "❌ 장비와 유물은 판매할 수 없어.",
+                ephemeral=True
+            )
+            return
+
+        owned_amount = int(inventory.get(item_id, 0))
+
+        if owned_amount <= 0:
+            await interaction.response.send_message(
+                "❌ 그 전리품을 가지고 있지 않아.",
+                ephemeral=True
+            )
+            return
+
+        amount_text = 수량.strip().lower().replace(",", "")
+
+        if amount_text in {"전부", "모두", "all"}:
+            sell_amount = owned_amount
+        else:
+            try:
+                sell_amount = int(amount_text)
+            except ValueError:
+                await interaction.response.send_message(
+                    "❌ 수량에는 숫자 또는 `전부`를 입력해 줘.",
+                    ephemeral=True
+                )
+                return
+
+        if sell_amount <= 0:
+            await interaction.response.send_message(
+                "❌ 판매 수량은 1개 이상이어야 해.",
+                ephemeral=True
+            )
+            return
+
+        if sell_amount > owned_amount:
+            await interaction.response.send_message(
+                f"❌ 수량이 부족해.\n"
+                f"현재 보유량: **{owned_amount:,}개**",
+                ephemeral=True
+            )
+            return
+
+        unit_price = max(1, int(item.get("value", 1)))
+        total_price = unit_price * sell_amount
+
+        remaining = owned_amount - sell_amount
+
+        if remaining > 0:
+            inventory[item_id] = remaining
+        else:
+            inventory.pop(item_id, None)
+
+        current_money = add_poker_money(uid, total_price)
+        item_name = get_adventure_item_name(item_id)
+
+        embed = discord.Embed(
+            title="💰 전리품 판매 완료!",
+            description=(
+                f"**{item_name}** ×{sell_amount:,}개를 판매했어.\n\n"
+                f"개당 가격: **{unit_price:,}모라**\n"
+                f"획득 금액: **{total_price:,}모라**\n"
+                f"남은 수량: **{remaining:,}개**\n"
+                f"현재 보유 모라: **{current_money:,}모라**"
+            ),
+            color=discord.Color.gold()
+        )
+
+        await interaction.response.send_message(embed=embed)
+
+
+@adventure_loot_sell.autocomplete("아이템")
+async def adventure_loot_sell_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    uid = str(interaction.user.id)
+    inventory = get_adventure_inventory(uid)
+    current = current.strip().lower()
+
+    choices = []
+
+    for item_id, count in inventory.items():
+        if count <= 0:
+            continue
+
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+
+        if not item:
+            continue
+
+        if item.get("kind") not in ADVENTURE_SELLABLE_KINDS:
+            continue
+
+        item_name = get_adventure_item_name(item_id)
+
+        if current and current not in item_name.lower():
+            continue
+
+        unit_price = max(1, int(item.get("value", 1)))
+
+        label = (
+            f"{item_name} ×{count:,} "
+            f"· 개당 {unit_price:,}모라"
+        )
+
+        choices.append(
+            app_commands.Choice(
+                name=label[:100],
+                value=item_id
+            )
+        )
+
+        if len(choices) >= 25:
+            break
+
+    return choices
+
+@bot.tree.command(
+    name="전체판매",
+    description="판매 가능한 모험 전리품을 모두 판매한다",
+    guild=GUILD
+)
+async def adventure_loot_sell_all(
+    interaction: discord.Interaction
+):
+    uid = str(interaction.user.id)
+
+    async with get_adventure_lock(uid):
+        inventory = get_adventure_inventory(uid)
+
+        sold_items = []
+        total_count = 0
+        total_price = 0
+
+        for item_id, owned_amount in list(inventory.items()):
+            owned_amount = int(owned_amount)
+
+            if owned_amount <= 0:
+                continue
+
+            item = ADVENTURE_ITEM_CATALOG.get(item_id)
+
+            if not item:
+                continue
+
+            # 장비, 유물 등은 판매하지 않음
+            if item.get("kind") not in ADVENTURE_SELLABLE_KINDS:
+                continue
+
+            unit_price = max(1, int(item.get("value", 1)))
+            item_total_price = unit_price * owned_amount
+            item_name = get_adventure_item_name(item_id)
+
+            sold_items.append({
+                "name": item_name,
+                "amount": owned_amount,
+                "price": item_total_price
+            })
+
+            total_count += owned_amount
+            total_price += item_total_price
+
+            # 전량 판매했으므로 가방에서 제거
+            inventory.pop(item_id, None)
+
+        if not sold_items:
+            await interaction.response.send_message(
+                "❌ 판매할 수 있는 전리품이 없어.\n"
+                "장비와 유물은 전체 판매에서 제외돼.",
+                ephemeral=True
+            )
+            return
+
+        current_money = add_poker_money(uid, total_price)
+        save_data()
+
+        # 판매 금액이 높은 순서로 표시
+        sold_items.sort(
+            key=lambda sold: sold["price"],
+            reverse=True
+        )
+
+        item_lines = []
+
+        for sold in sold_items[:15]:
+            item_lines.append(
+                f"• **{sold['name']}** ×{sold['amount']:,}"
+                f" → {sold['price']:,}모라"
+            )
+
+        if len(sold_items) > 15:
+            item_lines.append(
+                f"\n외 **{len(sold_items) - 15}종**"
+            )
+
+        embed = discord.Embed(
+            title="💰 전리품 전체 판매 완료!",
+            description="\n".join(item_lines),
+            color=discord.Color.gold()
+        )
+
+        embed.add_field(
+            name="📦 판매 결과",
+            value=(
+                f"판매 종류: **{len(sold_items):,}종**\n"
+                f"판매 수량: **{total_count:,}개**\n"
+                f"획득 금액: **{total_price:,}모라**"
+            ),
+            inline=False
+        )
+
+        embed.add_field(
+            name="💵 현재 보유 모라",
+            value=f"**{current_money:,}모라**",
+            inline=False
+        )
+
+        embed.set_footer(
+            text="장비와 유물은 판매되지 않았어."
+        )
+
+        await interaction.response.send_message(
+            embed=embed
+        )
+        
 WAREHOUSE_DAILY_TAX_RATE = 0.001      # 하루 0.1%
 WAREHOUSE_WITHDRAW_TAX_RATE = 0.005   # 출금 0.5%
 
