@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from PIL import Image, ImageDraw, ImageFont, ImageOps
 from io import BytesIO
 import google.generativeai as genai
+import math
 
 load_dotenv()
 
@@ -48,6 +49,8 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "warehouses": {},
+    "warehouse_last_tax": {},
     "sticky_message_id": None,
     "checkin": {},
     "ranking_message_id": None,
@@ -70,6 +73,8 @@ data = {
     "shop_items": {}
 }
 
+warehouses = {}
+warehouse_last_tax = {}
 characters = {}
 weapons = {}
 primogems = {}
@@ -93,7 +98,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -101,6 +106,8 @@ def load_data():
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             loaded = json.load(f)
 
+        data["warehouses"] = loaded.get("warehouses", {})
+        data["warehouse_last_tax"] = loaded.get("warehouse_last_tax", {})
         data["adventures"] = loaded.get("adventures", {})
         data["inventories"] = loaded.get("inventories", {})
         data["discovered_items"] = loaded.get("discovered_items", {})
@@ -141,6 +148,12 @@ def load_data():
     discovered_items = data["discovered_items"]
     shop_items = data["shop_items"]
 
+     warehouses = data["warehouses"]
+
+    warehouse_last_tax = {}
+    for uid, value in data["warehouse_last_tax"].items():
+        warehouse_last_tax[uid] = datetime.fromisoformat(value)
+        
     poker_last_claim = {}
     for uid, value in data["poker_last_claim"].items():
         poker_last_claim[uid] = datetime.fromisoformat(value)
@@ -148,6 +161,11 @@ def load_data():
 def save_data():
     os.makedirs(DATA_DIR, exist_ok=True)
 
+    data["warehouses"] = warehouses
+    data["warehouse_last_tax"] = {
+        uid: value.isoformat()
+        for uid, value in warehouse_last_tax.items()
+    }
     data["adventures"] = adventures
     data["inventories"] = inventories
     data["discovered_items"] = discovered_items
@@ -11016,10 +11034,162 @@ async def adventure_record_command(interaction: discord.Interaction):
     )
     await interaction.response.send_message(embed=embed)
 
+WAREHOUSE_DAILY_TAX_RATE = 0.001      # 하루 0.1%
+WAREHOUSE_WITHDRAW_TAX_RATE = 0.005   # 출금 0.5%
+
+def get_warehouse_money(user_id):
+    uid = str(user_id)
+    return int(warehouses.get(uid, 0))
+
+
+def add_warehouse_money(user_id, amount):
+    uid = str(user_id)
+    warehouses[uid] = max(0, get_warehouse_money(uid) + int(amount))
+    save_data()
+    return warehouses[uid]
+
+
+def apply_warehouse_daily_tax(user_id):
+    uid = str(user_id)
+    now = datetime.now(timezone.utc)
+
+    balance = get_warehouse_money(uid)
+
+    if balance <= 0:
+        warehouse_last_tax[uid] = now
+        save_data()
+        return 0, 0
+
+    last = warehouse_last_tax.get(uid)
+
+    if last is None:
+        warehouse_last_tax[uid] = now
+        save_data()
+        return 0, 0
+
+    days = (now.date() - last.date()).days
+
+    if days <= 0:
+        return 0, balance
+
+    total_tax = 0
+
+    for _ in range(days):
+        current = get_warehouse_money(uid)
+
+        if current <= 0:
+            break
+
+        tax = math.ceil(current * WAREHOUSE_DAILY_TAX_RATE)
+        tax = min(tax, current)
+
+        warehouses[uid] = current - tax
+        total_tax += tax
+
+    warehouse_last_tax[uid] = now
+    save_data()
+
+    return total_tax, get_warehouse_money(uid)
+
+@bot.tree.command(name="창고", description="모라를 창고에 입금하거나 출금합니다.", guild=GUILD)
+@app_commands.describe(
+    동작="조회 / 입금 / 출금",
+    금액="입금하거나 출금할 모라"
+)
+@app_commands.choices(
+    동작=[
+        app_commands.Choice(name="조회", value="조회"),
+        app_commands.Choice(name="입금", value="입금"),
+        app_commands.Choice(name="출금", value="출금"),
+    ]
+)
+async def warehouse_command(
+    interaction: discord.Interaction,
+    동작: app_commands.Choice[str],
+    금액: int = 0
+):
+    uid = str(interaction.user.id)
+
+    daily_tax, warehouse_after_tax = apply_warehouse_daily_tax(uid)
+
+    wallet = get_poker_money(uid)
+    warehouse = get_warehouse_money(uid)
+
+    if 동작.value == "조회":
+        tax_text = (
+            f"\n💸 밀린 보관료로 **{daily_tax:,}모라**가 빠져나갔어."
+            if daily_tax > 0 else ""
+        )
+
+        await interaction.response.send_message(
+            f"🏦 {interaction.user.mention}의 창고\n"
+            f"지갑: **{wallet:,}모라**\n"
+            f"창고: **{warehouse:,}모라**"
+            f"{tax_text}"
+        )
+        return
+
+    if 금액 <= 0:
+        await interaction.response.send_message(
+            "❌ 금액은 **1모라 이상**으로 입력해줘.",
+            ephemeral=True
+        )
+        return
+
+    if 동작.value == "입금":
+        if wallet < 금액:
+            await interaction.response.send_message(
+                f"❌ 지갑에 모라가 부족해!\n"
+                f"보유: **{wallet:,}모라**\n"
+                f"필요: **{금액:,}모라**",
+                ephemeral=True
+            )
+            return
+
+        add_poker_money(uid, -금액)
+        add_warehouse_money(uid, 금액)
+
+        await interaction.response.send_message(
+            f"🏦 창고 입금 완료!\n"
+            f"입금액: **{금액:,}모라**\n"
+            f"입금 세금: **0모라**\n"
+            f"현재 지갑: **{get_poker_money(uid):,}모라**\n"
+            f"현재 창고: **{get_warehouse_money(uid):,}모라**"
+        )
+        return
+
+    if 동작.value == "출금":
+        if warehouse < 금액:
+            await interaction.response.send_message(
+                f"❌ 창고에 모라가 부족해!\n"
+                f"창고 잔액: **{warehouse:,}모라**\n"
+                f"출금 요청: **{금액:,}모라**",
+                ephemeral=True
+            )
+            return
+
+        withdraw_tax = math.ceil(금액 * WAREHOUSE_WITHDRAW_TAX_RATE)
+        receive_amount = max(0, 금액 - withdraw_tax)
+
+        add_warehouse_money(uid, -금액)
+        add_poker_money(uid, receive_amount)
+
+        await interaction.response.send_message(
+            f"🏦 창고 출금 완료!\n"
+            f"출금액: **{금액:,}모라**\n"
+            f"출금 수수료 0.5%: **{withdraw_tax:,}모라**\n"
+            f"실수령액: **{receive_amount:,}모라**\n"
+            f"현재 지갑: **{get_poker_money(uid):,}모라**\n"
+            f"현재 창고: **{get_warehouse_money(uid):,}모라**"
+        )
+        return
+
 
 
 @bot.event
 async def on_ready():
+    for uid in list(warehouses.keys()):
+        apply_warehouse_daily_tax(uid)
     if not ranking_update_loop.is_running():
         ranking_update_loop.start()
     
