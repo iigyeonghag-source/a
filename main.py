@@ -5173,7 +5173,7 @@ MONSTERS = [
     {"name": "마왕", "min": 420, "max": 1000, "peanlty": 5000}
 ]
 
-MONSTER_TRAIT_RATE = 40 
+MONSTER_TRAIT_RATE = 30 
 
 MONSTER_TRAITS = [
     {"name": "💤 잠이 덜 깬", "chance": 1, "monster_power": 0.25, "money": 4.5, "exp": 4.5},
