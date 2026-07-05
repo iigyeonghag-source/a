@@ -357,7 +357,7 @@ async def time_notice_loop():
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
 
-    if 5 <= now.hour < 12:
+    if 6 <= now.hour < 12:
         period = "아침"
     elif 12 <= now.hour < 18:
         period = "점심"
@@ -8092,7 +8092,6 @@ async def sticky_message_listener(message):
     await refresh_sticky_message(message.channel)
 
 
-
 # =========================
 # 모험 / 전리품 / 유물 시스템
 # =========================
@@ -8106,6 +8105,11 @@ ADVENTURE_RELIC_PAGE_SIZE = 10
 # 보스 출현 판정은 이 확률과 별개로 매 턴 진행된다.
 # 일반 몬스터는 꽤 뜸하게 등장한다. 보스 판정은 이 확률과 별개다.
 ADVENTURE_MONSTER_EVENT_RATE = 10.0
+
+# 모험 한 턴은 실제로 1~5분 동안 진행된다.
+# 긴 asyncio.sleep 대신 완료 시각을 저장하고, 유저가 상황 확인 버튼으로 결과를 연다.
+ADVENTURE_TURN_MIN_SECONDS = 60
+ADVENTURE_TURN_MAX_SECONDS = 300
 
 # 모험 레벨은 스탯 배분 없이 자동으로 승률을 올린다.
 ADVENTURE_LEVEL_WIN_BONUS = 0.6
@@ -8445,6 +8449,9 @@ def get_adventure(uid):
         "earned_mora": 0,
         "lives": 3,
         "max_lives": 3,
+        "turn_started_at": None,
+        "turn_ready_at": None,
+        "turn_duration_seconds": 0,
         "pending_event": None,
         "pending_name_item_id": None,
         "terrain": None,
@@ -8923,6 +8930,9 @@ def start_new_adventure(uid, terrain_key):
         "earned_mora": 0,
         "lives": max_lives,
         "max_lives": max_lives,
+        "turn_started_at": None,
+        "turn_ready_at": None,
+        "turn_duration_seconds": 0,
         "pending_event": None,
         "pending_name_item_id": None,
         "terrain": terrain_key,
@@ -8958,6 +8968,9 @@ def finish_adventure(uid):
     adventure["total_runs"] = adventure.get("total_runs", 0) + 1
     adventure["active"] = False
     adventure["started_at"] = None
+    adventure["turn_started_at"] = None
+    adventure["turn_ready_at"] = None
+    adventure["turn_duration_seconds"] = 0
     adventure["pending_event"] = None
     adventure["pending_name_item_id"] = None
     adventure["lives"] = 3
@@ -9185,6 +9198,54 @@ def format_adventure_boosts(boosts):
     return ", ".join(parts) if parts else "없음"
 
 
+def parse_adventure_time(value):
+    if not value:
+        return None
+
+    try:
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=KST)
+        return parsed
+    except (TypeError, ValueError):
+        return None
+
+
+def get_adventure_turn_remaining(adventure):
+    ready_at = parse_adventure_time(adventure.get("turn_ready_at"))
+    if ready_at is None:
+        return 0
+
+    return max(0, int((ready_at - datetime.now(KST)).total_seconds()))
+
+
+def format_adventure_wait_time(seconds):
+    seconds = max(0, int(seconds))
+    minutes, seconds = divmod(seconds, 60)
+
+    if minutes and seconds:
+        return f"{minutes}분 {seconds}초"
+    if minutes:
+        return f"{minutes}분"
+    return f"{seconds}초"
+
+
+def clear_adventure_turn_timer(adventure):
+    adventure["turn_started_at"] = None
+    adventure["turn_ready_at"] = None
+    adventure["turn_duration_seconds"] = 0
+
+
+def schedule_adventure_turn(adventure):
+    duration = random.randint(ADVENTURE_TURN_MIN_SECONDS, ADVENTURE_TURN_MAX_SECONDS)
+    now = datetime.now(KST)
+
+    adventure["turn_started_at"] = now.isoformat()
+    adventure["turn_ready_at"] = (now + timedelta(seconds=duration)).isoformat()
+    adventure["turn_duration_seconds"] = duration
+    return duration
+
+
 def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
     elapsed = adventure_elapsed_minutes(adventure)
     danger = adventure_danger(adventure)
@@ -9195,6 +9256,15 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
     visited_text = " → ".join(get_terrain_info(key)["name"] for key in visited if key in ADVENTURE_TERRAINS)
     if not visited_text:
         visited_text = terrain["name"]
+
+    if adventure.get("turn_ready_at"):
+        remaining = get_adventure_turn_remaining(adventure)
+        if remaining > 0:
+            turn_status = f"⏳ 다음 사건까지: **{format_adventure_wait_time(remaining)}**"
+        else:
+            turn_status = "🎲 다음 사건: **확인 가능!**"
+    else:
+        turn_status = "🛤️ 다음 이동: **대기 중**"
 
     embed = discord.Embed(
         title=title,
@@ -9208,6 +9278,7 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
             f"⏱️ 경과 시간: **{elapsed:.1f}분**\n"
             f"👣 전체 진행: **{adventure['steps']}회**\n"
             f"🥾 현재 지형 진행: **{adventure.get('terrain_steps', 0)}회**\n"
+            f"{turn_status}\n"
             f"👑 다음 턴 보스 확률: **{get_adventure_boss_spawn_rate(adventure, next_turn=True):.1f}%**\n"
             f"⚔️ 처치 수: **{adventure['kills']}마리**\n"
             f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**\n"
@@ -9219,6 +9290,28 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
     )
 
     embed.set_footer(text=f"{terrain['description']} 시간과 진행 횟수가 늘수록 적이 강해진다.")
+    return embed
+
+
+def build_adventure_waiting_embed(member, adventure, title="🌲 모험을 떠나는 중..."):
+    terrain = get_terrain_info(adventure.get("terrain"))
+    remaining = get_adventure_turn_remaining(adventure)
+    embed = build_adventure_status_embed(member, adventure, title=title)
+
+    if remaining > 0:
+        wait_text = (
+            f"{terrain['emoji']} {terrain['name']}의 안쪽으로 천천히 이동하고 있어.\n"
+            f"이번 턴은 약 **{format_adventure_wait_time(adventure.get('turn_duration_seconds', remaining))}** 동안 진행돼.\n\n"
+            f"⏳ 현재 남은 시간: **{format_adventure_wait_time(remaining)}**\n"
+            "시간이 지난 뒤 **상황 확인**을 누르면 다음 사건이 발생해."
+        )
+    else:
+        wait_text = (
+            f"{terrain['emoji']} 이동이 끝났어. 주변에서 무언가 일어난 것 같아.\n\n"
+            "🎲 **상황 확인**을 눌러 이번 턴의 결과를 확인해!"
+        )
+
+    embed.description += f"\n\n{wait_text}"
     return embed
 
 
@@ -9273,20 +9366,18 @@ async def check_adventure_owner(interaction, owner_id):
 
 async def send_adventure_travel_animation(interaction, uid):
     adventure = get_adventure(uid)
+    schedule_adventure_turn(adventure)
+    save_data()
 
-    embed = build_adventure_status_embed(
+    embed = build_adventure_waiting_embed(
         interaction.user,
         adventure,
         title="🌲 모험을 떠나는 중...",
     )
-    terrain = get_terrain_info(adventure.get("terrain"))
-    embed.description += f"\n\n{terrain['emoji']} {terrain['name']}의 안쪽으로 더 나아가고 있어..."
-
-    await interaction.response.edit_message(embed=embed, view=None)
-    message = interaction.message
-
-    await asyncio.sleep(random.uniform(1.2, 2.0))
-    await roll_adventure_event(message, interaction.user)
+    await interaction.response.edit_message(
+        embed=embed,
+        view=AdventureTurnWaitingView(uid),
+    )
 
 
 async def apply_adventure_life_loss(message, member, adventure, reason_text):
@@ -9888,16 +9979,19 @@ class AdventureStartTerrainView(discord.ui.View):
                     return
 
                 adventure = start_new_adventure(self.user_id, selected)
+                schedule_adventure_turn(adventure)
+                save_data()
+
                 terrain_info = get_terrain_info(selected)
-                embed = build_adventure_status_embed(
+                embed = build_adventure_waiting_embed(
                     interaction.user,
                     adventure,
                     title=f"{terrain_info['emoji']} {terrain_info['name']}으로 모험을 떠나는 중...",
                 )
-                embed.description += f"\n\n{terrain_info['description']}"
-                await interaction.response.edit_message(embed=embed, view=None)
-                await asyncio.sleep(random.uniform(1.2, 2.0))
-                await roll_adventure_event(interaction.message, interaction.user)
+                await interaction.response.edit_message(
+                    embed=embed,
+                    view=AdventureTurnWaitingView(self.user_id),
+                )
 
             button.callback = callback
             self.add_item(button)
@@ -10063,6 +10157,106 @@ class AdventureEquipmentView(discord.ui.View):
         self.user_id = str(user_id)
         self.add_item(AdventureWeaponSelect(self.user_id))
         self.add_item(AdventureArmorSelect(self.user_id))
+
+
+class AdventureTurnWaitingView(discord.ui.View):
+    def __init__(self, user_id):
+        # 최대 대기 시간이 5분이라 여유 있게 15분 동안 버튼을 유지한다.
+        super().__init__(timeout=900)
+        self.user_id = str(user_id)
+
+    @discord.ui.button(label="🔎 상황 확인", style=discord.ButtonStyle.primary)
+    async def check_turn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        adventure = get_adventure(uid)
+
+        if not adventure.get("active"):
+            await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+            return
+
+        if adventure.get("pending_name_item_id"):
+            await interaction.response.send_message("먼저 발견한 유물의 이름을 지어줘.", ephemeral=True)
+            return
+
+        if adventure.get("pending_event"):
+            await interaction.response.send_message("먼저 현재 발생한 사건을 해결해야 해.", ephemeral=True)
+            return
+
+        if not adventure.get("turn_ready_at"):
+            await interaction.response.send_message(
+                "아직 이동을 시작하지 않았어. **계속 모험**을 눌러 다음 턴을 시작해.",
+                ephemeral=True,
+            )
+            return
+
+        remaining = get_adventure_turn_remaining(adventure)
+        if remaining > 0:
+            await interaction.response.send_message(
+                f"⏳ 아직 이동 중이야. **{format_adventure_wait_time(remaining)}** 뒤에 다시 확인해줘!",
+                ephemeral=True,
+            )
+            return
+
+        lock = get_adventure_lock(uid)
+        if lock.locked():
+            await interaction.response.send_message("이미 이번 턴을 확인 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            adventure = get_adventure(uid)
+            remaining = get_adventure_turn_remaining(adventure)
+            if remaining > 0:
+                await interaction.response.send_message(
+                    f"⏳ 아직 **{format_adventure_wait_time(remaining)}** 남았어.",
+                    ephemeral=True,
+                )
+                return
+
+            clear_adventure_turn_timer(adventure)
+            save_data()
+            await interaction.response.defer()
+            await roll_adventure_event(interaction.message, interaction.user)
+
+    @discord.ui.button(label="🧰 장비 변경", style=discord.ButtonStyle.success)
+    async def change_equipment(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        await interaction.response.send_message(
+            embed=build_adventure_equipment_embed(interaction.user, self.user_id),
+            view=AdventureEquipmentView(self.user_id),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
+    async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        uid = self.user_id
+        adventure = get_adventure(uid)
+
+        if not adventure.get("active"):
+            await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+            return
+
+        summary = finish_adventure(uid)
+        embed = discord.Embed(
+            title="🏠 무사히 귀환했다!",
+            description=(
+                f"👣 진행: **{summary['steps']}회**\n"
+                f"⚔️ 처치: **{summary['kills']}마리**\n"
+                f"💰 획득: **{summary['earned_mora']:,}모라**\n"
+                f"⏱️ 모험 시간: **{summary['minutes']:.1f}분**\n"
+                f"🗺️ 마지막 지형: **{get_terrain_name(summary.get('terrain'))}**\n\n"
+                "모험 중 얻은 장비와 영구 모험 레벨은 그대로 유지돼."
+            ),
+            color=discord.Color.green(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
 
 
 class AdventureTravelView(discord.ui.View):
@@ -10536,6 +10730,14 @@ async def adventure_command(interaction: discord.Interaction):
             adventure["pending_event"] = None
             save_data()
 
+        if adventure.get("turn_ready_at"):
+            embed = build_adventure_waiting_embed(interaction.user, adventure)
+            await interaction.response.send_message(
+                embed=embed,
+                view=AdventureTurnWaitingView(uid),
+            )
+            return
+
         embed = build_adventure_status_embed(interaction.user, adventure)
         await interaction.response.send_message(embed=embed, view=AdventureTravelView(uid))
         return
@@ -10778,6 +10980,7 @@ async def adventure_record_command(interaction: discord.Interaction):
         color=discord.Color.purple(),
     )
     await interaction.response.send_message(embed=embed)
+
 
 @bot.event
 async def on_ready():
