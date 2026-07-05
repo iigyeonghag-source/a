@@ -8108,8 +8108,8 @@ ADVENTURE_MONSTER_EVENT_RATE = 10.0
 
 # 모험 한 턴은 실제로 1~5분 동안 진행된다.
 # 긴 asyncio.sleep 대신 완료 시각을 저장하고, 유저가 상황 확인 버튼으로 결과를 연다.
-ADVENTURE_TURN_MIN_SECONDS = 15
-ADVENTURE_TURN_MAX_SECONDS = 90
+ADVENTURE_TURN_MIN_SECONDS = 5
+ADVENTURE_TURN_MAX_SECONDS = 60
 
 # 모험 레벨은 스탯 배분 없이 자동으로 승률을 올린다.
 ADVENTURE_LEVEL_WIN_BONUS = 0.6
