@@ -8092,6 +8092,7 @@ async def sticky_message_listener(message):
     await refresh_sticky_message(message.channel)
 
 
+
 # =========================
 # 모험 / 전리품 / 유물 시스템
 # =========================
@@ -8099,6 +8100,246 @@ async def sticky_message_listener(message):
 ADVENTURE_MAX_EQUIPPED = 3
 ADVENTURE_INVENTORY_PAGE_SIZE = 10
 ADVENTURE_RELIC_PAGE_SIZE = 10
+
+# 한 번 이동했을 때 일반 몬스터를 만날 기본 확률.
+# 몬스터가 너무 연속해서 나오지 않도록 18%로 낮췄다.
+# 보스 출현 판정은 이 확률과 별개로 매 턴 진행된다.
+# 일반 몬스터는 꽤 뜸하게 등장한다. 보스 판정은 이 확률과 별개다.
+ADVENTURE_MONSTER_EVENT_RATE = 10.0
+
+# 모험 레벨은 스탯 배분 없이 자동으로 승률을 올린다.
+ADVENTURE_LEVEL_WIN_BONUS = 0.6
+ADVENTURE_LEVEL_WIN_BONUS_CAP = 30.0
+
+# 전투 승리 시 모험 장비 발견 확률. 장비는 돈으로 구매할 수 없다.
+ADVENTURE_EQUIPMENT_DROP_RATES = {
+    "normal": 7.0,
+    "elite": 22.0,
+    "calamity": 55.0,
+    "boss": 100.0,
+}
+
+# 몬스터 조우 후 등급 판정:
+# 일반 89% / 강적 10% / 재앙급 1%
+ADVENTURE_MONSTER_TIERS = {
+    "normal": {
+        "name": "일반",
+        "prefix": "",
+        "level_mul": 1.0,
+        "level_flat": 0,
+        "reward_mul": 1.0,
+        "exp_mul": 1.0,
+        "loot_bonus": 0,
+    },
+    "elite": {
+        "name": "강적",
+        "prefix": "🔥 강적",
+        "level_mul": 1.35,
+        "level_flat": 3,
+        "reward_mul": 2.2,
+        "exp_mul": 2.0,
+        "loot_bonus": 1,
+    },
+    "calamity": {
+        "name": "재앙급",
+        "prefix": "☠️ 재앙급",
+        "level_mul": 2.6,
+        "level_flat": 15,
+        "reward_mul": 8.0,
+        "exp_mul": 8.0,
+        "loot_bonus": 3,
+    },
+}
+
+ADVENTURE_START_TERRAINS = ["desert", "grassland", "jungle"]
+
+ADVENTURE_TERRAINS = {
+    "desert": {
+        "name": "사막",
+        "emoji": "🏜️",
+        "color": 0xD9A441,
+        "description": "끝없이 펼쳐진 모래와 폐허가 길을 가로막는다.",
+        "danger_mul": 0.95,
+        "danger_flat": 0,
+        "reward_mul": 1.05,
+        "boss": "반영구 제어 매트릭스",
+        "monsters": [
+            "슬라임", "츄츄족", "보물 사냥단", "성해 짐승",
+            "유적 드레이크", "반영구 제어 매트릭스",
+        ],
+    },
+    "grassland": {
+        "name": "초원",
+        "emoji": "🌾",
+        "color": 0x67A84F,
+        "description": "바람이 잔잔한 초원. 평화로워 보여도 곳곳에 적이 숨어 있다.",
+        "danger_mul": 1.0,
+        "danger_flat": 0,
+        "reward_mul": 1.0,
+        "boss": "철갑 용 도마뱀",
+        "monsters": [
+            "슬라임", "츄츄족", "츄츄 폭도", "보물 사냥단",
+            "유적 가드", "철갑 용 도마뱀",
+        ],
+    },
+    "jungle": {
+        "name": "정글",
+        "emoji": "🌴",
+        "color": 0x247A46,
+        "description": "빛조차 잘 들지 않는 밀림. 독기와 짐승의 울음이 가득하다.",
+        "danger_mul": 1.08,
+        "danger_flat": 2,
+        "reward_mul": 1.12,
+        "boss": "아펩의 수호자",
+        "monsters": [
+            "슬라임", "츄츄족", "심연 메이지", "성해 짐승",
+            "수계 사냥개 무리", "아펩의 수호자",
+        ],
+    },
+    "cave": {
+        "name": "동굴",
+        "emoji": "🕳️",
+        "color": 0x5B4B66,
+        "description": "지하 깊은 곳으로 이어지는 동굴. 오래된 기계음이 메아리친다.",
+        "danger_mul": 1.18,
+        "danger_flat": 8,
+        "reward_mul": 1.22,
+        "boss": "유적 서펜트",
+        "monsters": [
+            "심연 메이지", "유적 가드", "유적 헌터", "원해 짐승",
+            "유적 서펜트", "영겁의 드레이크",
+        ],
+    },
+    "mountain": {
+        "name": "고산지대",
+        "emoji": "⛰️",
+        "color": 0x73808F,
+        "description": "숨이 가빠지는 높은 산맥. 강풍 너머로 낯선 문이 보인다.",
+        "danger_mul": 1.30,
+        "danger_flat": 15,
+        "reward_mul": 1.38,
+        "boss": "영겁의 드레이크",
+        "monsters": [
+            "츄츄 폭도", "우인단 선발대", "유적 헌터", "검귀",
+            "유적 드레이크", "영겁의 드레이크",
+        ],
+    },
+    "ice": {
+        "name": "얼음 지대",
+        "emoji": "❄️",
+        "color": 0x8ED6EA,
+        "description": "모든 것이 얼어붙은 땅. 발을 멈추면 냉기가 뼛속까지 스민다.",
+        "danger_mul": 1.45,
+        "danger_flat": 25,
+        "reward_mul": 1.55,
+        "boss": "황금 늑대왕",
+        "monsters": [
+            "우인단 선발대", "거울의 여인", "검귀", "수계 사냥개 무리",
+            "황금 늑대왕", "철갑 용 도마뱀",
+        ],
+    },
+    "demon": {
+        "name": "마계",
+        "emoji": "😈",
+        "color": 0x6C1738,
+        "description": "붉은 하늘 아래 마력이 끓어오르는 세계. 약한 자는 존재조차 버티지 못한다.",
+        "danger_mul": 2.0,
+        "danger_flat": 70,
+        "reward_mul": 2.4,
+        "boss": "마왕",
+        "monsters": [
+            "심연 메이지", "심연 사도", "심연 영창자", "원해 짐승",
+            "라이덴 쇼군", "마왕",
+        ],
+    },
+    "heaven": {
+        "name": "천계",
+        "emoji": "☁️",
+        "color": 0xF2D77A,
+        "description": "구름 위 신성한 세계. 아름답지만 허락받지 않은 자에겐 가장 잔혹하다.",
+        "danger_mul": 2.45,
+        "danger_flat": 105,
+        "reward_mul": 3.2,
+        "boss": "천리의 유지자",
+        "monsters": [
+            "자율 초정밀 태엽장치", "영겁의 드레이크", "타르탈리아",
+            "라이덴 쇼군", "천리의 유지자",
+        ],
+    },
+}
+
+# 이동 가능한 방향. 마계는 고산지대/얼음 지대에서만,
+# 천계는 마계에서만 진입할 수 있다.
+ADVENTURE_TERRAIN_ROUTES = {
+    "desert": ["grassland", "jungle", "cave"],
+    "grassland": ["desert", "jungle", "cave", "mountain"],
+    "jungle": ["desert", "grassland", "cave", "mountain"],
+    "cave": ["desert", "jungle", "mountain", "ice"],
+    "mountain": ["grassland", "cave", "ice", "demon"],
+    "ice": ["cave", "mountain", "demon"],
+    "demon": ["mountain", "ice", "heaven"],
+    "heaven": [],
+}
+
+# 이 유물을 해당 지형에서 얻으면 갈림길이 확정적으로 열린다.
+# 유물의 실제 표시 이름은 최초 발견자가 정한다.
+ADVENTURE_ROUTE_RELICS = {
+    "relic_012": {"source": "desert", "destinations": ["jungle", "cave"]},
+    "relic_025": {"source": "grassland", "destinations": ["cave", "mountain"]},
+    "relic_038": {"source": "jungle", "destinations": ["cave", "mountain"]},
+    "relic_051": {"source": "cave", "destinations": ["mountain", "ice"]},
+    "relic_064": {"source": "mountain", "destinations": ["ice", "demon"]},
+    "relic_077": {"source": "ice", "destinations": ["mountain", "demon"]},
+    "relic_090": {"source": "demon", "destinations": ["heaven"]},
+}
+
+ADVENTURE_TERRAIN_DEPTH = {
+    "desert": 1,
+    "grassland": 1,
+    "jungle": 1,
+    "cave": 2,
+    "mountain": 3,
+    "ice": 4,
+    "demon": 5,
+    "heaven": 6,
+}
+
+ADVENTURE_RANDOM_ROUTE_RATE = 2.5
+
+# 같은 지형에서 5턴을 넘긴 뒤부터 매 턴 보스 출현 확률이 증가한다.
+# 6턴째 1.5%에서 시작해 매 턴 1.25%p씩 상승하고 최대 20%까지 오른다.
+ADVENTURE_BOSS_MIN_TERRAIN_STEPS = 5
+ADVENTURE_BOSS_BASE_RATE = 1.5
+ADVENTURE_BOSS_RATE_PER_STEP = 1.25
+ADVENTURE_BOSS_MAX_RATE = 20.0
+
+
+def get_terrain_info(terrain_key):
+    return ADVENTURE_TERRAINS.get(terrain_key, ADVENTURE_TERRAINS["grassland"])
+
+
+def get_terrain_name(terrain_key):
+    terrain = get_terrain_info(terrain_key)
+    return f"{terrain['emoji']} {terrain['name']}"
+
+
+def valid_terrain_destinations(source, destinations=None):
+    allowed = ADVENTURE_TERRAIN_ROUTES.get(source, [])
+    if destinations is None:
+        destinations = allowed
+
+    result = []
+    for destination in destinations:
+        # 마계 진입은 고산지대와 얼음 지대에서만 허용한다.
+        if destination == "demon" and source not in {"mountain", "ice"}:
+            continue
+        # 천계 진입은 마계에서만 허용한다.
+        if destination == "heaven" and source != "demon":
+            continue
+        if destination in allowed and destination in ADVENTURE_TERRAINS and destination not in result:
+            result.append(destination)
+    return result
+
 
 ADVENTURE_RARITIES = {
     "common": {"name": "일반", "emoji": "⚪", "value_mul": 1.0},
@@ -8171,6 +8412,11 @@ ADVENTURE_SHOP_CATALOG = {
         "relic": 5.0,
         "escape": 12,
     },
+    "생명의 깃털": {
+        "price": 24000,
+        "desc": "장착한 채 모험을 시작하면 최대 목숨이 1개 증가한다.",
+        "max_lives": 1,
+    },
 }
 
 adventure_action_locks = {}
@@ -8198,12 +8444,27 @@ def get_adventure(uid):
         "kills": 0,
         "earned_mora": 0,
         "lives": 3,
+        "max_lives": 3,
         "pending_event": None,
         "pending_name_item_id": None,
+        "terrain": None,
+        "terrain_steps": 0,
+        "visited_terrains": [],
+        "defeated_bosses": [],
+        "best_terrain_rank": 0,
         "best_steps": 0,
         "best_kills": 0,
         "total_runs": 0,
         "total_kills": 0,
+
+        # /사냥과 완전히 분리된 모험 전용 성장 데이터
+        "level": 1,
+        "exp": 0,
+        "weapon": "무인검",
+        "armor": "모험가 세트",
+        "owned_weapons": ["무인검"],
+        "owned_armors": ["모험가 세트"],
+
         "boosts": {
             "battle": 0,
             "luck": 0,
@@ -8211,6 +8472,7 @@ def get_adventure(uid):
             "escape": 0,
             "life_save": 0,
             "relic": 0,
+            "max_lives": 0,
         },
     }
 
@@ -8218,8 +8480,40 @@ def get_adventure(uid):
         if key not in adventure:
             if isinstance(value, dict):
                 adventure[key] = value.copy()
+            elif isinstance(value, list):
+                adventure[key] = value.copy()
             else:
                 adventure[key] = value
+
+    # 예전 데이터나 손상된 데이터를 모험 전용 기본 장비로 복구한다.
+    if not isinstance(adventure.get("owned_weapons"), list):
+        adventure["owned_weapons"] = ["무인검"]
+    if not isinstance(adventure.get("owned_armors"), list):
+        adventure["owned_armors"] = ["모험가 세트"]
+
+    adventure["owned_weapons"] = [name for name in adventure["owned_weapons"] if name in WEAPONS]
+    adventure["owned_armors"] = [name for name in adventure["owned_armors"] if name in ARMORS]
+
+    if "무인검" not in adventure["owned_weapons"]:
+        adventure["owned_weapons"].insert(0, "무인검")
+    if "모험가 세트" not in adventure["owned_armors"]:
+        adventure["owned_armors"].insert(0, "모험가 세트")
+
+    if adventure.get("weapon") not in adventure["owned_weapons"]:
+        adventure["weapon"] = "무인검"
+    if adventure.get("armor") not in adventure["owned_armors"]:
+        adventure["armor"] = "모험가 세트"
+
+    adventure["level"] = max(1, int(adventure.get("level", 1)))
+    adventure["exp"] = max(0, int(adventure.get("exp", 0)))
+    adventure["max_lives"] = max(3, int(adventure.get("max_lives", 3)))
+    adventure["lives"] = max(0, min(int(adventure.get("lives", 3)), adventure["max_lives"]))
+
+    # 지형 시스템 추가 전부터 진행 중이던 모험은 초원에서 이어진다.
+    if adventure.get("active") and adventure.get("terrain") not in ADVENTURE_TERRAINS:
+        adventure["terrain"] = "grassland"
+        adventure["terrain_steps"] = 0
+        adventure["visited_terrains"] = ["grassland"]
 
     return adventure
 
@@ -8272,6 +8566,7 @@ def get_equipped_adventure_boosts(uid):
         "escape": 0,
         "life_save": 0,
         "relic": 0,
+        "max_lives": 0,
     }
 
     for item_name in info["equipped"]:
@@ -8282,9 +8577,154 @@ def get_equipped_adventure_boosts(uid):
     return boosts
 
 
+
+def get_adventure_required_exp(level):
+    """모험 전용 레벨 요구 경험치. /사냥 레벨과는 전혀 공유하지 않는다."""
+    return get_required_exp(max(1, int(level)))
+
+
+def give_adventure_exp(adventure, amount):
+    adventure["exp"] = max(0, int(adventure.get("exp", 0)) + int(amount))
+    leveled = 0
+
+    while adventure["exp"] >= get_adventure_required_exp(adventure["level"]):
+        adventure["exp"] -= get_adventure_required_exp(adventure["level"])
+        adventure["level"] += 1
+        leveled += 1
+
+    return leveled
+
+
+def calc_adventure_win_chance(adventure, monster, monster_level, trait=None):
+    """스탯창 없이 모험 레벨과 현재 장비만으로 승률을 계산한다."""
+    player_level = max(1, int(adventure.get("level", 1)))
+    weapon_name = adventure.get("weapon", "무인검")
+    armor_name = adventure.get("armor", "모험가 세트")
+    weapon_bonus = WEAPONS.get(weapon_name, WEAPONS["무인검"])["bonus"]
+    armor_bonus = ARMORS.get(armor_name, ARMORS["모험가 세트"])["bonus"]
+
+    level_bonus = min(
+        ADVENTURE_LEVEL_WIN_BONUS_CAP,
+        max(0, player_level - 1) * ADVENTURE_LEVEL_WIN_BONUS,
+    )
+
+    chance = 48
+    chance += level_bonus
+    chance += (player_level - monster_level) * 2.2
+    chance += weapon_bonus * 0.8
+    chance += armor_bonus * 0.6
+    chance -= monster["penalty"] * 0.6
+    chance -= max(0, monster_level - player_level) * 0.6
+    chance += adventure.get("boosts", {}).get("battle", 0)
+
+    if trait:
+        chance /= trait.get("monster_power", 1)
+
+    return max(3, min(97, int(chance)))
+
+
+def calc_adventure_escape_chance(adventure):
+    player_level = max(1, int(adventure.get("level", 1)))
+    armor_name = adventure.get("armor", "모험가 세트")
+    armor_bonus = ARMORS.get(armor_name, ARMORS["모험가 세트"])["bonus"]
+    escape_bonus = adventure.get("boosts", {}).get("escape", 0)
+
+    chance = 48 + player_level * 0.35 + armor_bonus * 0.12 + escape_bonus
+    return max(20, min(92, int(chance)))
+
+
+def calc_adventure_hospital_fee(money):
+    # /사냥의 체력 스탯 할인과 호환되지 않는다.
+    final_rate = 0.07
+    return int(max(0, money) * final_rate), final_rate
+
+
+def get_adventure_boss_spawn_rate(adventure, next_turn=False):
+    terrain_key = adventure.get("terrain") or "grassland"
+    defeated = set(adventure.get("defeated_bosses", []))
+    terrain_steps = max(0, int(adventure.get("terrain_steps", 0)))
+    if next_turn:
+        terrain_steps += 1
+
+    if terrain_key in defeated or terrain_steps <= ADVENTURE_BOSS_MIN_TERRAIN_STEPS:
+        return 0.0
+
+    extra_turns = terrain_steps - (ADVENTURE_BOSS_MIN_TERRAIN_STEPS + 1)
+    return min(
+        ADVENTURE_BOSS_MAX_RATE,
+        ADVENTURE_BOSS_BASE_RATE + max(0, extra_turns) * ADVENTURE_BOSS_RATE_PER_STEP,
+    )
+
+
+def get_adventure_equipment_text(adventure):
+    return (
+        f"🗡️ {adventure.get('weapon', '무인검')} · "
+        f"🛡️ {adventure.get('armor', '모험가 세트')}"
+    )
+
+
+def reset_adventure_run_equipment(adventure):
+    """병원행일 때만 이번 모험에서 얻은 장비를 전부 잃는다."""
+    lost_weapons = [name for name in adventure.get("owned_weapons", []) if name != "무인검"]
+    lost_armors = [name for name in adventure.get("owned_armors", []) if name != "모험가 세트"]
+
+    adventure["weapon"] = "무인검"
+    adventure["armor"] = "모험가 세트"
+    adventure["owned_weapons"] = ["무인검"]
+    adventure["owned_armors"] = ["모험가 세트"]
+    return lost_weapons, lost_armors
+
+
+def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=False):
+    """장비는 전투 보상으로만 획득한다."""
+    rate_key = "boss" if is_boss else monster_tier
+    drop_rate = ADVENTURE_EQUIPMENT_DROP_RATES.get(rate_key, 0.0)
+    drop_rate += min(5.0, adventure.get("boosts", {}).get("loot", 0) * 0.15)
+    if random.random() * 100 >= drop_rate:
+        return None
+
+    owned_weapons = set(adventure.get("owned_weapons", []))
+    owned_armors = set(adventure.get("owned_armors", []))
+    depth = ADVENTURE_TERRAIN_DEPTH.get(adventure.get("terrain"), 0)
+    player_level = max(1, int(adventure.get("level", 1)))
+    allowed_bonus = 5 + player_level * 0.8 + depth * 3.5 + adventure.get("terrain_steps", 0) * 0.35
+
+    weapon_candidates = [
+        name for name, info in WEAPONS.items()
+        if name != "무인검" and name not in owned_weapons and info.get("bonus", 0) <= allowed_bonus
+    ]
+    armor_candidates = [
+        name for name, info in ARMORS.items()
+        if name != "모험가 세트" and name not in owned_armors and info.get("bonus", 0) <= allowed_bonus
+    ]
+
+    if not weapon_candidates and not armor_candidates:
+        weapon_candidates = [name for name in WEAPONS if name != "무인검" and name not in owned_weapons]
+        armor_candidates = [name for name in ARMORS if name != "모험가 세트" and name not in owned_armors]
+
+    kinds = []
+    if weapon_candidates:
+        kinds.append("weapon")
+    if armor_candidates:
+        kinds.append("armor")
+    if not kinds:
+        return None
+
+    kind = random.choice(kinds)
+    if kind == "weapon":
+        name = random.choice(weapon_candidates)
+        adventure.setdefault("owned_weapons", ["무인검"]).append(name)
+        return {"kind": "weapon", "name": name, "bonus": WEAPONS[name]["bonus"]}
+
+    name = random.choice(armor_candidates)
+    adventure.setdefault("owned_armors", ["모험가 세트"]).append(name)
+    return {"kind": "armor", "name": name, "bonus": ARMORS[name]["bonus"]}
+
+
 def build_adventure_item_catalog():
     """코드 몇 줄로 400종이 넘는 전리품을 만든다."""
     catalog = {}
+    terrain_keys = list(ADVENTURE_TERRAINS.keys())
 
     monster_parts = [
         ("흔적", "common", 12),
@@ -8348,6 +8788,37 @@ def build_adventure_item_catalog():
                 "value": 10 + score * 6,
                 "source_monster": None,
                 "custom_name": False,
+                "terrain": terrain_keys[(prefix_index + material_index) % len(terrain_keys)],
+            }
+
+    terrain_materials = {
+        "desert": ["태양 선인장", "유리 모래", "전갈 독침", "사막 장미", "고대 토기", "열풍 결정"],
+        "grassland": ["바람풀", "들꽃 꿀", "푸른 씨앗", "초원 양털", "맑은 이슬", "야생 곡식"],
+        "jungle": ["독버섯", "거대 잎사귀", "덩굴 수액", "밀림 열매", "맹수 발톱", "녹빛 원석"],
+        "cave": ["박쥐 날개", "암흑 수정", "동굴 이끼", "고대 철편", "석회 진주", "메아리석"],
+        "mountain": ["독수리 깃", "고산 약초", "운철 조각", "산맥 수정", "폭풍석", "구름 이끼"],
+        "ice": ["영구빙", "서리꽃", "빙정 조각", "설원 모피", "얼음 송곳니", "극광 가루"],
+        "demon": ["마력 응혈", "악마의 뿔", "저주받은 뼈", "핏빛 결정", "검은 불씨", "심연 가죽"],
+        "heaven": ["천사의 깃", "성광 결정", "구름 비단", "별의 가루", "신성한 이슬", "찬란한 파편"],
+    }
+
+    for terrain_index, (terrain_key, names) in enumerate(terrain_materials.items()):
+        for material_index, name in enumerate(names):
+            rarity = "uncommon" if material_index < 3 else "rare"
+            if terrain_key in {"demon", "heaven"}:
+                rarity = "epic" if material_index < 4 else "legendary"
+            elif terrain_key in {"mountain", "ice"} and material_index >= 4:
+                rarity = "epic"
+
+            item_id = f"terrain_{terrain_index:02d}_{material_index:02d}"
+            catalog[item_id] = {
+                "name": name,
+                "kind": "material",
+                "rarity": rarity,
+                "value": int((35 + terrain_index * 25 + material_index * 12) * ADVENTURE_RARITIES[rarity]["value_mul"]),
+                "source_monster": None,
+                "custom_name": False,
+                "terrain": terrain_key,
             }
 
     # 이름을 최초 발견자가 붙이는 유물 120종
@@ -8364,6 +8835,10 @@ def build_adventure_item_catalog():
             rarity = "uncommon"
 
         item_id = f"relic_{relic_number:03d}"
+        relic_terrain = terrain_keys[(relic_number - 1) % len(terrain_keys)]
+        if item_id in ADVENTURE_ROUTE_RELICS:
+            relic_terrain = ADVENTURE_ROUTE_RELICS[item_id]["source"]
+
         catalog[item_id] = {
             "name": None,
             "kind": "relic",
@@ -8371,6 +8846,8 @@ def build_adventure_item_catalog():
             "value": int(250 * ADVENTURE_RARITIES[rarity]["value_mul"]),
             "source_monster": None,
             "custom_name": True,
+            "terrain": relic_terrain,
+            "route_relic": item_id in ADVENTURE_ROUTE_RELICS,
         }
 
     return catalog
@@ -8430,18 +8907,29 @@ def adventure_danger(adventure):
     return adventure_elapsed_minutes(adventure) + adventure.get("steps", 0) * 1.4
 
 
-def start_new_adventure(uid):
+def start_new_adventure(uid, terrain_key):
+    if terrain_key not in ADVENTURE_START_TERRAINS:
+        terrain_key = "grassland"
+
     adventure = get_adventure(uid)
+    boosts = get_equipped_adventure_boosts(uid)
+    max_lives = 3 + max(0, int(boosts.get("max_lives", 0)))
+
     adventure.update({
         "active": True,
         "started_at": datetime.now(KST).isoformat(),
         "steps": 0,
         "kills": 0,
         "earned_mora": 0,
-        "lives": 3,
+        "lives": max_lives,
+        "max_lives": max_lives,
         "pending_event": None,
         "pending_name_item_id": None,
-        "boosts": get_equipped_adventure_boosts(uid),
+        "terrain": terrain_key,
+        "terrain_steps": 0,
+        "visited_terrains": [terrain_key],
+        "defeated_bosses": [],
+        "boosts": boosts,
     })
     save_data()
     return adventure
@@ -8455,16 +8943,29 @@ def finish_adventure(uid):
         "kills": adventure.get("kills", 0),
         "earned_mora": adventure.get("earned_mora", 0),
         "minutes": adventure_elapsed_minutes(adventure),
+        "terrain": adventure.get("terrain"),
+        "visited_terrains": list(adventure.get("visited_terrains", [])),
     }
+
+    terrain_rank = max(
+        [ADVENTURE_TERRAIN_DEPTH.get(key, 0) for key in summary["visited_terrains"]]
+        or [0]
+    )
 
     adventure["best_steps"] = max(adventure.get("best_steps", 0), summary["steps"])
     adventure["best_kills"] = max(adventure.get("best_kills", 0), summary["kills"])
+    adventure["best_terrain_rank"] = max(adventure.get("best_terrain_rank", 0), terrain_rank)
     adventure["total_runs"] = adventure.get("total_runs", 0) + 1
     adventure["active"] = False
     adventure["started_at"] = None
     adventure["pending_event"] = None
     adventure["pending_name_item_id"] = None
     adventure["lives"] = 3
+    adventure["max_lives"] = 3
+    adventure["terrain"] = None
+    adventure["terrain_steps"] = 0
+    adventure["visited_terrains"] = []
+    adventure["defeated_bosses"] = []
 
     save_data()
     return summary
@@ -8481,33 +8982,106 @@ def get_trait_by_name(name):
     return None
 
 
-def pick_adventure_monster(user, adventure):
-    danger = adventure_danger(adventure)
-    target_level = max(1, user["level"] + int(danger * 0.75))
+def roll_adventure_monster_tier():
+    roll = random.random() * 100
 
-    possible = [
+    if roll < 1.0:
+        return "calamity"
+    if roll < 11.0:
+        return "elite"
+    return "normal"
+
+
+def get_adventure_monster_tier(tier_name):
+    return ADVENTURE_MONSTER_TIERS.get(
+        tier_name,
+        ADVENTURE_MONSTER_TIERS["normal"],
+    )
+
+
+def format_adventure_monster_name(monster_name, trait=None, tier_name="normal"):
+    parts = []
+    tier = get_adventure_monster_tier(tier_name)
+
+    if tier["prefix"]:
+        parts.append(tier["prefix"])
+    if trait:
+        parts.append(trait["name"])
+    parts.append(monster_name)
+
+    return " ".join(parts)
+
+
+def find_adventure_monster_by_name(name):
+    return find_monster_by_name(name)
+
+
+def pick_adventure_monster(adventure, tier_name="normal", force_boss=False):
+    danger = adventure_danger(adventure)
+    terrain_key = adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+
+    normal_target = max(
+        1,
+        int((adventure["level"] + danger * 0.75 + terrain["danger_flat"]) * terrain["danger_mul"]),
+    )
+    tier = get_adventure_monster_tier(tier_name)
+
+    target_level = max(
+        1,
+        int(normal_target * tier["level_mul"]) + tier["level_flat"],
+    )
+
+    terrain_monsters = [
         monster
-        for monster in MONSTERS
-        if monster["min"] <= target_level <= monster["max"]
+        for name in terrain["monsters"]
+        for monster in [find_adventure_monster_by_name(name)]
+        if monster is not None
     ]
 
-    if not possible:
-        possible = sorted(
-            MONSTERS,
-            key=lambda monster: abs(((monster["min"] + monster["max"]) / 2) - target_level),
-        )[:4]
+    boss_name = terrain.get("boss")
+    defeated = set(adventure.get("defeated_bosses", []))
+    is_boss = bool(force_boss and terrain_key not in defeated and boss_name)
 
-    monster = random.choice(possible)
-    low = max(monster["min"], target_level - 3)
-    high = min(monster["max"], target_level + 3)
+    monster = find_adventure_monster_by_name(boss_name) if is_boss else None
 
-    if low > high:
-        low, high = monster["min"], monster["max"]
+    if monster is None:
+        normal_pool = [monster for monster in terrain_monsters if monster["name"] != boss_name]
+        if not normal_pool:
+            normal_pool = terrain_monsters or MONSTERS
+
+        possible = [
+            monster
+            for monster in normal_pool
+            if monster["min"] <= target_level <= monster["max"]
+        ]
+
+        if not possible:
+            possible = sorted(
+                normal_pool,
+                key=lambda monster: abs(((monster["min"] + monster["max"]) / 2) - target_level),
+            )[:3]
+
+        monster = random.choice(possible)
+        is_boss = False
+
+    if is_boss:
+        target_level = max(target_level + 8, int(monster["min"] * 1.1))
+        low = max(1, target_level - 2)
+        high = target_level + 4
+    elif tier_name == "normal":
+        low = max(monster["min"], target_level - 3)
+        high = min(monster["max"], target_level + 3)
+        if low > high:
+            low = max(1, target_level - 3)
+            high = target_level + 3
+    else:
+        low = max(1, target_level - 3)
+        high = target_level + 3
 
     monster_level = random.randint(low, high)
     trait = pick_monster_trait()
-
-    return monster, monster_level, trait
+    return monster, monster_level, trait, is_boss
 
 
 def weighted_adventure_item(items, danger=0.0, loot_bonus=0.0):
@@ -8545,11 +9119,20 @@ def pick_monster_loot(monster_name, adventure):
 
 
 def pick_world_loot(adventure):
+    terrain_key = adventure.get("terrain") or "grassland"
     candidates = [
         item_id
         for item_id, item in ADVENTURE_ITEM_CATALOG.items()
         if item["kind"] in {"herb", "ore", "material"}
+        and item.get("terrain") == terrain_key
     ]
+
+    if not candidates:
+        candidates = [
+            item_id
+            for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+            if item["kind"] in {"herb", "ore", "material"}
+        ]
 
     return weighted_adventure_item(
         candidates,
@@ -8558,20 +9141,24 @@ def pick_world_loot(adventure):
     )
 
 
-def pick_mystery_relic():
+def pick_mystery_relic(adventure=None):
+    terrain_key = (adventure or {}).get("terrain") or "grassland"
     all_relics = [
         item_id
         for item_id, item in ADVENTURE_ITEM_CATALOG.items()
-        if item["kind"] == "relic"
+        if item["kind"] == "relic" and item.get("terrain") == terrain_key
     ]
 
-    undiscovered = [
-        item_id
-        for item_id in all_relics
-        if item_id not in discovered_items
-    ]
+    if not all_relics:
+        all_relics = [
+            item_id
+            for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+            if item["kind"] == "relic"
+        ]
 
-    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나오게 함
+    undiscovered = [item_id for item_id in all_relics if item_id not in discovered_items]
+
+    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나온다.
     if undiscovered and random.random() < 0.78:
         return random.choice(undiscovered)
 
@@ -8601,23 +9188,37 @@ def format_adventure_boosts(boosts):
 def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
     elapsed = adventure_elapsed_minutes(adventure)
     danger = adventure_danger(adventure)
+    terrain_key = adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+
+    visited = adventure.get("visited_terrains", [])
+    visited_text = " → ".join(get_terrain_info(key)["name"] for key in visited if key in ADVENTURE_TERRAINS)
+    if not visited_text:
+        visited_text = terrain["name"]
 
     embed = discord.Embed(
         title=title,
         description=(
             f"{member.mention}은(는) 현재 모험 중이야.\n\n"
+            f"🗺️ 현재 지형: **{terrain['emoji']} {terrain['name']}**\n"
+            f"📍 이동 경로: **{visited_text}**\n"
+            f"🎖️ 모험 레벨: **Lv.{adventure['level']}** "
+            f"({adventure['exp']}/{get_adventure_required_exp(adventure['level'])} EXP)\n"
+            f"{get_adventure_equipment_text(adventure)}\n"
             f"⏱️ 경과 시간: **{elapsed:.1f}분**\n"
-            f"👣 진행 횟수: **{adventure['steps']}회**\n"
+            f"👣 전체 진행: **{adventure['steps']}회**\n"
+            f"🥾 현재 지형 진행: **{adventure.get('terrain_steps', 0)}회**\n"
+            f"👑 다음 턴 보스 확률: **{get_adventure_boss_spawn_rate(adventure, next_turn=True):.1f}%**\n"
             f"⚔️ 처치 수: **{adventure['kills']}마리**\n"
-            f"❤️ 목숨: **{adventure['lives']}/3**\n"
+            f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**\n"
             f"💰 이번 모험 수익: **{adventure['earned_mora']:,}모라**\n"
             f"☠️ 위험도: **{danger:.1f}**\n\n"
             f"🎒 적용 효과: {format_adventure_boosts(adventure.get('boosts', {}))}"
         ),
-        color=discord.Color.blurple(),
+        color=discord.Color(terrain["color"]),
     )
 
-    embed.set_footer(text="시간과 진행 횟수가 늘수록 더 강한 적이 나타난다.")
+    embed.set_footer(text=f"{terrain['description']} 시간과 진행 횟수가 늘수록 적이 강해진다.")
     return embed
 
 
@@ -8678,7 +9279,8 @@ async def send_adventure_travel_animation(interaction, uid):
         adventure,
         title="🌲 모험을 떠나는 중...",
     )
-    embed.description += "\n\n낯선 길을 따라 앞으로 나아가고 있어..."
+    terrain = get_terrain_info(adventure.get("terrain"))
+    embed.description += f"\n\n{terrain['emoji']} {terrain['name']}의 안쪽으로 더 나아가고 있어..."
 
     await interaction.response.edit_message(embed=embed, view=None)
     message = interaction.message
@@ -8689,20 +9291,18 @@ async def send_adventure_travel_animation(interaction, uid):
 
 async def apply_adventure_life_loss(message, member, adventure, reason_text):
     uid = str(member.id)
-    user = get_hunt_user(uid)
 
-    vit_saved = check_life_save(user)
     shop_save_chance = adventure.get("boosts", {}).get("life_save", 0)
-    shop_saved = random.random() * 100 < shop_save_chance
+    life_saved = random.random() * 100 < shop_save_chance
 
-    if vit_saved or shop_saved:
+    if life_saved:
         save_data()
         embed = discord.Embed(
             title="💥 간신히 살아남았다!",
             description=(
                 f"{reason_text}\n\n"
-                "하지만 생존 효과가 발동해서 목숨은 줄지 않았어!\n"
-                f"❤️ 남은 목숨: **{adventure['lives']}/3**"
+                "모험 전용 생존 효과가 발동해서 목숨은 줄지 않았어!\n"
+                f"❤️ 남은 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**"
             ),
             color=discord.Color.orange(),
         )
@@ -8718,7 +9318,7 @@ async def apply_adventure_life_loss(message, member, adventure, reason_text):
             description=(
                 f"{reason_text}\n\n"
                 "목숨을 하나 잃었어.\n"
-                f"❤️ 남은 목숨: **{adventure['lives']}/3**"
+                f"❤️ 남은 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**"
             ),
             color=discord.Color.red(),
         )
@@ -8726,24 +9326,165 @@ async def apply_adventure_life_loss(message, member, adventure, reason_text):
         return
 
     money = get_poker_money(uid)
-    hospital_fee, final_rate = calc_hospital_fee(user, money)
+    hospital_fee, final_rate = calc_adventure_hospital_fee(money)
     remove_poker_money(uid, hospital_fee)
+    lost_weapons, lost_armors = reset_adventure_run_equipment(adventure)
     summary = finish_adventure(uid)
+    lost_count = len(lost_weapons) + len(lost_armors)
 
     embed = discord.Embed(
         title="🏥 병원에서 눈을 떴다...",
         description=(
             f"{reason_text}\n\n"
             "목숨을 전부 잃어서 이번 모험은 처음부터 다시 해야 해.\n"
-            f"치료비: **{hospital_fee:,}모라** ({final_rate * 100:.1f}%)\n\n"
+            f"치료비: **{hospital_fee:,}모라** ({final_rate * 100:.1f}%)\n"
+            f"🧰 잃어버린 모험 장비: **{lost_count}개**\n"
+            f"🎖️ 모험 레벨은 **Lv.{adventure['level']}**로 보존됐어.\n\n"
             f"👣 진행: **{summary['steps']}회**\n"
             f"⚔️ 처치: **{summary['kills']}마리**\n"
             f"💰 획득: **{summary['earned_mora']:,}모라**\n"
-            f"⏱️ 생존 시간: **{summary['minutes']:.1f}분**"
+            f"⏱️ 생존 시간: **{summary['minutes']:.1f}분**\n"
+            f"🗺️ 마지막 지형: **{get_terrain_name(summary.get('terrain'))}**"
         ),
         color=discord.Color.dark_red(),
     )
     await message.edit(embed=embed, view=None)
+
+
+def get_route_relic_destinations(item_id, adventure):
+    route = ADVENTURE_ROUTE_RELICS.get(item_id)
+    current = adventure.get("terrain")
+    if not route or route.get("source") != current:
+        return []
+    return valid_terrain_destinations(current, route.get("destinations", []))
+
+
+def queue_terrain_choice(adventure, destinations, reason, detail=None):
+    current = adventure.get("terrain") or "grassland"
+    destinations = valid_terrain_destinations(current, destinations)
+    if not destinations:
+        return False
+
+    adventure["pending_event"] = {
+        "type": "terrain_choice",
+        "source": current,
+        "destinations": destinations,
+        "reason": reason,
+        "detail": detail,
+    }
+    return True
+
+
+def build_terrain_choice_embed(adventure):
+    pending = adventure.get("pending_event") or {}
+    source = pending.get("source") or adventure.get("terrain") or "grassland"
+    destinations = valid_terrain_destinations(source, pending.get("destinations", []))
+    reason = pending.get("reason")
+
+    if reason == "boss":
+        title = "👑 지역의 지배자를 쓰러뜨렸다!"
+        reason_text = "보스가 지키고 있던 길이 열리며 여러 지형으로 이어지는 통로가 드러났어."
+    elif reason == "relic":
+        title = "🔮 유물이 새로운 길에 반응한다!"
+        relic_name = pending.get("detail") or "수수께끼의 유물"
+        reason_text = f"**{relic_name}**에서 빛이 흘러나오며 숨겨진 갈림길이 열렸어."
+    else:
+        title = "🧭 낯선 갈림길을 발견했다!"
+        reason_text = "공간이 뒤틀리며 평소에는 보이지 않던 길들이 나타났어."
+
+    route_lines = [f"• {get_terrain_name(key)}" for key in destinations]
+    terrain = get_terrain_info(source)
+    return discord.Embed(
+        title=title,
+        description=(
+            f"현재 위치: **{get_terrain_name(source)}**\n\n"
+            f"{reason_text}\n\n"
+            "이동할 지형을 선택해. 현재 지형에 남을 수도 있어.\n\n"
+            + "\n".join(route_lines)
+        ),
+        color=discord.Color(terrain["color"]),
+    )
+
+
+async def show_terrain_choice(message, member):
+    adventure = get_adventure(member.id)
+    pending = adventure.get("pending_event") or {}
+    destinations = valid_terrain_destinations(
+        pending.get("source") or adventure.get("terrain"),
+        pending.get("destinations", []),
+    )
+
+    if not destinations:
+        adventure["pending_event"] = None
+        save_data()
+        await message.edit(embed=build_adventure_status_embed(member, adventure), view=AdventureTravelView(member.id))
+        return
+
+    await message.edit(
+        embed=build_terrain_choice_embed(adventure),
+        view=AdventureTerrainChoiceView(member.id, destinations),
+    )
+
+
+async def show_adventure_monster_encounter(message, member, adventure, monster_tier="normal", force_boss=False):
+    uid = str(member.id)
+    terrain_key = adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+    tier_info = get_adventure_monster_tier(monster_tier)
+
+    monster, monster_level, trait, is_boss = pick_adventure_monster(
+        adventure,
+        monster_tier,
+        force_boss=force_boss,
+    )
+    battle_level = apply_trait_to_monster_level(monster_level, trait)
+    monster_name = monster["name"]
+    display_name = format_adventure_monster_name(monster_name, trait, monster_tier)
+
+    adventure["pending_event"] = {
+        "type": "monster",
+        "monster_name": monster_name,
+        "monster_level": monster_level,
+        "trait_name": trait["name"] if trait else None,
+        "monster_tier": monster_tier,
+        "terrain": terrain_key,
+        "is_boss": is_boss,
+    }
+    save_data()
+
+    preview_chance = calc_adventure_win_chance(adventure, monster, monster_level, trait)
+
+    if is_boss:
+        encounter_title = f"👑 {terrain['name']}의 보스가 나타났다!"
+        encounter_notice = "**이 지역의 길을 지키는 보스야!**\n쓰러뜨리면 새로운 지형으로 이어지는 길이 확정적으로 열려.\n\n"
+        encounter_color = discord.Color.dark_gold()
+    elif monster_tier == "calamity":
+        encounter_title = "☠️ 도저히 상대하기 힘든 존재가 나타났다!"
+        encounter_notice = "**재앙급 개체야. 정면 승부는 정말 위험해!**\n승리하면 보상이 크게 증가해.\n\n"
+        encounter_color = discord.Color.dark_red()
+    elif monster_tier == "elite":
+        encounter_title = "🔥 평소보다 강한 몬스터가 나타났다!"
+        encounter_notice = "**강적 개체야. 일반 몬스터보다 훨씬 강해!**\n대신 보상도 더 많아.\n\n"
+        encounter_color = discord.Color.red()
+    else:
+        encounter_title = "⚔️ 몬스터가 나타났다!"
+        encounter_notice = ""
+        encounter_color = discord.Color.orange()
+
+    embed = discord.Embed(
+        title=encounter_title,
+        description=(
+            encounter_notice
+            + f"지형: **{terrain['emoji']} {terrain['name']}**\n"
+            + f"**Lv.{battle_level} {display_name}** 등장!\n\n"
+            f"내 모험 레벨: **Lv.{adventure['level']}**\n"
+            f"{get_adventure_equipment_text(adventure)}\n"
+            f"예상 승률: **{preview_chance}%**\n"
+            f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**"
+        ),
+        color=encounter_color,
+    )
+    await message.edit(embed=embed, view=AdventureBattleView(uid))
 
 
 async def roll_adventure_event(message, member):
@@ -8767,80 +9508,101 @@ async def roll_adventure_event(message, member):
         await message.edit(embed=embed, view=RelicNamingView(uid))
         return
 
+    pending = adventure.get("pending_event")
+    if pending and pending.get("type") == "terrain_choice":
+        await show_terrain_choice(message, member)
+        return
+
     adventure["steps"] += 1
+    adventure["terrain_steps"] = adventure.get("terrain_steps", 0) + 1
     danger = adventure_danger(adventure)
     boosts = adventure.get("boosts", {})
+    terrain_key = adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+
+    # 보스는 5턴을 넘긴 뒤부터 매 턴 독립적으로 판정된다.
+    boss_rate = get_adventure_boss_spawn_rate(adventure)
+    if boss_rate > 0 and random.random() * 100 < boss_rate:
+        await show_adventure_monster_encounter(
+            message,
+            member,
+            adventure,
+            monster_tier="normal",
+            force_boss=True,
+        )
+        return
+
+    # 아무 조건 없이 나타나는 희귀 갈림길. 특수 지형도 진입 방향 제한은 반드시 지킨다.
+    route_rate = ADVENTURE_RANDOM_ROUTE_RATE + min(1.5, boosts.get("luck", 0) * 0.04)
+    if adventure["terrain_steps"] >= 2 and random.random() * 100 < route_rate:
+        destinations = valid_terrain_destinations(terrain_key)
+        if len(destinations) > 2:
+            destinations = random.sample(destinations, k=random.randint(2, min(3, len(destinations))))
+        if queue_terrain_choice(adventure, destinations, "random"):
+            save_data()
+            await show_terrain_choice(message, member)
+            return
 
     relic_rate = min(12.0, 1.5 + boosts.get("relic", 0) + danger * 0.018)
     good_event_shift = min(12.0, boosts.get("luck", 0) * 0.6)
     roll = random.random() * 100
 
     if roll < relic_rate:
-        item_id = pick_mystery_relic()
+        item_id = pick_mystery_relic(adventure)
         add_adventure_item(uid, item_id, 1)
 
         item_name = get_adventure_item_name(item_id)
         is_new = item_id not in discovered_items
+        route_destinations = get_route_relic_destinations(item_id, adventure)
 
+        if route_destinations:
+            queue_terrain_choice(adventure, route_destinations, "relic", item_name)
         if is_new:
             adventure["pending_name_item_id"] = item_id
 
         save_data()
 
         rarity = ADVENTURE_RARITIES[ADVENTURE_ITEM_CATALOG[item_id]["rarity"]]
+        route_notice = "\n\n🔮 이 유물에서 이상한 힘이 느껴져. 이름을 정하면 숨겨진 길이 열릴 것 같아!" if route_destinations else ""
         embed = discord.Embed(
             title="✨ 처음 보는 물건을 발견했다!" if is_new else "✨ 유물을 발견했다!",
             description=(
                 f"{rarity['emoji']} **{item_name}**\n"
-                f"등급: **{rarity['name']}**\n\n"
+                f"등급: **{rarity['name']}**\n"
+                f"발견 지형: **{terrain['emoji']} {terrain['name']}**\n\n"
                 + (
                     "이 유물은 아직 이름이 없어. 최초 발견자인 네가 이름을 지을 수 있어!"
                     if is_new
                     else "이미 누군가 이름 붙인 유물이야."
                 )
+                + route_notice
             ),
             color=discord.Color.gold(),
         )
 
-        view = RelicNamingView(uid) if is_new else AdventureTravelView(uid)
+        if is_new:
+            view = RelicNamingView(uid)
+        elif route_destinations:
+            view = AdventureTerrainChoiceView(uid, route_destinations)
+        else:
+            view = AdventureTravelView(uid)
         await message.edit(embed=embed, view=view)
         return
 
-    monster_border = 58 - good_event_shift * 0.25
-    item_border = monster_border + 20 + good_event_shift * 0.55
-    money_border = item_border + 11 + good_event_shift * 0.25
-    heal_border = money_border + 6 + good_event_shift * 0.15
+    # 일반 몬스터는 약 18%로 낮췄다. 강적 10%, 재앙급 1% 판정은 그대로 유지한다.
+    monster_border = max(5.0, ADVENTURE_MONSTER_EVENT_RATE - good_event_shift * 0.20)
+    item_border = monster_border + 22 + good_event_shift * 0.55
+    money_border = item_border + 13 + good_event_shift * 0.25
+    heal_border = money_border + 7 + good_event_shift * 0.15
 
     if roll < relic_rate + monster_border:
-        user = get_hunt_user(uid)
-        monster, monster_level, trait = pick_adventure_monster(user, adventure)
-        battle_level = apply_trait_to_monster_level(monster_level, trait)
-        monster_name = monster["name"]
-        display_name = f"{trait['name']} {monster_name}" if trait else monster_name
-
-        adventure["pending_event"] = {
-            "type": "monster",
-            "monster_name": monster_name,
-            "monster_level": monster_level,
-            "trait_name": trait["name"] if trait else None,
-        }
-        save_data()
-
-        preview_chance = calc_win_chance(user, monster, monster_level, trait)
-        preview_chance += adventure.get("boosts", {}).get("battle", 0)
-        preview_chance = max(3, min(97, int(preview_chance)))
-
-        embed = discord.Embed(
-            title="⚔️ 몬스터가 나타났다!",
-            description=(
-                f"**Lv.{battle_level} {display_name}** 등장!\n\n"
-                f"예상 승률: **{preview_chance}%**\n"
-                f"❤️ 목숨: **{adventure['lives']}/3**\n"
-                f"☠️ 현재 위험도: **{danger:.1f}**"
-            ),
-            color=discord.Color.orange(),
+        await show_adventure_monster_encounter(
+            message,
+            member,
+            adventure,
+            monster_tier=roll_adventure_monster_tier(),
+            force_boss=False,
         )
-        await message.edit(embed=embed, view=AdventureBattleView(uid))
         return
 
     adjusted_roll = roll - relic_rate
@@ -8855,18 +9617,16 @@ async def roll_adventure_event(message, member):
         save_data()
 
         embed = discord.Embed(
-            title="🎒 길에서 재료를 발견했다!",
-            description=(
-                f"{get_adventure_item_line(item_id, amount)}\n\n"
-                "가방에 넣었어."
-            ),
-            color=discord.Color.green(),
+            title=f"🎒 {terrain['name']}에서 재료를 발견했다!",
+            description=f"{get_adventure_item_line(item_id, amount)}\n\n가방에 넣었어.",
+            color=discord.Color(terrain["color"]),
         )
         await message.edit(embed=embed, view=AdventureTravelView(uid))
         return
 
     if adjusted_roll < money_border:
         amount = random.randint(40, 100) + int(danger * random.randint(4, 8))
+        amount = int(amount * terrain["reward_mul"])
         add_poker_money(uid, amount)
         adventure["earned_mora"] += amount
         save_data()
@@ -8884,30 +9644,26 @@ async def roll_adventure_event(message, member):
 
     if adjusted_roll < heal_border:
         old_lives = adventure["lives"]
-        adventure["lives"] = min(3, adventure["lives"] + 1)
+        adventure["lives"] = min(adventure.get("max_lives", 3), adventure["lives"] + 1)
         save_data()
 
         if adventure["lives"] > old_lives:
-            text = "샘물을 마시자 상처가 회복됐어!\n❤️ 목숨 **+1**"
+            text_value = "샘물을 마시자 상처가 회복됐어!\n❤️ 목숨 **+1**"
         else:
-            text = "맑은 샘물을 발견했지만 이미 멀쩡해서 별 효과는 없었어."
+            text_value = "맑은 샘물을 발견했지만 이미 멀쩡해서 별 효과는 없었어."
 
-        embed = discord.Embed(
-            title="💧 회복의 샘",
-            description=text,
-            color=discord.Color.blue(),
-        )
+        embed = discord.Embed(title="💧 회복의 샘", description=text_value, color=discord.Color.blue())
         await message.edit(embed=embed, view=AdventureTravelView(uid))
         return
 
     save_data()
     embed = discord.Embed(
-        title="🍃 아무 일도 없었다...",
+        title=f"{terrain['emoji']} {terrain['name']}을 계속 걷고 있다...",
         description=(
-            "바람 소리만 들릴 뿐이야.\n"
-            "그래도 조금 더 깊은 곳까지 들어왔어."
+            f"{terrain['description']}\n그래도 조금 더 깊은 곳까지 들어왔어.\n\n"
+            f"다음 턴 보스 확률: **{get_adventure_boss_spawn_rate(adventure, next_turn=True):.1f}%**"
         ),
-        color=discord.Color.light_grey(),
+        color=discord.Color(terrain["color"]),
     )
     await message.edit(embed=embed, view=AdventureTravelView(uid))
 
@@ -8921,10 +9677,14 @@ async def resolve_adventure_battle(message, member):
         await message.edit(content="전투할 몬스터가 사라졌어.", embed=None, view=AdventureTravelView(uid))
         return
 
-    user = get_hunt_user(uid)
-    monster = find_monster_by_name(pending["monster_name"])
+    monster = find_adventure_monster_by_name(pending["monster_name"])
     trait = get_trait_by_name(pending.get("trait_name"))
     monster_level = int(pending["monster_level"])
+    monster_tier = pending.get("monster_tier", "normal")
+    tier_info = get_adventure_monster_tier(monster_tier)
+    terrain_key = pending.get("terrain") or adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+    is_boss = bool(pending.get("is_boss"))
 
     if monster is None:
         adventure["pending_event"] = None
@@ -8933,13 +9693,14 @@ async def resolve_adventure_battle(message, member):
         return
 
     battle_level = apply_trait_to_monster_level(monster_level, trait)
-    display_name = f"{trait['name']} {monster['name']}" if trait else monster["name"]
+    display_name = format_adventure_monster_name(
+        monster["name"],
+        trait,
+        monster_tier,
+    )
 
-    win_chance = calc_win_chance(user, monster, monster_level, trait)
-    win_chance, magic_activated = apply_magic_double_chance(user, win_chance)
-    win_chance += adventure.get("boosts", {}).get("battle", 0)
-    win_chance = max(3, min(97, int(win_chance)))
-
+    # 전투 버튼을 누르는 순간의 모험 전용 장비를 실시간 반영한다.
+    win_chance = calc_adventure_win_chance(adventure, monster, monster_level, trait)
     win = random.randint(1, 100) <= win_chance
     adventure["pending_event"] = None
 
@@ -8956,10 +9717,12 @@ async def resolve_adventure_battle(message, member):
     reward = random.randint(70, 150) + monster_level * 18
     exp = random.randint(25, 55) + monster_level * 5
     reward, exp = apply_trait_reward(reward, exp, trait)
-    reward, exp = apply_int_reward_bonus(user, reward, exp)
+
+    reward = int(reward * tier_info["reward_mul"] * terrain["reward_mul"])
+    exp = int(exp * tier_info["exp_mul"] * terrain["reward_mul"])
 
     add_poker_money(uid, reward)
-    leveled = give_hunt_exp(user, exp)
+    leveled = give_adventure_exp(adventure, exp)
 
     adventure["kills"] += 1
     adventure["total_kills"] += 1
@@ -8969,9 +9732,14 @@ async def resolve_adventure_battle(message, member):
     loot_amount = 1
     if ADVENTURE_ITEM_CATALOG[loot_id]["rarity"] in {"common", "uncommon"}:
         loot_amount = random.randint(1, 2)
+
+    loot_amount += tier_info["loot_bonus"]
     add_adventure_item(uid, loot_id, loot_amount)
 
-    # 전투 승리 후 별도의 유물 추가 드롭
+    equipment_drop = roll_adventure_equipment_drop(
+        adventure, monster_tier=monster_tier, is_boss=is_boss
+    )
+
     relic_chance = min(
         14.0,
         1.2
@@ -8983,50 +9751,83 @@ async def resolve_adventure_battle(message, member):
     relic_is_new = False
 
     if random.random() * 100 < relic_chance:
-        relic_id = pick_mystery_relic()
+        relic_id = pick_mystery_relic(adventure)
         relic_is_new = relic_id not in discovered_items
         add_adventure_item(uid, relic_id, 1)
 
+        route_destinations = get_route_relic_destinations(relic_id, adventure)
+        if route_destinations:
+            queue_terrain_choice(adventure, route_destinations, "relic", get_adventure_item_name(relic_id))
         if relic_is_new:
             adventure["pending_name_item_id"] = relic_id
 
-    try:
-        add_quest_progress(uid, "hunt_count", 1)
-        add_quest_progress(uid, "hunt_win", 1)
-        add_quest_progress(uid, "mora_earned", reward)
-        add_quest_progress(uid, "level", user["level"], mode="max")
-        sync_hunt_level_quests(uid)
-    except Exception as error:
-        print("모험 퀘스트 반영 실패:", error)
+    boss_routes = []
+    if is_boss:
+        defeated = adventure.setdefault("defeated_bosses", [])
+        if terrain_key not in defeated:
+            defeated.append(terrain_key)
+        boss_routes = valid_terrain_destinations(terrain_key)
+        queue_terrain_choice(adventure, boss_routes, "boss", monster["name"])
 
     save_data()
 
     result_lines = [
         f"✅ **Lv.{battle_level} {display_name}** 처치!",
+        f"등급: **{tier_info['name']}**",
         f"승률: **{win_chance}%**",
-        f"마력 폭주: **{'발동됨' if magic_activated else '발동 안 됨'}**",
+        f"{get_adventure_equipment_text(adventure)}",
         "",
         f"💰 **{reward:,}모라**",
-        f"⭐ **{exp} EXP**",
+        f"⭐ 모험 경험치 **{exp} EXP**",
         f"🎒 {get_adventure_item_line(loot_id, loot_amount)}",
     ]
 
+    if equipment_drop:
+        equipment_emoji = "🗡️" if equipment_drop["kind"] == "weapon" else "🛡️"
+        result_lines.append(
+            f"{equipment_emoji} 새 장비 발견: **{equipment_drop['name']}** "
+            f"(승률 보너스 +{equipment_drop['bonus']})"
+        )
+
     if leveled:
-        result_lines.append(f"\n🎉 레벨 업! 현재 **Lv.{user['level']}**")
-        result_lines.append(f"스탯 포인트 **{leveled * 5}** 획득!")
+        result_lines.append(f"\n🎉 모험 레벨 업! 현재 **Lv.{adventure['level']}**")
 
     if relic_id:
         result_lines.append(f"\n✨ 추가 발견: {get_adventure_item_line(relic_id)}")
         if relic_is_new:
             result_lines.append("최초 발견 유물이야. 이름을 지어줘!")
+        if get_route_relic_destinations(relic_id, adventure):
+            result_lines.append("🔮 유물이 숨겨진 지형으로 이어지는 길을 열었어!")
+
+    if is_boss:
+        if boss_routes:
+            result_lines.append("\n🗺️ 보스가 지키던 갈림길이 열렸어!")
+        else:
+            result_lines.append("\n🏆 이 지형의 최종 지배자를 쓰러뜨렸어!")
+        victory_title = f"👑 {terrain['name']} 보스 격파!"
+        victory_color = discord.Color.gold()
+    elif monster_tier == "calamity":
+        victory_title = "🏆 재앙급 몬스터 격파!"
+        victory_color = discord.Color.gold()
+    elif monster_tier == "elite":
+        victory_title = "🔥 강적 격파!"
+        victory_color = discord.Color.green()
+    else:
+        victory_title = "⚔️ 전투 승리!"
+        victory_color = discord.Color.green()
 
     embed = discord.Embed(
-        title="⚔️ 전투 승리!",
+        title=victory_title,
         description="\n".join(result_lines),
-        color=discord.Color.green(),
+        color=victory_color,
     )
 
-    view = RelicNamingView(uid) if relic_is_new else AdventureTravelView(uid)
+    if relic_is_new:
+        view = RelicNamingView(uid)
+    elif adventure.get("pending_event", {}).get("type") == "terrain_choice":
+        view = AdventureTerrainChoiceView(uid, adventure["pending_event"].get("destinations", []))
+    else:
+        view = AdventureTravelView(uid)
     await message.edit(embed=embed, view=view)
 
 
@@ -9039,11 +9840,7 @@ async def resolve_adventure_escape(message, member):
         await message.edit(content="도망칠 상대가 없어.", embed=None, view=AdventureTravelView(uid))
         return
 
-    user = get_hunt_user(uid)
-    dex = get_stat(user, "dex")
-    escape_bonus = adventure.get("boosts", {}).get("escape", 0)
-    escape_chance = max(20, min(92, int(55 + dex * 0.25 + escape_bonus)))
-
+    escape_chance = calc_adventure_escape_chance(adventure)
     adventure["pending_event"] = None
 
     if random.randint(1, 100) <= escape_chance:
@@ -9051,7 +9848,8 @@ async def resolve_adventure_escape(message, member):
         embed = discord.Embed(
             title="💨 도주 성공!",
             description=(
-                f"도주 확률 **{escape_chance}%**\n\n"
+                f"도주 확률 **{escape_chance}%**\n"
+                f"{get_adventure_equipment_text(adventure)}\n\n"
                 "몬스터가 쫓아오기 전에 무사히 빠져나왔어."
             ),
             color=discord.Color.blue(),
@@ -9066,6 +9864,205 @@ async def resolve_adventure_escape(message, member):
         adventure,
         f"도주에 실패했어. 성공 확률은 **{escape_chance}%**였어.",
     )
+
+
+class AdventureStartTerrainView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+
+        for terrain_key in ADVENTURE_START_TERRAINS:
+            terrain = get_terrain_info(terrain_key)
+            button = discord.ui.Button(
+                label=f"{terrain['emoji']} {terrain['name']}",
+                style=discord.ButtonStyle.primary,
+            )
+
+            async def callback(interaction, selected=terrain_key):
+                if not await check_adventure_owner(interaction, self.user_id):
+                    return
+
+                adventure = get_adventure(self.user_id)
+                if adventure.get("active"):
+                    await interaction.response.send_message("이미 모험 중이야.", ephemeral=True)
+                    return
+
+                adventure = start_new_adventure(self.user_id, selected)
+                terrain_info = get_terrain_info(selected)
+                embed = build_adventure_status_embed(
+                    interaction.user,
+                    adventure,
+                    title=f"{terrain_info['emoji']} {terrain_info['name']}으로 모험을 떠나는 중...",
+                )
+                embed.description += f"\n\n{terrain_info['description']}"
+                await interaction.response.edit_message(embed=embed, view=None)
+                await asyncio.sleep(random.uniform(1.2, 2.0))
+                await roll_adventure_event(interaction.message, interaction.user)
+
+            button.callback = callback
+            self.add_item(button)
+
+
+class AdventureTerrainChoiceView(discord.ui.View):
+    def __init__(self, user_id, destinations):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+        adventure = get_adventure(self.user_id)
+        source = adventure.get("terrain") or "grassland"
+        self.destinations = valid_terrain_destinations(source, destinations)
+
+        for destination in self.destinations:
+            terrain = get_terrain_info(destination)
+            style = discord.ButtonStyle.danger if destination == "demon" else discord.ButtonStyle.success
+            if destination == "heaven":
+                style = discord.ButtonStyle.primary
+
+            button = discord.ui.Button(label=f"{terrain['emoji']} {terrain['name']}", style=style)
+
+            async def callback(interaction, selected=destination):
+                if not await check_adventure_owner(interaction, self.user_id):
+                    return
+
+                adventure = get_adventure(self.user_id)
+                pending = adventure.get("pending_event") or {}
+                source_key = adventure.get("terrain") or "grassland"
+                allowed = valid_terrain_destinations(source_key, pending.get("destinations", self.destinations))
+                if selected not in allowed:
+                    await interaction.response.send_message("그 길은 이미 닫혔어.", ephemeral=True)
+                    return
+
+                adventure["terrain"] = selected
+                adventure["terrain_steps"] = 0
+                adventure["pending_event"] = None
+                visited = adventure.setdefault("visited_terrains", [])
+                if not visited or visited[-1] != selected:
+                    visited.append(selected)
+                save_data()
+
+                terrain_info = get_terrain_info(selected)
+                embed = build_adventure_status_embed(
+                    interaction.user,
+                    adventure,
+                    title=f"{terrain_info['emoji']} {terrain_info['name']}에 도착했다!",
+                )
+                embed.description += f"\n\n{terrain_info['description']}"
+                await interaction.response.edit_message(embed=embed, view=AdventureTravelView(self.user_id))
+
+            button.callback = callback
+            self.add_item(button)
+
+        stay_button = discord.ui.Button(label="📍 현재 지형에 남기", style=discord.ButtonStyle.secondary)
+
+        async def stay_callback(interaction):
+            if not await check_adventure_owner(interaction, self.user_id):
+                return
+            adventure = get_adventure(self.user_id)
+            adventure["pending_event"] = None
+            save_data()
+            embed = build_adventure_status_embed(interaction.user, adventure, title="📍 현재 길을 계속 탐험한다")
+            await interaction.response.edit_message(embed=embed, view=AdventureTravelView(self.user_id))
+
+        stay_button.callback = stay_callback
+        self.add_item(stay_button)
+
+
+def build_adventure_equipment_embed(member, uid):
+    adventure = get_adventure(uid)
+    weapon = adventure.get("weapon", "무인검")
+    armor = adventure.get("armor", "모험가 세트")
+
+    embed = discord.Embed(
+        title=f"🧰 {member.display_name}의 모험 장비",
+        description=(
+            "아래 선택 메뉴에서 모험 중 발견한 장비를 즉시 교체할 수 있어.\n"
+            "전투 직전에 바꿔도 실제 승률에 바로 반영돼.\n"
+            "장비는 돈으로 살 수 없고, 병원행이면 기본 장비만 남아.\n\n"
+            f"🎖️ 모험 레벨: **Lv.{adventure['level']}**\n"
+            f"🗡️ 현재 무기: **{weapon}** (+{WEAPONS[weapon]['bonus']})\n"
+            f"🛡️ 현재 갑옷: **{armor}** (+{ARMORS[armor]['bonus']})\n\n"
+            f"보유 무기: **{len(adventure['owned_weapons'])}개**\n"
+            f"보유 갑옷: **{len(adventure['owned_armors'])}개**"
+        ),
+        color=discord.Color.dark_teal(),
+    )
+    embed.set_footer(text="새 장비는 모험 전투 보상으로만 획득 가능")
+    return embed
+
+
+class AdventureWeaponSelect(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = str(user_id)
+        adventure = get_adventure(self.user_id)
+        current = adventure.get("weapon", "무인검")
+        options = [
+            discord.SelectOption(
+                label=name,
+                description=f"승률 보너스 +{WEAPONS[name]['bonus']}",
+                default=(name == current),
+            )
+            for name in adventure.get("owned_weapons", ["무인검"])
+            if name in WEAPONS
+        ][:25]
+        super().__init__(placeholder="🗡️ 장착할 무기 선택", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        selected = self.values[0]
+        if selected not in adventure.get("owned_weapons", []):
+            await interaction.response.send_message("보유하지 않은 모험 무기야.", ephemeral=True)
+            return
+
+        adventure["weapon"] = selected
+        save_data()
+        await interaction.response.edit_message(
+            embed=build_adventure_equipment_embed(interaction.user, self.user_id),
+            view=AdventureEquipmentView(self.user_id),
+        )
+
+
+class AdventureArmorSelect(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = str(user_id)
+        adventure = get_adventure(self.user_id)
+        current = adventure.get("armor", "모험가 세트")
+        options = [
+            discord.SelectOption(
+                label=name,
+                description=f"승률 보너스 +{ARMORS[name]['bonus']}",
+                default=(name == current),
+            )
+            for name in adventure.get("owned_armors", ["모험가 세트"])
+            if name in ARMORS
+        ][:25]
+        super().__init__(placeholder="🛡️ 장착할 갑옷 선택", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        selected = self.values[0]
+        if selected not in adventure.get("owned_armors", []):
+            await interaction.response.send_message("보유하지 않은 모험 갑옷이야.", ephemeral=True)
+            return
+
+        adventure["armor"] = selected
+        save_data()
+        await interaction.response.edit_message(
+            embed=build_adventure_equipment_embed(interaction.user, self.user_id),
+            view=AdventureEquipmentView(self.user_id),
+        )
+
+
+class AdventureEquipmentView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+        self.add_item(AdventureWeaponSelect(self.user_id))
+        self.add_item(AdventureArmorSelect(self.user_id))
 
 
 class AdventureTravelView(discord.ui.View):
@@ -9097,6 +10094,17 @@ class AdventureTravelView(discord.ui.View):
         async with lock:
             await send_adventure_travel_animation(interaction, uid)
 
+    @discord.ui.button(label="🧰 장비 변경", style=discord.ButtonStyle.success)
+    async def change_equipment(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        await interaction.response.send_message(
+            embed=build_adventure_equipment_embed(interaction.user, self.user_id),
+            view=AdventureEquipmentView(self.user_id),
+            ephemeral=True,
+        )
+
     @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
     async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
@@ -9117,7 +10125,8 @@ class AdventureTravelView(discord.ui.View):
                 f"👣 진행: **{summary['steps']}회**\n"
                 f"⚔️ 처치: **{summary['kills']}마리**\n"
                 f"💰 획득: **{summary['earned_mora']:,}모라**\n"
-                f"⏱️ 모험 시간: **{summary['minutes']:.1f}분**\n\n"
+                f"⏱️ 모험 시간: **{summary['minutes']:.1f}분**\n"
+                f"🗺️ 마지막 지형: **{get_terrain_name(summary.get('terrain'))}**\n\n"
                 "가방의 전리품은 그대로 보관돼."
             ),
             color=discord.Color.green(),
@@ -9158,6 +10167,17 @@ class AdventureBattleView(discord.ui.View):
 
             await asyncio.sleep(1.4)
             await resolve_adventure_battle(message, interaction.user)
+
+    @discord.ui.button(label="🧰 장비 변경", style=discord.ButtonStyle.success)
+    async def change_equipment(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        await interaction.response.send_message(
+            embed=build_adventure_equipment_embed(interaction.user, self.user_id),
+            view=AdventureEquipmentView(self.user_id),
+            ephemeral=True,
+        )
 
     @discord.ui.button(label="💨 도망가기", style=discord.ButtonStyle.secondary)
     async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -9249,7 +10269,16 @@ class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
             ),
             color=discord.Color.gold(),
         )
-        await interaction.response.edit_message(embed=embed, view=AdventureTravelView(uid))
+        pending = adventure.get("pending_event") or {}
+        if pending.get("type") == "terrain_choice":
+            if pending.get("reason") == "relic":
+                pending["detail"] = clean_name
+                save_data()
+            view = AdventureTerrainChoiceView(uid, pending.get("destinations", []))
+            embed.description += "\n\n🔮 이름을 얻은 유물이 반응하며 지형을 바꿀 수 있는 길이 열렸어!"
+        else:
+            view = AdventureTravelView(uid)
+        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class RelicNamingView(discord.ui.View):
@@ -9272,13 +10301,19 @@ class RelicNamingView(discord.ui.View):
         if item_id in discovered_items:
             adventure["pending_name_item_id"] = None
             save_data()
+            pending = adventure.get("pending_event") or {}
+            view = (
+                AdventureTerrainChoiceView(self.user_id, pending.get("destinations", []))
+                if pending.get("type") == "terrain_choice"
+                else AdventureTravelView(self.user_id)
+            )
             await interaction.response.edit_message(
                 embed=discord.Embed(
                     title="이름 등록 완료",
                     description=f"누군가 먼저 **{get_adventure_item_name(item_id)}**(으)로 등록했어.",
                     color=discord.Color.gold(),
                 ),
-                view=AdventureTravelView(self.user_id),
+                view=view,
             )
             return
 
@@ -9434,7 +10469,7 @@ def build_relic_dex_embed(page=0):
     return embed, total_pages
 
 
-@bot.tree.command(name="모험", description="푸리나와 함께 모험을 시작하거나 이어간다", guild=GUILD)
+@bot.tree.command(name="모험", description="푸리나와 함께 지형을 넘나드는 모험을 시작하거나 이어간다", guild=GUILD)
 async def adventure_command(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     adventure = get_adventure(uid)
@@ -9455,19 +10490,45 @@ async def adventure_command(interaction: discord.Interaction):
             await interaction.response.send_message(embed=embed, view=RelicNamingView(uid))
             return
 
+        if pending_event and pending_event.get("type") == "terrain_choice":
+            await interaction.response.send_message(
+                embed=build_terrain_choice_embed(adventure),
+                view=AdventureTerrainChoiceView(uid, pending_event.get("destinations", [])),
+            )
+            return
+
         if pending_event and pending_event.get("type") == "monster":
-            monster = find_monster_by_name(pending_event.get("monster_name"))
+            monster = find_adventure_monster_by_name(pending_event.get("monster_name"))
             trait = get_trait_by_name(pending_event.get("trait_name"))
 
             if monster:
-                display_name = f"{trait['name']} {monster['name']}" if trait else monster["name"]
+                monster_tier = pending_event.get("monster_tier", "normal")
+                display_name = format_adventure_monster_name(monster["name"], trait, monster_tier)
+                terrain = get_terrain_info(pending_event.get("terrain") or adventure.get("terrain"))
+
+                if pending_event.get("is_boss"):
+                    resume_title = f"👑 {terrain['name']}의 보스전이 아직 끝나지 않았어!"
+                    resume_color = discord.Color.dark_gold()
+                elif monster_tier == "calamity":
+                    resume_title = "☠️ 재앙급 전투가 아직 끝나지 않았어!"
+                    resume_color = discord.Color.dark_red()
+                elif monster_tier == "elite":
+                    resume_title = "🔥 강적과의 전투가 아직 끝나지 않았어!"
+                    resume_color = discord.Color.red()
+                else:
+                    resume_title = "⚔️ 전투가 아직 끝나지 않았어!"
+                    resume_color = discord.Color.orange()
+
                 embed = discord.Embed(
-                    title="⚔️ 전투가 아직 끝나지 않았어!",
+                    title=resume_title,
                     description=(
+                        f"지형: **{terrain['emoji']} {terrain['name']}**\n"
                         f"**Lv.{pending_event['monster_level']} {display_name}**\n\n"
+                        f"내 모험 레벨: **Lv.{adventure['level']}**\n"
+                        f"{get_adventure_equipment_text(adventure)}\n\n"
                         "전투를 시작하거나 도망가야 해."
                     ),
-                    color=discord.Color.orange(),
+                    color=resume_color,
                 )
                 await interaction.response.send_message(embed=embed, view=AdventureBattleView(uid))
                 return
@@ -9479,20 +10540,23 @@ async def adventure_command(interaction: discord.Interaction):
         await interaction.response.send_message(embed=embed, view=AdventureTravelView(uid))
         return
 
-    adventure = start_new_adventure(uid)
+    lines = []
+    for terrain_key in ADVENTURE_START_TERRAINS:
+        terrain = get_terrain_info(terrain_key)
+        lines.append(f"{terrain['emoji']} **{terrain['name']}** — {terrain['description']}")
 
-    embed = build_adventure_status_embed(
-        interaction.user,
-        adventure,
-        title="🌲 모험을 떠나는 중...",
+    embed = discord.Embed(
+        title="🧭 첫 모험 지형을 선택해!",
+        description=(
+            "처음에는 사막, 초원, 정글 중 하나에서 출발할 수 있어.\n"
+            "모험 도중 보스 격파, 특정 유물, 희귀 갈림길을 통해 다른 지형으로 넘어가게 돼.\n\n"
+            + "\n\n".join(lines)
+            + "\n\n😈 마계는 고산지대 또는 얼음 지대에서만 진입 가능\n"
+            + "☁️ 천계는 마계에서만 진입 가능"
+        ),
+        color=discord.Color.blurple(),
     )
-    embed.description += "\n\n푸리나와 함께 도시 밖으로 발걸음을 옮겼어..."
-
-    await interaction.response.send_message(embed=embed)
-    message = await interaction.original_response()
-
-    await asyncio.sleep(random.uniform(1.5, 2.3))
-    await roll_adventure_event(message, interaction.user)
+    await interaction.response.send_message(embed=embed, view=AdventureStartTerrainView(uid))
 
 
 @bot.tree.command(name="가방", description="모험에서 얻은 전리품을 확인한다", guild=GUILD)
@@ -9509,6 +10573,86 @@ async def adventure_inventory_command(interaction: discord.Interaction):
 async def relic_dex_command(interaction: discord.Interaction):
     embed, _ = build_relic_dex_embed(0)
     await interaction.response.send_message(embed=embed, view=RelicDexView(0))
+
+
+@bot.tree.command(name="모험무기", description="발견한 모험 전용 무기를 확인하거나 장착한다", guild=GUILD)
+@app_commands.describe(이름="장착할 모험 전용 무기")
+async def adventure_weapon_command(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    adventure = get_adventure(uid)
+
+    if 이름 is None:
+        lines = []
+        for name, info in WEAPONS.items():
+            if adventure["weapon"] == name:
+                state = "✅ 장착 중"
+            elif name in adventure["owned_weapons"]:
+                state = "📦 발견함"
+            else:
+                state = "🔒 미발견"
+            lines.append(f"**{name}** — {state} / 승률 보너스 +{info['bonus']}")
+        embed = discord.Embed(title="🗡️ 모험 전용 무기", description="\n".join(lines), color=discord.Color.dark_gold())
+        embed.set_footer(text="무기는 구매 불가 · 모험 전투 보상으로만 발견 가능")
+        await interaction.response.send_message(embed=embed)
+        return
+
+    if 이름 not in WEAPONS:
+        await interaction.response.send_message("❌ 그런 모험 무기는 없어.", ephemeral=True)
+        return
+    if 이름 not in adventure["owned_weapons"]:
+        await interaction.response.send_message("🔒 아직 발견하지 못한 무기야. 모험에서 직접 찾아야 해.", ephemeral=True)
+        return
+    adventure["weapon"] = 이름
+    save_data()
+    await interaction.response.send_message(f"🗡️ 모험 무기를 **{이름}**(으)로 교체했어.")
+
+
+@adventure_weapon_command.autocomplete("이름")
+async def adventure_weapon_autocomplete(interaction: discord.Interaction, current: str):
+    adventure = get_adventure(interaction.user.id)
+    current = current.lower().strip()
+    names = [name for name in adventure.get("owned_weapons", ["무인검"]) if name in WEAPONS and current in name.lower()][:25]
+    return [app_commands.Choice(name=name, value=name) for name in names]
+
+
+@bot.tree.command(name="모험갑옷", description="발견한 모험 전용 갑옷을 확인하거나 장착한다", guild=GUILD)
+@app_commands.describe(이름="장착할 모험 전용 갑옷")
+async def adventure_armor_command(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    adventure = get_adventure(uid)
+
+    if 이름 is None:
+        lines = []
+        for name, info in ARMORS.items():
+            if adventure["armor"] == name:
+                state = "✅ 장착 중"
+            elif name in adventure["owned_armors"]:
+                state = "📦 발견함"
+            else:
+                state = "🔒 미발견"
+            lines.append(f"**{name}** — {state} / 승률 보너스 +{info['bonus']}")
+        embed = discord.Embed(title="🛡️ 모험 전용 갑옷", description="\n".join(lines), color=discord.Color.dark_teal())
+        embed.set_footer(text="갑옷은 구매 불가 · 모험 전투 보상으로만 발견 가능")
+        await interaction.response.send_message(embed=embed)
+        return
+
+    if 이름 not in ARMORS:
+        await interaction.response.send_message("❌ 그런 모험 갑옷은 없어.", ephemeral=True)
+        return
+    if 이름 not in adventure["owned_armors"]:
+        await interaction.response.send_message("🔒 아직 발견하지 못한 갑옷이야. 모험에서 직접 찾아야 해.", ephemeral=True)
+        return
+    adventure["armor"] = 이름
+    save_data()
+    await interaction.response.send_message(f"🛡️ 모험 갑옷을 **{이름}**(으)로 교체했어.")
+
+
+@adventure_armor_command.autocomplete("이름")
+async def adventure_armor_autocomplete(interaction: discord.Interaction, current: str):
+    adventure = get_adventure(interaction.user.id)
+    current = current.lower().strip()
+    names = [name for name in adventure.get("owned_armors", ["모험가 세트"]) if name in ARMORS and current in name.lower()][:25]
+    return [app_commands.Choice(name=name, value=name) for name in names]
 
 
 @bot.tree.command(name="모험상점", description="모험용 아이템을 구매하거나 장착한다", guild=GUILD)
@@ -9618,17 +10762,23 @@ async def adventure_record_command(interaction: discord.Interaction):
     embed = discord.Embed(
         title=f"🏆 {interaction.user.display_name}의 모험 기록",
         description=(
+            f"모험 레벨: **Lv.{adventure['level']}** "
+            f"({adventure['exp']}/{get_adventure_required_exp(adventure['level'])} EXP)\n"
+            f"현재 무기: **{adventure['weapon']}**\n"
+            f"현재 갑옷: **{adventure['armor']}**\n"
+            f"레벨 자동 승률 보너스: **+{min(ADVENTURE_LEVEL_WIN_BONUS_CAP, max(0, adventure['level'] - 1) * ADVENTURE_LEVEL_WIN_BONUS):.1f}%**\n\n"
             f"최고 진행: **{adventure['best_steps']}회**\n"
             f"한 모험 최고 처치: **{adventure['best_kills']}마리**\n"
             f"누적 처치: **{adventure['total_kills']}마리**\n"
             f"완료한 모험: **{adventure['total_runs']}회**\n"
+            f"최고 도달 지형 단계: **{adventure.get('best_terrain_rank', 0)}/6**\n"
+            f"현재 지형: **{get_terrain_name(adventure.get('terrain')) if adventure['active'] else '없음'}**\n"
             f"현재 상태: **{'모험 중' if adventure['active'] else '대기 중'}**"
         ),
         color=discord.Color.purple(),
     )
     await interaction.response.send_message(embed=embed)
 
-    
 @bot.event
 async def on_ready():
     if not ranking_update_loop.is_running():
