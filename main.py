@@ -98,7 +98,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global (data,poker_money,poker_last_claim,favor,user_memory,characters,hunt_users,weapons,primogems,quests,achievements,character_pity,levels,checkin,warnings,warehouses,warehouse_last_tax,adventures,inventories,discovered_items,shop_items)
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, shop_items
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
