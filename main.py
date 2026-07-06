@@ -8126,14 +8126,27 @@ ADVENTURE_MONSTER_EVENT_RATE = 35.0
 ADVENTURE_MONSTER_PITY_PER_TURN = 15.0
 ADVENTURE_MONSTER_EVENT_RATE_MAX = 80.0
 
-# 모험 한 턴은 실제로 1~5분 동안 진행된다.
-# 긴 asyncio.sleep 대신 완료 시각을 저장하고, 유저가 상황 확인 버튼으로 결과를 연다.
+# 턴 대기 시간은 연출용일 뿐이며 몬스터 난이도에는 절대 반영되지 않는다.
 ADVENTURE_TURN_MIN_SECONDS = 5
 ADVENTURE_TURN_MAX_SECONDS = 20
 
+# 몬스터는 오직 완료한 턴 수에 따라 조금씩 강해진다.
+# 1턴당 위험도 0.70, 실제 몬스터 목표 레벨에는 위험도의 0.65배가 반영된다.
+ADVENTURE_DANGER_PER_TURN = 0.70
+ADVENTURE_MONSTER_DANGER_LEVEL_MUL = 0.65
+
+# 모험 몬스터 전용 너프 수치. /사냥 몬스터 밸런스에는 영향을 주지 않는다.
+ADVENTURE_BASE_WIN_CHANCE = 56
+ADVENTURE_MONSTER_PENALTY_MUL = 0.32
+ADVENTURE_MONSTER_PENALTY_BASE_CAP = 12
+ADVENTURE_MONSTER_PENALTY_PER_LEVEL_CAP = 1.4
+ADVENTURE_EXTRA_LEVEL_PENALTY_MUL = 0.35
+ADVENTURE_TRAIT_POWER_SCALE = 0.55
+ADVENTURE_BOSS_LEVEL_BONUS = 4
+
 # 모험 레벨은 스탯 배분 없이 자동으로 승률을 올린다.
-ADVENTURE_LEVEL_WIN_BONUS = 0.6
-ADVENTURE_LEVEL_WIN_BONUS_CAP = 30.0
+ADVENTURE_LEVEL_WIN_BONUS = 0.7
+ADVENTURE_LEVEL_WIN_BONUS_CAP = 35.0
 
 # 전투 승리 시 모험 장비 발견 확률. 장비는 돈으로 구매할 수 없다.
 ADVENTURE_EQUIPMENT_DROP_RATES = {
@@ -8158,8 +8171,8 @@ ADVENTURE_MONSTER_TIERS = {
     "elite": {
         "name": "강적",
         "prefix": "🔥 강적",
-        "level_mul": 1.35,
-        "level_flat": 3,
+        "level_mul": 1.18,
+        "level_flat": 2,
         "reward_mul": 2.2,
         "exp_mul": 2.0,
         "loot_bonus": 1,
@@ -8167,8 +8180,8 @@ ADVENTURE_MONSTER_TIERS = {
     "calamity": {
         "name": "재앙급",
         "prefix": "☠️ 재앙급",
-        "level_mul": 2.6,
-        "level_flat": 15,
+        "level_mul": 1.70,
+        "level_flat": 8,
         "reward_mul": 8.0,
         "exp_mul": 8.0,
         "loot_bonus": 3,
@@ -8211,8 +8224,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "🌴",
         "color": 0x247A46,
         "description": "빛조차 잘 들지 않는 밀림. 독기와 짐승의 울음이 가득하다.",
-        "danger_mul": 1.08,
-        "danger_flat": 2,
+        "danger_mul": 1.04,
+        "danger_flat": 1,
         "reward_mul": 1.12,
         "boss": "아펩의 수호자",
         "monsters": [
@@ -8225,8 +8238,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "🕳️",
         "color": 0x5B4B66,
         "description": "지하 깊은 곳으로 이어지는 동굴. 오래된 기계음이 메아리친다.",
-        "danger_mul": 1.18,
-        "danger_flat": 8,
+        "danger_mul": 1.10,
+        "danger_flat": 4,
         "reward_mul": 1.22,
         "boss": "유적 서펜트",
         "monsters": [
@@ -8239,8 +8252,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "⛰️",
         "color": 0x73808F,
         "description": "숨이 가빠지는 높은 산맥. 강풍 너머로 낯선 문이 보인다.",
-        "danger_mul": 1.30,
-        "danger_flat": 15,
+        "danger_mul": 1.16,
+        "danger_flat": 8,
         "reward_mul": 1.38,
         "boss": "영겁의 드레이크",
         "monsters": [
@@ -8253,8 +8266,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "❄️",
         "color": 0x8ED6EA,
         "description": "모든 것이 얼어붙은 땅. 발을 멈추면 냉기가 뼛속까지 스민다.",
-        "danger_mul": 1.45,
-        "danger_flat": 25,
+        "danger_mul": 1.24,
+        "danger_flat": 12,
         "reward_mul": 1.55,
         "boss": "황금 늑대왕",
         "monsters": [
@@ -8267,8 +8280,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "😈",
         "color": 0x6C1738,
         "description": "붉은 하늘 아래 마력이 끓어오르는 세계. 약한 자는 존재조차 버티지 못한다.",
-        "danger_mul": 2.0,
-        "danger_flat": 70,
+        "danger_mul": 1.45,
+        "danger_flat": 25,
         "reward_mul": 2.4,
         "boss": "마왕",
         "monsters": [
@@ -8281,8 +8294,8 @@ ADVENTURE_TERRAINS = {
         "emoji": "☁️",
         "color": 0xF2D77A,
         "description": "구름 위 신성한 세계. 아름답지만 허락받지 않은 자에겐 가장 잔혹하다.",
-        "danger_mul": 2.45,
-        "danger_flat": 105,
+        "danger_mul": 1.65,
+        "danger_flat": 40,
         "reward_mul": 3.2,
         "boss": "천리의 유지자",
         "monsters": [
@@ -8636,19 +8649,29 @@ def calc_adventure_win_chance(adventure, monster, monster_level, trait=None):
         max(0, player_level - 1) * ADVENTURE_LEVEL_WIN_BONUS,
     )
 
-    chance = 48
+    # 모험 전투만 별도로 완화한다. /사냥의 몬스터 수치는 그대로 유지된다.
+    raw_monster_penalty = monster.get("penalty", monster.get("peanlty", 0))
+    penalty_cap = (
+        ADVENTURE_MONSTER_PENALTY_BASE_CAP
+        + monster_level * ADVENTURE_MONSTER_PENALTY_PER_LEVEL_CAP
+    )
+    monster_penalty = min(raw_monster_penalty, penalty_cap)
+
+    chance = ADVENTURE_BASE_WIN_CHANCE
     chance += level_bonus
-    chance += (player_level - monster_level) * 2.2
-    chance += weapon_bonus * 0.8
-    chance += armor_bonus * 0.6
-    chance -= monster["penalty"] * 0.6
-    chance -= max(0, monster_level - player_level) * 0.6
+    chance += (player_level - monster_level) * 2.4
+    chance += weapon_bonus * 0.9
+    chance += armor_bonus * 0.7
+    chance -= monster_penalty * ADVENTURE_MONSTER_PENALTY_MUL
+    chance -= max(0, monster_level - player_level) * ADVENTURE_EXTRA_LEVEL_PENALTY_MUL
     chance += adventure.get("boosts", {}).get("battle", 0)
 
     if trait:
-        chance /= trait.get("monster_power", 1)
+        raw_power = max(0.1, float(trait.get("monster_power", 1)))
+        softened_power = 1 + (raw_power - 1) * ADVENTURE_TRAIT_POWER_SCALE
+        chance /= max(0.25, softened_power)
 
-    return max(3, min(97, int(chance)))
+    return max(8, min(97, int(chance)))
 
 
 def calc_adventure_escape_chance(adventure):
@@ -8945,8 +8968,9 @@ def adventure_elapsed_minutes(adventure):
 
 
 def adventure_danger(adventure):
-    # 실제 시간과 진행 횟수가 모두 위험도에 반영됨
-    return adventure_elapsed_minutes(adventure) + adventure.get("steps", 0) * 1.4
+    # 실제 시간은 무시하고 완료한 턴 수만 위험도에 반영한다.
+    steps = max(0, int(adventure.get("steps", 0)))
+    return steps * ADVENTURE_DANGER_PER_TURN
 
 
 def start_new_adventure(uid, terrain_key):
@@ -9073,7 +9097,14 @@ def pick_adventure_monster(adventure, tier_name="normal", force_boss=False):
 
     normal_target = max(
         1,
-        int((adventure["level"] + danger * 0.75 + terrain["danger_flat"]) * terrain["danger_mul"]),
+        int(
+            (
+                adventure["level"]
+                + danger * ADVENTURE_MONSTER_DANGER_LEVEL_MUL
+                + terrain["danger_flat"]
+            )
+            * terrain["danger_mul"]
+        ),
     )
     tier = get_adventure_monster_tier(tier_name)
 
@@ -9116,9 +9147,10 @@ def pick_adventure_monster(adventure, tier_name="normal", force_boss=False):
         is_boss = False
 
     if is_boss:
-        target_level = max(target_level + 8, int(monster["min"] * 1.1))
-        low = max(1, target_level - 2)
-        high = target_level + 4
+        # 전역 몬스터의 최소 레벨을 강제하지 않고 현재 턴 진행도에 맞춘다.
+        target_level += ADVENTURE_BOSS_LEVEL_BONUS
+        low = max(1, target_level - 3)
+        high = target_level + 2
     elif tier_name == "normal":
         low = max(monster["min"], target_level - 3)
         high = min(monster["max"], target_level + 3)
@@ -9312,7 +9344,7 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
             f"🎖️ 모험 레벨: **Lv.{adventure['level']}** "
             f"({adventure['exp']}/{get_adventure_required_exp(adventure['level'])} EXP)\n"
             f"{get_adventure_equipment_text(adventure)}\n"
-            f"⏱️ 경과 시간: **{elapsed:.1f}분**\n"
+            f"⏱️ 경과 시간: **{elapsed:.1f}분** *(난이도 영향 없음)*\n"
             f"👣 전체 진행: **{adventure['steps']}회**\n"
             f"🥾 현재 지형 진행: **{adventure.get('terrain_steps', 0)}회**\n"
             f"{turn_status}\n"
@@ -9327,7 +9359,7 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
         color=discord.Color(terrain["color"]),
     )
 
-    embed.set_footer(text=f"{terrain['description']} 시간과 진행 횟수가 늘수록 적이 강해진다.")
+    embed.set_footer(text=f"{terrain['description']} 실제 시간은 무관하며, 완료한 턴 수에 따라 적이 강해진다.")
     return embed
 
 
