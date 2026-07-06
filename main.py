@@ -8477,6 +8477,7 @@ def get_adventure(uid):
     defaults = {
         "active": False,
         "started_at": None,
+        "thread_id": None,
         "steps": 0,
         "kills": 0,
         "earned_mora": 0,
@@ -9028,6 +9029,8 @@ def finish_adventure(uid):
     adventure["total_runs"] = adventure.get("total_runs", 0) + 1
     adventure["active"] = False
     adventure["started_at"] = None
+    # 모험이 끝나면 다음 /모험에서 새 전용 스레드를 만들도록 연결을 끊는다.
+    adventure["thread_id"] = None
     adventure["turn_started_at"] = None
     adventure["turn_ready_at"] = None
     adventure["turn_duration_seconds"] = 0
@@ -10748,9 +10751,100 @@ def build_relic_dex_embed(page=0):
     return embed, total_pages
 
 
-@bot.tree.command(name="모험", description="푸리나와 함께 지형을 넘나드는 모험을 시작하거나 이어간다", guild=GUILD)
-async def adventure_command(interaction: discord.Interaction):
-    uid = str(interaction.user.id)
+async def get_saved_adventure_thread(guild, adventure):
+    """저장된 모험 스레드를 찾고, 보관 상태라면 다시 연다."""
+    thread_id = adventure.get("thread_id")
+    if not thread_id:
+        return None
+
+    try:
+        thread_id = int(thread_id)
+    except (TypeError, ValueError):
+        adventure["thread_id"] = None
+        save_data()
+        return None
+
+    thread = guild.get_thread(thread_id) or bot.get_channel(thread_id)
+
+    if thread is None:
+        try:
+            thread = await guild.fetch_channel(thread_id)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            thread = None
+
+    if not isinstance(thread, discord.Thread):
+        adventure["thread_id"] = None
+        save_data()
+        return None
+
+    if thread.archived:
+        try:
+            await thread.edit(archived=False, reason="진행 중인 모험 재개")
+        except (discord.Forbidden, discord.HTTPException):
+            return None
+
+    return thread
+
+
+def make_adventure_thread_name(member):
+    display_name = " ".join(member.display_name.split()).strip() or str(member.id)
+    return f"🧭 {display_name}의 모험"[:100]
+
+
+async def ensure_adventure_thread(interaction, adventure):
+    """진행 중인 스레드를 재사용하거나 새 공개 스레드를 만든다."""
+    current_channel = interaction.channel
+
+    # 저장된 스레드 안에서 다시 /모험을 친 경우 그대로 사용한다.
+    if (
+        isinstance(current_channel, discord.Thread)
+        and adventure.get("thread_id")
+        and str(current_channel.id) == str(adventure.get("thread_id"))
+    ):
+        if current_channel.archived:
+            await current_channel.edit(archived=False, reason="모험 재개")
+        return current_channel, False
+
+    saved_thread = await get_saved_adventure_thread(interaction.guild, adventure)
+    if saved_thread is not None:
+        return saved_thread, False
+
+    # 업데이트 전에 시작한 모험을 임의의 스레드에서 이어가는 경우 현재 스레드를 채택한다.
+    if adventure.get("active") and isinstance(current_channel, discord.Thread):
+        adventure["thread_id"] = current_channel.id
+        save_data()
+        return current_channel, False
+
+    parent_channel = (
+        current_channel.parent
+        if isinstance(current_channel, discord.Thread)
+        else current_channel
+    )
+
+    if not isinstance(parent_channel, discord.TextChannel):
+        raise RuntimeError("이 채널에서는 모험 스레드를 만들 수 없어. 일반 텍스트 채널에서 /모험을 사용해 줘.")
+
+    thread = await parent_channel.create_thread(
+        name=make_adventure_thread_name(interaction.user),
+        type=discord.ChannelType.public_thread,
+        auto_archive_duration=1440,
+        reason=f"{interaction.user}의 모험 전용 스레드",
+    )
+
+    adventure["thread_id"] = thread.id
+    save_data()
+
+    # 공개 스레드라 없어도 들어갈 수 있지만, 가능한 경우 사용자를 바로 참여시킨다.
+    try:
+        await thread.add_user(interaction.user)
+    except (discord.Forbidden, discord.HTTPException):
+        pass
+
+    return thread, True
+
+
+async def send_adventure_screen(channel, member, uid):
+    """현재 모험 상태에 맞는 화면을 반드시 모험 스레드에 출력한다."""
     adventure = get_adventure(uid)
 
     if adventure["active"]:
@@ -10766,11 +10860,11 @@ async def adventure_command(interaction: discord.Interaction):
                 ),
                 color=discord.Color.gold(),
             )
-            await interaction.response.send_message(embed=embed, view=RelicNamingView(uid))
+            await channel.send(embed=embed, view=RelicNamingView(uid))
             return
 
         if pending_event and pending_event.get("type") == "terrain_choice":
-            await interaction.response.send_message(
+            await channel.send(
                 embed=build_terrain_choice_embed(adventure),
                 view=AdventureTerrainChoiceView(uid, pending_event.get("destinations", [])),
             )
@@ -10809,22 +10903,19 @@ async def adventure_command(interaction: discord.Interaction):
                     ),
                     color=resume_color,
                 )
-                await interaction.response.send_message(embed=embed, view=AdventureBattleView(uid))
+                await channel.send(embed=embed, view=AdventureBattleView(uid))
                 return
 
             adventure["pending_event"] = None
             save_data()
 
         if adventure.get("turn_ready_at"):
-            embed = build_adventure_waiting_embed(interaction.user, adventure)
-            await interaction.response.send_message(
-                embed=embed,
-                view=AdventureTurnWaitingView(uid),
-            )
+            embed = build_adventure_waiting_embed(member, adventure)
+            await channel.send(embed=embed, view=AdventureTurnWaitingView(uid))
             return
 
-        embed = build_adventure_status_embed(interaction.user, adventure)
-        await interaction.response.send_message(embed=embed, view=AdventureTravelView(uid))
+        embed = build_adventure_status_embed(member, adventure)
+        await channel.send(embed=embed, view=AdventureTravelView(uid))
         return
 
     lines = []
@@ -10843,7 +10934,53 @@ async def adventure_command(interaction: discord.Interaction):
         ),
         color=discord.Color.blurple(),
     )
-    await interaction.response.send_message(embed=embed, view=AdventureStartTerrainView(uid))
+    await channel.send(embed=embed, view=AdventureStartTerrainView(uid))
+
+
+@bot.tree.command(name="모험", description="전용 스레드를 만들어 모험을 시작하거나 이어간다", guild=GUILD)
+async def adventure_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    await interaction.response.defer(ephemeral=True)
+
+    lock = get_adventure_lock(uid)
+    async with lock:
+        adventure = get_adventure(uid)
+
+        try:
+            thread, created = await ensure_adventure_thread(interaction, adventure)
+        except RuntimeError as error:
+            await interaction.followup.send(f"❌ {error}", ephemeral=True)
+            return
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ 스레드를 만들 권한이 없어. 봇에게 `공개 스레드 만들기`, "
+                "`스레드에서 메시지 보내기`, `스레드 관리` 권한을 줘.",
+                ephemeral=True,
+            )
+            return
+        except discord.HTTPException as error:
+            await interaction.followup.send(
+                f"❌ 모험 스레드를 만드는 중 오류가 났어: `{error}`",
+                ephemeral=True,
+            )
+            return
+
+        if created:
+            await thread.send(
+                f"{interaction.user.mention} 전용 모험 스레드야! "
+                "이 아래에 뜨는 버튼으로 계속 진행하면 돼."
+            )
+
+        await send_adventure_screen(thread, interaction.user, uid)
+
+    if interaction.channel_id == thread.id:
+        result_text = "🧭 현재 모험 화면을 이 스레드에 다시 띄웠어."
+    elif created:
+        result_text = f"🧭 모험 전용 스레드를 만들었어: {thread.mention}"
+    else:
+        result_text = f"🧭 진행 중인 모험 스레드로 이어졌어: {thread.mention}"
+
+    await interaction.followup.send(result_text, ephemeral=True)
 
 
 @bot.tree.command(name="가방", description="모험에서 얻은 전리품을 확인한다", guild=GUILD)
