@@ -14,6 +14,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from io import BytesIO
 import google.generativeai as genai
 import math
+import hashlib
 
 load_dotenv()
 
@@ -70,6 +71,7 @@ data = {
     "adventures": {},
     "inventories": {},
     "discovered_items": {},
+    "relic_upgrades": {},
     "shop_items": {}
 }
 
@@ -85,6 +87,7 @@ warnings = {}
 adventures = {}
 inventories = {}
 discovered_items = {}
+relic_upgrades = {}
 shop_items = {}
 
 def remove_poker_money(user_id, amount):
@@ -98,7 +101,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, shop_items
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, relic_upgrades, shop_items
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -111,6 +114,7 @@ def load_data():
         data["adventures"] = loaded.get("adventures", {})
         data["inventories"] = loaded.get("inventories", {})
         data["discovered_items"] = loaded.get("discovered_items", {})
+        data["relic_upgrades"] = loaded.get("relic_upgrades", {})
         data["shop_items"] = loaded.get("shop_items", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
@@ -146,6 +150,7 @@ def load_data():
     adventures = data["adventures"]
     inventories = data["inventories"]
     discovered_items = data["discovered_items"]
+    relic_upgrades = data["relic_upgrades"]
     shop_items = data["shop_items"]
     
     warehouses = data["warehouses"]
@@ -169,6 +174,7 @@ def save_data():
     data["adventures"] = adventures
     data["inventories"] = inventories
     data["discovered_items"] = discovered_items
+    data["relic_upgrades"] = relic_upgrades
     data["shop_items"] = shop_items
     data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
@@ -8119,6 +8125,122 @@ ADVENTURE_MAX_EQUIPPED = 3
 ADVENTURE_INVENTORY_PAGE_SIZE = 10
 ADVENTURE_RELIC_PAGE_SIZE = 10
 
+RELIC_MAX_ENHANCEMENT = 7
+
+# 디스코드는 일반 글자에 임의 색상을 넣을 수 없어서,
+# 상세 화면에서는 ANSI 색상 + 색상 이모지 + 임베드 색상을 함께 사용한다.
+RELIC_ENHANCEMENT_STYLES = {
+    0: {"emoji": "⚪", "name": "무강화", "color": 0x7F8C8D, "ansi": 37},
+    1: {"emoji": "🔴", "name": "빨강", "color": 0xE74C3C, "ansi": 31},
+    2: {"emoji": "🟠", "name": "주황", "color": 0xFF8C00, "ansi": 33},
+    3: {"emoji": "🟡", "name": "노랑", "color": 0xF1C40F, "ansi": 93},
+    4: {"emoji": "🟢", "name": "초록", "color": 0x2ECC71, "ansi": 32},
+    5: {"emoji": "🔵", "name": "파랑", "color": 0x3498DB, "ansi": 34},
+    6: {"emoji": "🔷", "name": "남색", "color": 0x4B0082, "ansi": 36},
+    7: {"emoji": "🟣", "name": "보라", "color": 0x9B59B6, "ansi": 35},
+}
+
+# 유물 등급별로 한 번의 강화에서 요구되는 재료 종류/기본 수량/성공률이 달라진다.
+# 실제 수량은 목표 강화 단계와 재료 자체의 희귀도까지 반영하여 고정 랜덤으로 계산된다.
+RELIC_UPGRADE_RULES = {
+    "uncommon": {
+        "type_range": (2, 3),
+        "amount_range": (2, 5),
+        "success": [90, 80, 70, 60, 50, 40, 30],
+    },
+    "rare": {
+        "type_range": (2, 4),
+        "amount_range": (3, 7),
+        "success": [85, 75, 65, 55, 45, 35, 25],
+    },
+    "epic": {
+        "type_range": (3, 4),
+        "amount_range": (4, 9),
+        "success": [80, 68, 56, 44, 34, 24, 16],
+    },
+    "legendary": {
+        "type_range": (3, 5),
+        "amount_range": (6, 12),
+        "success": [75, 62, 50, 38, 28, 18, 10],
+    },
+    "mythic": {
+        "type_range": (4, 6),
+        "amount_range": (8, 16),
+        "success": [70, 58, 46, 34, 24, 15, 8],
+    },
+}
+
+# 최초 발견자가 지은 이름에 아래 키워드가 포함되면 해당 계열 재료가 우선적으로 뽑힌다.
+# 그래도 매 단계 일부는 전체 전리품에서 뽑혀, 모든 모험 전리품이 강화 재료로 쓰일 수 있다.
+RELIC_MATERIAL_THEMES = {
+    "fire": {
+        "display": "화염",
+        "relic_keywords": ["불", "화", "화염", "염", "태양", "해", "열", "붉", "적", "용암"],
+        "material_keywords": ["불", "태양", "열풍", "핏빛", "붉은", "금빛", "새벽빛", "해질녘", "사막", "전갈"],
+        "terrains": ["desert", "demon"],
+    },
+    "ice": {
+        "display": "빙결",
+        "relic_keywords": ["얼음", "빙", "서리", "눈", "설", "한기", "극광"],
+        "material_keywords": ["얼음", "빙", "서리", "설원", "극광", "영구빙", "냉기"],
+        "terrains": ["ice"],
+    },
+    "wind": {
+        "display": "바람",
+        "relic_keywords": ["바람", "풍", "폭풍", "하늘", "구름", "날개", "깃"],
+        "material_keywords": ["바람", "폭풍", "구름", "날개", "깃", "독수리"],
+        "terrains": ["grassland", "mountain", "heaven"],
+    },
+    "water": {
+        "display": "물",
+        "relic_keywords": ["물", "바다", "해양", "심해", "파도", "비", "눈물", "청해"],
+        "material_keywords": ["물", "심해", "물방울", "조개", "이슬", "축축한", "푸른"],
+        "terrains": ["grassland", "cave", "ice"],
+    },
+    "earth": {
+        "display": "대지",
+        "relic_keywords": ["땅", "대지", "산", "암석", "돌", "바위", "광석", "철", "금"],
+        "material_keywords": ["광석", "결정", "모래", "철", "돌", "수정", "원석", "운철", "산맥"],
+        "terrains": ["desert", "cave", "mountain"],
+    },
+    "nature": {
+        "display": "자연",
+        "relic_keywords": ["숲", "초원", "풀", "꽃", "나무", "잎", "생명", "녹", "독"],
+        "material_keywords": ["약초", "버섯", "꽃", "뿌리", "잎", "나무", "열매", "씨앗", "이끼", "녹빛", "독"],
+        "terrains": ["grassland", "jungle"],
+    },
+    "dark": {
+        "display": "암흑",
+        "relic_keywords": ["어둠", "암흑", "심연", "악마", "마왕", "저주", "죽음", "검은", "밤"],
+        "material_keywords": ["암흑", "심연", "악마", "저주", "검은", "핏빛", "뼈", "응혈"],
+        "terrains": ["cave", "demon"],
+    },
+    "light": {
+        "display": "성광",
+        "relic_keywords": ["빛", "광명", "성광", "신성", "천사", "신", "별", "찬란", "새벽"],
+        "material_keywords": ["빛", "성광", "신성", "천사", "별", "찬란", "새벽빛", "금빛"],
+        "terrains": ["heaven"],
+    },
+    "beast": {
+        "display": "야수",
+        "relic_keywords": ["용", "늑대", "짐승", "야수", "사냥", "발톱", "송곳니", "뿔", "피"],
+        "material_keywords": ["용", "늑대", "짐승", "발톱", "송곳니", "뿔", "가죽", "뼈", "심장", "모피"],
+        "terrains": ["jungle", "mountain", "ice", "demon"],
+    },
+    "machine": {
+        "display": "기계",
+        "relic_keywords": ["기계", "유적", "철", "장치", "톱니", "매트릭스", "인형"],
+        "material_keywords": ["유적", "철편", "기계", "장치", "매트릭스", "드레이크", "파편", "핵"],
+        "terrains": ["desert", "cave", "mountain"],
+    },
+    "magic": {
+        "display": "마력",
+        "relic_keywords": ["마력", "마법", "정령", "정수", "핵", "결정", "수정", "신비"],
+        "material_keywords": ["마력", "정수", "핵", "결정", "수정", "원석", "가루", "진주"],
+        "terrains": ["cave", "demon", "heaven"],
+    },
+}
+
 # 한 번 이동했을 때 일반 몬스터를 만날 기본 확률.
 # 기본 35%이며, 몬스터가 나오지 않은 턴마다 15%p씩 올라 최대 80%가 된다.
 # 보스 출현 판정은 이 확률과 별개로 매 턴 진행된다.
@@ -8942,6 +9064,453 @@ def get_adventure_item_line(item_id, count=1):
     rarity = ADVENTURE_RARITIES[item["rarity"]]
     return f"{rarity['emoji']} **{get_adventure_item_name(item_id)}** ×{count}"
 
+
+
+def get_relic_upgrade_state(uid, item_id):
+    uid = str(uid)
+
+    if uid not in relic_upgrades or not isinstance(relic_upgrades[uid], dict):
+        relic_upgrades[uid] = {}
+
+    if item_id not in relic_upgrades[uid] or not isinstance(relic_upgrades[uid][item_id], dict):
+        relic_upgrades[uid][item_id] = {
+            "level": 0,
+            "attempts": 0,
+            "failures": 0,
+        }
+
+    state = relic_upgrades[uid][item_id]
+    state["level"] = max(0, min(RELIC_MAX_ENHANCEMENT, int(state.get("level", 0))))
+    state["attempts"] = max(0, int(state.get("attempts", 0)))
+    state["failures"] = max(0, int(state.get("failures", 0)))
+    return state
+
+
+def get_relic_enhancement_style(level):
+    level = max(0, min(RELIC_MAX_ENHANCEMENT, int(level)))
+    return RELIC_ENHANCEMENT_STYLES[level]
+
+
+def format_relic_name(uid, item_id, markdown=True):
+    state = get_relic_upgrade_state(uid, item_id)
+    level = state["level"]
+    style = get_relic_enhancement_style(level)
+    name = get_adventure_item_name(item_id)
+    suffix = f" +{level}" if level > 0 else ""
+    label = f"{style['emoji']} {name}{suffix}"
+    return f"**{label}**" if markdown else label
+
+
+def format_relic_ansi_name(uid, item_id):
+    """상세 화면에서 강화 단계에 맞는 ANSI 색상으로 유물 이름을 표시한다."""
+    state = get_relic_upgrade_state(uid, item_id)
+    level = state["level"]
+    style = get_relic_enhancement_style(level)
+    name = get_adventure_item_name(item_id)
+    suffix = f" +{level}" if level > 0 else ""
+    return f"```ansi\n\u001b[1;{style['ansi']}m{name}{suffix}\u001b[0m\n```"
+
+
+def get_owned_relic_entries(uid):
+    inventory = get_adventure_inventory(uid)
+    entries = []
+
+    for item_id, count in inventory.items():
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+        if not item or item.get("kind") != "relic" or int(count) <= 0:
+            continue
+        entries.append((item_id, int(count)))
+
+    entries.sort(
+        key=lambda pair: (
+            -get_relic_upgrade_state(uid, pair[0])["level"],
+            -ADVENTURE_RARITY_ORDER[ADVENTURE_ITEM_CATALOG[pair[0]]["rarity"]],
+            get_adventure_item_name(pair[0]),
+        )
+    )
+    return entries
+
+
+def resolve_owned_relic_id(uid, query):
+    if not query:
+        return None
+
+    query = str(query).strip()
+    owned_ids = {item_id for item_id, _ in get_owned_relic_entries(uid)}
+    if query in owned_ids:
+        return query
+
+    normalized_query = normalize_item_name_for_filter(query)
+    for item_id in owned_ids:
+        if normalize_item_name_for_filter(get_adventure_item_name(item_id)) == normalized_query:
+            return item_id
+    return None
+
+
+def get_relic_name_themes(item_id):
+    name = normalize_item_name_for_filter(get_adventure_item_name(item_id))
+    matched = []
+
+    if name and name != normalize_item_name_for_filter("이름 없는 유물"):
+        for theme_key, theme in RELIC_MATERIAL_THEMES.items():
+            if any(normalize_item_name_for_filter(keyword) in name for keyword in theme["relic_keywords"]):
+                matched.append(theme_key)
+
+    if matched:
+        return matched
+
+    # 이름에 지정 키워드가 없더라도 같은 유물은 항상 같은 속성을 갖도록 고정 랜덤 처리한다.
+    seed_text = f"{item_id}|{name}|fallback-theme-v1"
+    seed = int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16)
+    rng = random.Random(seed)
+    theme_keys = list(RELIC_MATERIAL_THEMES.keys())
+    rng.shuffle(theme_keys)
+    return theme_keys[:rng.randint(1, 2)]
+
+
+def get_upgrade_material_search_text(item_id):
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    terrain = get_terrain_info(item.get("terrain")) if item.get("terrain") else {}
+    parts = [
+        get_adventure_item_name(item_id),
+        str(item.get("kind", "")),
+        str(item.get("source_monster") or ""),
+        str(terrain.get("name", "")),
+    ]
+    return normalize_item_name_for_filter(" ".join(parts))
+
+
+def material_matches_relic_themes(item_id, theme_keys):
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    search_text = get_upgrade_material_search_text(item_id)
+    terrain_key = item.get("terrain")
+
+    for theme_key in theme_keys:
+        theme = RELIC_MATERIAL_THEMES[theme_key]
+        if terrain_key in theme.get("terrains", []):
+            return True
+        if any(normalize_item_name_for_filter(keyword) in search_text for keyword in theme["material_keywords"]):
+            return True
+    return False
+
+
+def get_relic_upgrade_success_rate(item_id, target_level):
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    rules = RELIC_UPGRADE_RULES[item["rarity"]]
+    target_level = max(1, min(RELIC_MAX_ENHANCEMENT, int(target_level)))
+    return float(rules["success"][target_level - 1])
+
+
+def get_relic_upgrade_requirements(item_id, target_level):
+    """
+    이름 키워드, 유물 ID, 등급, 목표 강화 단계를 씨앗으로 재료를 고정 랜덤 생성한다.
+    서버가 재시작되어도 같은 유물의 같은 단계는 항상 같은 재료를 요구한다.
+    """
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    rarity_key = item["rarity"]
+    rules = RELIC_UPGRADE_RULES[rarity_key]
+    target_level = max(1, min(RELIC_MAX_ENHANCEMENT, int(target_level)))
+    relic_name = get_adventure_item_name(item_id)
+
+    seed_text = f"{item_id}|{relic_name}|{rarity_key}|{target_level}|upgrade-recipe-v1"
+    seed = int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16)
+    rng = random.Random(seed)
+
+    all_materials = [
+        material_id
+        for material_id, material in ADVENTURE_ITEM_CATALOG.items()
+        if material.get("kind") != "relic"
+    ]
+    theme_keys = get_relic_name_themes(item_id)
+    themed_materials = [
+        material_id
+        for material_id in all_materials
+        if material_matches_relic_themes(material_id, theme_keys)
+    ]
+
+    minimum_types, maximum_types = rules["type_range"]
+    type_count = rng.randint(minimum_types, maximum_types)
+    if target_level >= 5 and maximum_types < 6 and rng.random() < 0.45:
+        type_count += 1
+    type_count = min(type_count, len(all_materials), 6)
+
+    selected = []
+    attempts = 0
+    while len(selected) < type_count and attempts < 500:
+        attempts += 1
+        # 이름 속성과 맞는 재료가 75%, 전체 전리품에서 무작위 재료가 25%.
+        # 이 덕분에 특정 이름이어도 모든 전리품이 강화 재료가 될 가능성이 있다.
+        pool = themed_materials if themed_materials and rng.random() < 0.75 else all_materials
+        candidate = rng.choice(pool)
+        if candidate not in selected:
+            selected.append(candidate)
+
+    # 테마 후보가 지나치게 적은 경우에도 무한 반복 없이 전체 재료에서 채운다.
+    if len(selected) < type_count:
+        remaining = [material_id for material_id in all_materials if material_id not in selected]
+        rng.shuffle(remaining)
+        selected.extend(remaining[:type_count - len(selected)])
+
+    minimum_amount, maximum_amount = rules["amount_range"]
+    level_scale = 1.0 + (target_level - 1) * 0.45
+    requirements = []
+
+    for material_id in selected:
+        material = ADVENTURE_ITEM_CATALOG[material_id]
+        material_rank = ADVENTURE_RARITY_ORDER.get(material["rarity"], 0)
+        base_amount = rng.randint(minimum_amount, maximum_amount)
+
+        # 희귀 재료는 너무 많은 수량을 요구하지 않도록 수량을 낮춘다.
+        rarity_divisor = 1.0 + material_rank * 0.38
+        amount = max(1, int(round(base_amount * level_scale / rarity_divisor)))
+        requirements.append((material_id, amount))
+
+    requirements.sort(
+        key=lambda pair: (
+            -ADVENTURE_RARITY_ORDER[ADVENTURE_ITEM_CATALOG[pair[0]]["rarity"]],
+            get_adventure_item_name(pair[0]),
+        )
+    )
+    return requirements
+
+
+def get_missing_relic_materials(uid, requirements):
+    inventory = get_adventure_inventory(uid)
+    missing = []
+    for material_id, required in requirements:
+        owned = max(0, int(inventory.get(material_id, 0)))
+        if owned < required:
+            missing.append((material_id, required, owned))
+    return missing
+
+
+def consume_relic_upgrade_materials(uid, requirements):
+    inventory = get_adventure_inventory(uid)
+    for material_id, required in requirements:
+        remaining = max(0, int(inventory.get(material_id, 0)) - int(required))
+        if remaining > 0:
+            inventory[material_id] = remaining
+        else:
+            inventory.pop(material_id, None)
+
+
+def build_owned_relic_embed(member, uid, page=0):
+    entries = get_owned_relic_entries(uid)
+    total_pages = max(1, (len(entries) + ADVENTURE_RELIC_PAGE_SIZE - 1) // ADVENTURE_RELIC_PAGE_SIZE)
+    page = max(0, min(int(page), total_pages - 1))
+    start = page * ADVENTURE_RELIC_PAGE_SIZE
+    page_entries = entries[start:start + ADVENTURE_RELIC_PAGE_SIZE]
+
+    embed = discord.Embed(
+        title=f"🔮 {member.display_name}의 유물",
+        color=discord.Color.purple(),
+    )
+
+    if not page_entries:
+        embed.description = "아직 보유한 유물이 없어. 모험에서 유물을 발견해 봐!"
+    else:
+        lines = []
+        for item_id, count in page_entries:
+            item = ADVENTURE_ITEM_CATALOG[item_id]
+            rarity = ADVENTURE_RARITIES[item["rarity"]]
+            state = get_relic_upgrade_state(uid, item_id)
+            level = state["level"]
+            if item_id not in discovered_items:
+                next_text = "이름 등록 대기 중"
+            elif level >= RELIC_MAX_ENHANCEMENT:
+                next_text = "최대 강화 완료"
+            else:
+                chance = get_relic_upgrade_success_rate(item_id, level + 1)
+                next_text = f"다음 강화 성공률 {chance:.0f}%"
+
+            lines.append(
+                f"{format_relic_name(uid, item_id)} ×{count}\n"
+                f"└ {rarity['emoji']} {rarity['name']} · {next_text}"
+            )
+        embed.description = "\n\n".join(lines)
+        embed.add_field(
+            name="사용법",
+            value="`/유물 이름:<유물>`로 재료와 강화 버튼을 확인할 수 있어.",
+            inline=False,
+        )
+
+    embed.set_footer(text=f"페이지 {page + 1}/{total_pages} · 보유 유물 {len(entries)}종 · 유물은 /가방에 표시되지 않음")
+    return embed, total_pages
+
+
+def build_relic_detail_embed(member, uid, item_id):
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    rarity = ADVENTURE_RARITIES[item["rarity"]]
+    state = get_relic_upgrade_state(uid, item_id)
+    level = state["level"]
+    style = get_relic_enhancement_style(level)
+    inventory = get_adventure_inventory(uid)
+    owned_count = max(0, int(inventory.get(item_id, 0)))
+    theme_keys = get_relic_name_themes(item_id)
+    theme_text = ", ".join(RELIC_MATERIAL_THEMES[key]["display"] for key in theme_keys)
+
+    embed = discord.Embed(
+        title=f"{style['emoji']} 유물 상세",
+        description=format_relic_ansi_name(uid, item_id),
+        color=discord.Color(style["color"]),
+    )
+    embed.add_field(
+        name="기본 정보",
+        value=(
+            f"등급: {rarity['emoji']} **{rarity['name']}**\n"
+            f"강화: **+{level}/{RELIC_MAX_ENHANCEMENT}** · 색상: **{style['name']}**\n"
+            f"보유 수량: **{owned_count}개**\n"
+            f"재료 공명: **{theme_text}**"
+        ),
+        inline=False,
+    )
+
+    if item_id not in discovered_items:
+        embed.add_field(
+            name="강화 불가",
+            value="아직 이름이 등록되지 않은 유물이야. 최초 발견자가 이름을 정한 뒤 강화할 수 있어.",
+            inline=False,
+        )
+    elif level >= RELIC_MAX_ENHANCEMENT:
+        embed.add_field(
+            name="🌈 최대 강화 완료",
+            value=f"이 유물은 이미 **+{RELIC_MAX_ENHANCEMENT}**까지 강화됐어.",
+            inline=False,
+        )
+    else:
+        target_level = level + 1
+        chance = get_relic_upgrade_success_rate(item_id, target_level)
+        requirements = get_relic_upgrade_requirements(item_id, target_level)
+        lines = []
+        for material_id, required in requirements:
+            material = ADVENTURE_ITEM_CATALOG[material_id]
+            material_rarity = ADVENTURE_RARITIES[material["rarity"]]
+            owned = max(0, int(inventory.get(material_id, 0)))
+            mark = "✅" if owned >= required else "❌"
+            lines.append(
+                f"{mark} {material_rarity['emoji']} **{get_adventure_item_name(material_id)}** "
+                f"{owned}/{required}"
+            )
+
+        embed.add_field(
+            name=f"🔨 +{target_level} 강화 재료",
+            value="\n".join(lines),
+            inline=False,
+        )
+        embed.add_field(
+            name="성공 확률",
+            value=(
+                f"**{chance:.0f}%**\n"
+                "강화 버튼을 누르면 성공 여부와 관계없이 표시된 재료가 소모돼."
+            ),
+            inline=False,
+        )
+
+    embed.set_footer(text=f"강화 시도 {state['attempts']}회 · 실패 {state['failures']}회")
+    return embed
+
+
+class OwnedRelicView(discord.ui.View):
+    def __init__(self, user_id, member, page=0):
+        super().__init__(timeout=180)
+        self.user_id = str(user_id)
+        self.member = member
+        self.page = max(0, int(page))
+        _, total_pages = build_owned_relic_embed(member, self.user_id, self.page)
+        self.previous_page.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= total_pages - 1
+
+    @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        self.page = max(0, self.page - 1)
+        embed, _ = build_owned_relic_embed(self.member, self.user_id, self.page)
+        await interaction.response.edit_message(embed=embed, view=OwnedRelicView(self.user_id, self.member, self.page))
+
+    @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        self.page += 1
+        embed, total_pages = build_owned_relic_embed(self.member, self.user_id, self.page)
+        self.page = min(self.page, total_pages - 1)
+        await interaction.response.edit_message(embed=embed, view=OwnedRelicView(self.user_id, self.member, self.page))
+
+
+class RelicUpgradeView(discord.ui.View):
+    def __init__(self, user_id, member, item_id):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+        self.member = member
+        self.item_id = item_id
+        state = get_relic_upgrade_state(self.user_id, self.item_id)
+        target_level = min(RELIC_MAX_ENHANCEMENT, state["level"] + 1)
+        self.upgrade_button.label = f"🔨 +{target_level} 강화 도전"
+        self.upgrade_button.disabled = (
+            state["level"] >= RELIC_MAX_ENHANCEMENT
+            or self.item_id not in discovered_items
+        )
+
+    @discord.ui.button(label="🔨 강화 도전", style=discord.ButtonStyle.danger)
+    async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        async with get_adventure_lock(self.user_id):
+            owned_ids = {item_id for item_id, _ in get_owned_relic_entries(self.user_id)}
+            if self.item_id not in owned_ids:
+                await interaction.response.send_message("❌ 더 이상 이 유물을 가지고 있지 않아.", ephemeral=True)
+                return
+
+            if self.item_id not in discovered_items:
+                await interaction.response.send_message("❌ 이름이 등록된 뒤에 강화할 수 있어.", ephemeral=True)
+                return
+
+            state = get_relic_upgrade_state(self.user_id, self.item_id)
+            if state["level"] >= RELIC_MAX_ENHANCEMENT:
+                await interaction.response.send_message("이미 최대 강화야!", ephemeral=True)
+                return
+
+            target_level = state["level"] + 1
+            requirements = get_relic_upgrade_requirements(self.item_id, target_level)
+            missing = get_missing_relic_materials(self.user_id, requirements)
+            if missing:
+                lines = [
+                    f"• {get_adventure_item_name(material_id)}: {owned}/{required}"
+                    for material_id, required, owned in missing
+                ]
+                await interaction.response.send_message(
+                    "❌ 강화 재료가 부족해.\n" + "\n".join(lines),
+                    ephemeral=True,
+                )
+                return
+
+            consume_relic_upgrade_materials(self.user_id, requirements)
+            chance = get_relic_upgrade_success_rate(self.item_id, target_level)
+            success = random.random() * 100 < chance
+            state["attempts"] += 1
+
+            if success:
+                state["level"] = target_level
+                result_text = (
+                    f"🎉 **강화 성공!** {get_adventure_item_name(self.item_id)}이(가) "
+                    f"**+{target_level}**이 됐어."
+                )
+            else:
+                state["failures"] += 1
+                result_text = (
+                    f"💥 **강화 실패...** 성공 확률은 **{chance:.0f}%**였어. "
+                    "재료는 소모됐지만 강화 단계는 유지돼."
+                )
+
+            save_data()
+            embed = build_relic_detail_embed(self.member, self.user_id, self.item_id)
+            embed.add_field(name="이번 강화 결과", value=result_text, inline=False)
+            await interaction.response.edit_message(
+                embed=embed,
+                view=RelicUpgradeView(self.user_id, self.member, self.item_id),
+            )
 
 def add_adventure_item(uid, item_id, amount=1):
     if item_id not in ADVENTURE_ITEM_CATALOG:
@@ -10536,6 +11105,7 @@ class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
             "discoverer_id": uid,
             "discoverer_name": interaction.user.display_name,
             "discovered_at": datetime.now(KST).isoformat(),
+            "upgrade_recipe_version": 1,
         }
         adventure["pending_name_item_id"] = None
         save_data()
@@ -10643,7 +11213,11 @@ def build_adventure_inventory_embed(member, uid, page=0):
     entries = [
         (item_id, count)
         for item_id, count in inventory.items()
-        if count > 0 and item_id in ADVENTURE_ITEM_CATALOG
+        if (
+            count > 0
+            and item_id in ADVENTURE_ITEM_CATALOG
+            and ADVENTURE_ITEM_CATALOG[item_id].get("kind") != "relic"
+        )
     ]
 
     entries.sort(
@@ -10664,7 +11238,7 @@ def build_adventure_inventory_embed(member, uid, page=0):
     )
 
     if not page_entries:
-        embed.description = "아직 모험에서 얻은 물건이 없어."
+        embed.description = "아직 보유한 전리품이 없어. 유물은 `/유물`에서 확인할 수 있어."
     else:
         lines = []
         for item_id, count in page_entries:
@@ -10679,7 +11253,7 @@ def build_adventure_inventory_embed(member, uid, page=0):
     embed.set_footer(
         text=(
             f"페이지 {page + 1}/{total_pages} · 보유 종류 {len(entries)}종 · "
-            f"전체 아이템 {len(ADVENTURE_ITEM_CATALOG)}종"
+            f"강화 재료 종류 {sum(1 for item in ADVENTURE_ITEM_CATALOG.values() if item.get('kind') != 'relic')}종 · 유물은 /유물"
         )
     )
     return embed, total_pages
@@ -10991,6 +11565,57 @@ async def adventure_inventory_command(interaction: discord.Interaction):
         embed=embed,
         view=AdventureInventoryView(uid, interaction.user, 0),
     )
+
+
+
+@bot.tree.command(name="유물", description="보유한 유물과 강화 재료를 확인한다", guild=GUILD)
+@app_commands.describe(이름="상세 확인하거나 강화할 유물. 비워두면 전체 목록 표시")
+async def owned_relic_command(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+
+    if not 이름:
+        embed, _ = build_owned_relic_embed(interaction.user, uid, 0)
+        await interaction.response.send_message(
+            embed=embed,
+            view=OwnedRelicView(uid, interaction.user, 0),
+        )
+        return
+
+    item_id = resolve_owned_relic_id(uid, 이름)
+    if not item_id:
+        await interaction.response.send_message("❌ 그 유물은 가지고 있지 않아.", ephemeral=True)
+        return
+
+    embed = build_relic_detail_embed(interaction.user, uid, item_id)
+    await interaction.response.send_message(
+        embed=embed,
+        view=RelicUpgradeView(uid, interaction.user, item_id),
+    )
+
+
+@owned_relic_command.autocomplete("이름")
+async def owned_relic_autocomplete(interaction: discord.Interaction, current: str):
+    uid = str(interaction.user.id)
+    normalized = normalize_item_name_for_filter(current)
+    choices = []
+
+    for item_id, count in get_owned_relic_entries(uid):
+        name = get_adventure_item_name(item_id)
+        if normalized and normalized not in normalize_item_name_for_filter(name):
+            continue
+        item = ADVENTURE_ITEM_CATALOG[item_id]
+        rarity = ADVENTURE_RARITIES[item["rarity"]]["name"]
+        level = get_relic_upgrade_state(uid, item_id)["level"]
+        choices.append(
+            app_commands.Choice(
+                name=f"{name} +{level} · {rarity} · {count}개"[:100],
+                value=item_id,
+            )
+        )
+        if len(choices) >= 25:
+            break
+
+    return choices
 
 
 @bot.tree.command(name="유물도감", description="서버에서 발견된 이름 있는 유물을 확인한다", guild=GUILD)
