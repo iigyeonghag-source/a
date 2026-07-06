@@ -8592,7 +8592,7 @@ ADVENTURE_SHOP_CATALOG = {
 ADVENTURE_POTION_CATALOG = {
     "체력의 포션": {
         "price": 2200,
-        "desc": "모험 중 사용하면 목숨을 1 회복한다.",
+        "desc": "모험 중 사용하면 목숨을 1 회복한다. 모험당 최대 2회 사용 가능.",
     },
     "힘의 포션": {
         "price": 3500,
@@ -8648,6 +8648,7 @@ def get_adventure(uid):
         "total_kills": 0,
         "hard_mode_unlocked": False,
         "hard_mode": False,
+        "health_potion_uses": 0,
         "strength_potion_used": False,
         "luck_potion_used": False,
 
@@ -8702,6 +8703,9 @@ def get_adventure(uid):
     adventure["exp"] = max(0, int(adventure.get("exp", 0)))
     adventure["max_lives"] = max(3, int(adventure.get("max_lives", 3)))
     adventure["lives"] = max(0, min(int(adventure.get("lives", 3)), adventure["max_lives"]))
+    adventure["health_potion_uses"] = max(0, min(2, int(adventure.get("health_potion_uses", 0))))
+    adventure["strength_potion_used"] = bool(adventure.get("strength_potion_used", False))
+    adventure["luck_potion_used"] = bool(adventure.get("luck_potion_used", False))
 
     # 기존 유저도 과거 최고 도달 지형 기록이나 현재 이동 기록에 마계가 있으면 자동 해금한다.
     if (
@@ -9630,6 +9634,7 @@ def start_new_adventure(uid, terrain_key, hard_mode=False):
         "visited_terrains": [terrain_key],
         "defeated_bosses": [],
         "hard_mode": hard_mode,
+        "health_potion_uses": 0,
         "strength_potion_used": False,
         "luck_potion_used": False,
         "boosts": boosts,
@@ -9676,6 +9681,7 @@ def finish_adventure(uid):
     adventure["visited_terrains"] = []
     adventure["defeated_bosses"] = []
     adventure["hard_mode"] = False
+    adventure["health_potion_uses"] = 0
     adventure["strength_potion_used"] = False
     adventure["luck_potion_used"] = False
 
@@ -10872,6 +10878,14 @@ class AdventureTerrainChoiceView(discord.ui.View):
         stay_button.callback = stay_callback
         self.add_item(stay_button)
 
+        potion_button = discord.ui.Button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
+
+        async def potion_callback(interaction):
+            await open_adventure_potion_menu(interaction, self.user_id)
+
+        potion_button.callback = potion_callback
+        self.add_item(potion_button)
+
 
 def build_adventure_equipment_embed(member, uid):
     adventure = get_adventure(uid)
@@ -10972,6 +10986,181 @@ class AdventureEquipmentView(discord.ui.View):
         self.add_item(AdventureArmorSelect(self.user_id))
 
 
+def get_adventure_potion_usage_text(adventure, potion_name):
+    if potion_name == "체력의 포션":
+        return f"{int(adventure.get('health_potion_uses', 0))}/2회 사용"
+    if potion_name == "힘의 포션":
+        return "1/1회 사용" if adventure.get("strength_potion_used") else "0/1회 사용"
+    return "1/1회 사용" if adventure.get("luck_potion_used") else "0/1회 사용"
+
+
+def build_adventure_potion_embed(member, uid):
+    adventure = get_adventure(uid)
+    info = get_adventure_shop_user(uid)
+
+    lines = []
+    for name, potion in ADVENTURE_POTION_CATALOG.items():
+        owned = int(info["potions"].get(name, 0))
+        usage = get_adventure_potion_usage_text(adventure, name)
+        lines.append(
+            f"🧪 **{name}** — 보유 **{owned}개** · {usage}\n"
+            f"└ {potion['desc']}"
+        )
+
+    embed = discord.Embed(
+        title=f"🧪 {member.display_name}의 포션 가방",
+        description=(
+            "아래 선택 메뉴에서 사용할 포션을 골라.\n"
+            "사용할 수 없는 상태라면 포션과 사용 횟수는 소모되지 않아.\n\n"
+            + "\n\n".join(lines)
+        ),
+        color=discord.Color.purple(),
+    )
+    embed.set_footer(text="체력 포션 2회 · 힘/운 포션 각 1회까지 사용 가능")
+    return embed
+
+
+async def use_adventure_potion(uid, potion_name):
+    uid = str(uid)
+    adventure = get_adventure(uid)
+    info = get_adventure_shop_user(uid)
+
+    if not adventure.get("active"):
+        return False, "❌ 현재 진행 중인 모험이 없어."
+
+    if potion_name not in ADVENTURE_POTION_CATALOG:
+        return False, "❌ 존재하지 않는 포션이야."
+
+    owned = int(info["potions"].get(potion_name, 0))
+    if owned <= 0:
+        return False, f"❌ **{potion_name}**을 가지고 있지 않아. 모험 전에 상점에서 구매해 둬."
+
+    if potion_name == "체력의 포션":
+        used = int(adventure.get("health_potion_uses", 0))
+        if used >= 2:
+            return False, "❌ 체력의 포션은 한 모험에서 최대 2번만 사용할 수 있어."
+        if adventure["lives"] >= adventure.get("max_lives", 3):
+            return False, "❌ 이미 목숨이 가득 차 있어. 포션은 소모되지 않았어."
+
+        adventure["lives"] += 1
+        adventure["health_potion_uses"] = used + 1
+        result = (
+            "❤️ 목숨을 1 회복했어!\n"
+            f"현재 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**\n"
+            f"이번 모험 사용 횟수: **{adventure['health_potion_uses']}/2회**"
+        )
+
+    elif potion_name == "힘의 포션":
+        if adventure.get("strength_potion_used"):
+            return False, "❌ 힘의 포션은 한 모험에서 한 번만 사용할 수 있어."
+
+        adventure["strength_potion_used"] = True
+        boosts = adventure.setdefault("boosts", {})
+        boosts["battle"] = boosts.get("battle", 0) + 10
+        result = "💪 이번 모험이 끝날 때까지 전투 승률이 **10% 증가**해!"
+
+    else:
+        if adventure.get("luck_potion_used"):
+            return False, "❌ 운의 포션은 한 모험에서 한 번만 사용할 수 있어."
+
+        adventure["luck_potion_used"] = True
+        boosts = adventure.setdefault("boosts", {})
+        boosts["luck"] = boosts.get("luck", 0) + 12
+        boosts["loot"] = boosts.get("loot", 0) + 12
+        boosts["relic"] = boosts.get("relic", 0) + 3
+        result = "🍀 이번 모험이 끝날 때까지 행운/전리품 **+12%**, 유물 발견률 **+3%p**!"
+
+    remaining = owned - 1
+    if remaining > 0:
+        info["potions"][potion_name] = remaining
+    else:
+        info["potions"].pop(potion_name, None)
+
+    save_data()
+    return True, (
+        f"🧪 **{potion_name}** 사용 완료!\n"
+        f"{result}\n"
+        f"남은 수량: **{remaining}개**"
+    )
+
+
+class AdventurePotionSelect(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = str(user_id)
+        adventure = get_adventure(self.user_id)
+        info = get_adventure_shop_user(self.user_id)
+
+        options = []
+        potion_emojis = {
+            "체력의 포션": "❤️",
+            "힘의 포션": "💪",
+            "운의 포션": "🍀",
+        }
+        for name in ADVENTURE_POTION_CATALOG:
+            owned = int(info["potions"].get(name, 0))
+            usage = get_adventure_potion_usage_text(adventure, name)
+            options.append(
+                discord.SelectOption(
+                    label=name,
+                    description=f"보유 {owned}개 · {usage}",
+                    emoji=potion_emojis.get(name, "🧪"),
+                )
+            )
+
+        super().__init__(
+            placeholder="🧪 사용할 포션 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        lock = get_adventure_lock(self.user_id)
+        if lock.locked():
+            await interaction.response.send_message("이미 다른 행동을 처리 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            success, result = await use_adventure_potion(self.user_id, self.values[0])
+
+        embed = build_adventure_potion_embed(interaction.user, self.user_id)
+        embed.add_field(
+            name="사용 결과" if success else "사용 불가",
+            value=result,
+            inline=False,
+        )
+        await interaction.response.edit_message(
+            embed=embed,
+            view=AdventurePotionView(self.user_id),
+        )
+
+
+class AdventurePotionView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+        self.add_item(AdventurePotionSelect(self.user_id))
+
+
+async def open_adventure_potion_menu(interaction, user_id):
+    if not await check_adventure_owner(interaction, user_id):
+        return
+
+    adventure = get_adventure(user_id)
+    if not adventure.get("active"):
+        await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+        return
+
+    await interaction.response.send_message(
+        embed=build_adventure_potion_embed(interaction.user, user_id),
+        view=AdventurePotionView(user_id),
+        ephemeral=True,
+    )
+
+
 class AdventureTurnWaitingView(discord.ui.View):
     def __init__(self, user_id):
         # 최대 대기 시간이 5분이라 여유 있게 15분 동안 버튼을 유지한다.
@@ -11044,6 +11233,10 @@ class AdventureTurnWaitingView(discord.ui.View):
             ephemeral=True,
         )
 
+    @discord.ui.button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
+    async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_potion_menu(interaction, self.user_id)
+
     @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
     async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
@@ -11111,6 +11304,10 @@ class AdventureTravelView(discord.ui.View):
             view=AdventureEquipmentView(self.user_id),
             ephemeral=True,
         )
+
+    @discord.ui.button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
+    async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_potion_menu(interaction, self.user_id)
 
     @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
     async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -11185,6 +11382,10 @@ class AdventureBattleView(discord.ui.View):
             view=AdventureEquipmentView(self.user_id),
             ephemeral=True,
         )
+
+    @discord.ui.button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
+    async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_potion_menu(interaction, self.user_id)
 
     @discord.ui.button(label="💨 도망가기", style=discord.ButtonStyle.secondary)
     async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -11765,8 +11966,8 @@ async def relic_dex_command(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, view=RelicDexView(0))
 
 
-@bot.tree.command(name="모험상점", description="모험용 아이템과 포션을 구매하거나 사용한다", guild=GUILD)
-@app_commands.describe(아이템="구매/장착하거나 사용할 아이템 이름. 비워두면 목록 표시")
+@bot.tree.command(name="모험상점", description="모험용 아이템과 포션을 구매한다", guild=GUILD)
+@app_commands.describe(아이템="구매하거나 장착할 아이템 이름. 비워두면 목록 표시")
 async def adventure_shop_command(interaction: discord.Interaction, 아이템: str = None):
     uid = str(interaction.user.id)
     info = get_adventure_shop_user(uid)
@@ -11805,69 +12006,21 @@ async def adventure_shop_command(interaction: discord.Interaction, 아이템: st
         embed.set_footer(
             text=(
                 f"영구 아이템은 최대 {ADVENTURE_MAX_EQUIPPED}개 장착 · "
-                "포션은 모험 전에 구매하고 모험 중 같은 이름을 다시 입력하면 사용"
+                "포션은 모험 전에 구매하고 모험 중 '포션 사용' 버튼으로 사용"
             )
         )
         await interaction.response.send_message(embed=embed)
         return
 
-    # 포션: 모험 전에는 구매, 모험 중에는 보유분을 사용한다.
+    # 포션은 모험 전에 구매하고, 모험 중에는 화면의 포션 버튼으로 사용한다.
     if 아이템 in ADVENTURE_POTION_CATALOG:
         potion = ADVENTURE_POTION_CATALOG[아이템]
 
         if adventure["active"]:
-            owned = int(info["potions"].get(아이템, 0))
-            if owned <= 0:
-                await interaction.response.send_message(
-                    f"❌ **{아이템}**을 가지고 있지 않아. 모험을 시작하기 전에 구매해 둬.",
-                    ephemeral=True,
-                )
-                return
-
-            if 아이템 == "체력의 포션":
-                if adventure["lives"] >= adventure.get("max_lives", 3):
-                    await interaction.response.send_message("❌ 이미 목숨이 가득 차 있어.", ephemeral=True)
-                    return
-                adventure["lives"] += 1
-                result = (
-                    "❤️ 목숨을 1 회복했어!\n"
-                    f"현재 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**"
-                )
-
-            elif 아이템 == "힘의 포션":
-                if adventure.get("strength_potion_used"):
-                    await interaction.response.send_message(
-                        "❌ 힘의 포션은 한 모험에서 한 번만 사용할 수 있어.",
-                        ephemeral=True,
-                    )
-                    return
-                adventure["strength_potion_used"] = True
-                adventure.setdefault("boosts", {})["battle"] = adventure.get("boosts", {}).get("battle", 0) + 10
-                result = "💪 이번 모험이 끝날 때까지 전투 승률이 **10% 증가**해!"
-
-            else:  # 운의 포션
-                if adventure.get("luck_potion_used"):
-                    await interaction.response.send_message(
-                        "❌ 운의 포션은 한 모험에서 한 번만 사용할 수 있어.",
-                        ephemeral=True,
-                    )
-                    return
-                adventure["luck_potion_used"] = True
-                boosts = adventure.setdefault("boosts", {})
-                boosts["luck"] = boosts.get("luck", 0) + 12
-                boosts["loot"] = boosts.get("loot", 0) + 12
-                boosts["relic"] = boosts.get("relic", 0) + 3
-                result = "🍀 이번 모험이 끝날 때까지 행운/전리품 **+12%**, 유물 발견률 **+3%p**!"
-
-            remaining = owned - 1
-            if remaining > 0:
-                info["potions"][아이템] = remaining
-            else:
-                info["potions"].pop(아이템, None)
-
-            save_data()
             await interaction.response.send_message(
-                f"🧪 **{아이템}** 사용 완료!\n{result}\n남은 수량: **{remaining}개**"
+                "❌ 모험 중에는 `/모험상점`으로 포션을 사용할 수 없어. "
+                "모험 화면의 **🧪 포션 사용** 버튼을 눌러줘.",
+                ephemeral=True,
             )
             return
 
@@ -11893,7 +12046,7 @@ async def adventure_shop_command(interaction: discord.Interaction, 아이템: st
 
     if adventure["active"]:
         await interaction.response.send_message(
-            "❌ 모험 중에는 영구 아이템을 바꿀 수 없어. 포션만 사용할 수 있어.",
+            "❌ 모험 중에는 영구 아이템을 바꿀 수 없어. 포션은 모험 화면의 버튼으로 사용해.",
             ephemeral=True,
         )
         return
