@@ -5148,7 +5148,12 @@ WEAPONS = {
     "안개를 가르는 회광": {"price": 18000, "bonus": 45},
     "고요히 샘솟는 빛": {"price": 25000, "bonus": 60},
     "서약의 자유": {"price": 100000, "bonus": 85},
-    "용사의 성검": {"price": 6500000, "bonus": 270}
+    "용사의 성검": {"price": 6500000, "bonus": 270},
+
+    # 17번 연구소 전용 무기. 상점 구매 및 일반 장비 드롭으로는 절대 획득할 수 없다.
+    "P90": {"price": 0, "bonus": 95, "obtain_only": True},
+    "AK12": {"price": 0, "bonus": 145, "obtain_only": True},
+    "MINIGUN": {"price": 0, "bonus": 235, "obtain_only": True},
 }
 
 ARMORS = {
@@ -5194,7 +5199,22 @@ MONSTERS = [
     {"name": "타르탈리아", "min": 230, "max": 270, "penalty": 850},
     {"name": "라이덴 쇼군", "min": 270, "max": 310, "penalty": 900},
     {"name": "천리의 유지자", "min": 310, "max": 420, "penalty": 1200},
-    {"name": "마왕", "min": 420, "max": 1000, "peanlty": 5000}
+    {"name": "마왕", "min": 420, "max": 1000, "penalty": 5000},
+
+    # 모험 최종장 전용 몬스터
+    {"name": "불의 신", "min": 330, "max": 470, "penalty": 1450},
+    {"name": "물의 신", "min": 340, "max": 480, "penalty": 1500},
+    {"name": "바람의 신", "min": 350, "max": 490, "penalty": 1550},
+    {"name": "땅의 신", "min": 360, "max": 510, "penalty": 1650},
+    {"name": "대마왕", "min": 380, "max": 560, "penalty": 1900},
+    {"name": "시설 가드", "min": 390, "max": 540, "penalty": 1050},
+    {"name": "기동특수부대원", "min": 410, "max": 570, "penalty": 1200},
+    {"name": "알파 부대원", "min": 430, "max": 600, "penalty": 1350},
+    {"name": "알파 부대장", "min": 450, "max": 630, "penalty": 1550},
+    {"name": "저거너트", "min": 480, "max": 680, "penalty": 1850},
+    {"name": "39번 실험체", "min": 500, "max": 720, "penalty": 2100},
+    {"name": "1번 실험체", "min": 530, "max": 760, "penalty": 2400},
+    {"name": "각성한 매드 사이언티스트", "min": 570, "max": 820, "penalty": 2900},
 ]
 
 MONSTER_TRAIT_RATE = 30 
@@ -6232,6 +6252,8 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
         lines = []
 
         for name, info in WEAPONS.items():
+            if info.get("obtain_only"):
+                continue
             owned = " ✅ 장착중" if user["weapon"] == name else ""
             lines.append(
                 f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
@@ -6243,6 +6265,13 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
 
     if 이름 not in WEAPONS:
         await interaction.response.send_message("❌ 그런 무기는 없음.", ephemeral=True)
+        return
+
+    if WEAPONS[이름].get("obtain_only"):
+        await interaction.response.send_message(
+            "❌ 이 무기는 상점에서 살 수 없어. 17번 연구소의 해당 적을 처치해야만 일정 확률로 획득할 수 있어.",
+            ephemeral=True,
+        )
         return
 
     price = WEAPONS[이름]["price"]
@@ -8435,10 +8464,49 @@ ADVENTURE_TERRAINS = {
             "라이덴 쇼군", "천리의 유지자",
         ],
     },
+    "outskirts": {
+        "name": "외곽",
+        "emoji": "🌌",
+        "color": 0x6257A8,
+        "description": "천계 바깥의 경계. 네 원소의 신들이 침입자를 시험한다.",
+        "danger_mul": 1.82,
+        "danger_flat": 55,
+        "reward_mul": 3.8,
+        # 네 신 중 하나가 해당 모험의 외곽 보스로 선택된다.
+        "boss": "땅의 신",
+        "bosses": ["불의 신", "물의 신", "바람의 신", "땅의 신"],
+        "monsters": ["불의 신", "물의 신", "바람의 신", "땅의 신"],
+    },
+    "glitch": {
+        "name": "!@$*!&",
+        "emoji": "�",
+        "color": 0x16051F,
+        "description": "공간과 글자가 무너진 장소. 이곳에는 대마왕 외에는 아무것도 존재하지 않는다.",
+        "danger_mul": 2.0,
+        "danger_flat": 70,
+        "reward_mul": 4.2,
+        "boss": "대마왕",
+        "monsters": ["대마왕"],
+    },
+    "lab17": {
+        "name": "17번 연구소",
+        "emoji": "🧪",
+        "color": 0x263238,
+        "description": "세계의 끝에 숨겨진 실험 시설. 모든 모험의 진실이 이곳에 잠들어 있다.",
+        "danger_mul": 2.15,
+        "danger_flat": 85,
+        "reward_mul": 4.8,
+        "boss": "각성한 매드 사이언티스트",
+        "monsters": [
+            "시설 가드", "기동특수부대원", "알파 부대원", "알파 부대장",
+            "저거너트", "대마왕", "39번 실험체", "1번 실험체",
+            "각성한 매드 사이언티스트",
+        ],
+    },
 }
 
-# 이동 가능한 방향. 마계는 고산지대/얼음 지대에서만,
-# 천계는 마계에서만 진입할 수 있다.
+# 이동 가능한 방향. 천계 이후의 최종장 지형은 랜덤/유물 갈림길로 진입할 수 없고,
+# 오직 현재 지형의 보스를 쓰러뜨렸을 때만 아래 순서대로 이동한다.
 ADVENTURE_TERRAIN_ROUTES = {
     "desert": ["grassland", "jungle", "cave"],
     "grassland": ["desert", "jungle", "cave", "mountain"],
@@ -8447,7 +8515,10 @@ ADVENTURE_TERRAIN_ROUTES = {
     "mountain": ["grassland", "cave", "ice", "demon"],
     "ice": ["cave", "mountain", "demon"],
     "demon": ["mountain", "ice", "heaven"],
-    "heaven": [],
+    "heaven": ["outskirts"],
+    "outskirts": ["glitch"],
+    "glitch": ["lab17"],
+    "lab17": [],
 }
 
 # 이 유물을 해당 지형에서 얻으면 갈림길이 확정적으로 열린다.
@@ -8471,6 +8542,95 @@ ADVENTURE_TERRAIN_DEPTH = {
     "ice": 4,
     "demon": 5,
     "heaven": 6,
+    "outskirts": 7,
+    "glitch": 8,
+    "lab17": 9,
+}
+
+# 기존 120종 유물/월드 재료의 지형 배치를 유지하기 위한 목록이다.
+# 새 최종장 지형을 여기에 넣으면 기존 유물 ID의 출현 지형이 전부 바뀌므로 추가하지 않는다.
+ADVENTURE_LOOT_TERRAINS = [
+    "desert", "grassland", "jungle", "cave", "mountain", "ice", "demon", "heaven"
+]
+
+ADVENTURE_STORY_LOCKED_TERRAINS = {"heaven", "outskirts", "glitch", "lab17"}
+ADVENTURE_FORCED_TERRAINS = {"glitch", "lab17"}
+
+# 엔딩 보상 설정. ID가 0이면 같은 이름의 역할을 찾고, 없으면 새로 생성한다.
+ADVENTURE_ENDING_CHANNEL_ID = 1523946840310157323
+ADVENTURE_ENDING_ROLE_ID = 0
+ADVENTURE_ENDING_ROLE_NAME = "THE END"
+
+# 연구소 전용 총기. 일반 장비 드롭에서는 제외되며 아래 적에게서만 나온다.
+ADVENTURE_RESTRICTED_WEAPONS = {"P90", "AK12", "MINIGUN"}
+ADVENTURE_SPECIAL_WEAPON_DROPS = {
+    "기동특수부대원": [("P90", 18.0)],
+    "알파 부대원": [("AK12", 14.0)],
+    "알파 부대장": [("AK12", 30.0)],
+    "저거너트": [("MINIGUN", 20.0)],
+}
+
+ADVENTURE_STORY_PHASES = {
+    "glitch_demon_king": {
+        "monster": "대마왕",
+        "level_mul": 3.0,
+        "level_flat": 150,
+        "escape": True,
+    },
+    "lab_guard": {
+        "monster": "시설 가드",
+        "level_mul": 3.5,
+        "level_flat": 175,
+        "escape": False,
+    },
+    "lab_mtf": {
+        "monster": "기동특수부대원",
+        "level_mul": 4.2,
+        "level_flat": 230,
+        "escape": False,
+    },
+    "lab_alpha": {
+        "monster": "알파 부대원",
+        "level_mul": 5.2,
+        "level_flat": 280,
+        "escape": False,
+    },
+    "lab_alpha_leader": {
+        "monster": "알파 부대장",
+        "level_mul": 6.5,
+        "level_flat": 330,
+        "escape": False,
+    },
+    "lab_juggernaut": {
+        "monster": "저거너트",
+        "level_mul": 8.3,
+        "level_flat": 400,
+        "escape": False,
+    },
+    "experiment_19": {
+        "monster": "대마왕",
+        "level_mul": 10.8,
+        "level_flat": 450,
+        "escape": False,
+    },
+    "experiment_39": {
+        "monster": "39번 실험체",
+        "level_mul": 14.0,
+        "level_flat": 500,
+        "escape": False,
+    },
+    "experiment_1": {
+        "monster": "1번 실험체",
+        "level_mul": 18.0,
+        "level_flat": 700,
+        "escape": False,
+    },
+    "mad_scientist_final": {
+        "monster": "각성한 매드 사이언티스트",
+        "level_mul": 23.0,
+        "level_flat": 950,
+        "escape": False,
+    },
 }
 
 ADVENTURE_RANDOM_ROUTE_RATE = 2.5
@@ -8504,6 +8664,13 @@ def valid_terrain_destinations(source, destinations=None):
             continue
         # 천계 진입은 마계에서만 허용한다.
         if destination == "heaven" and source != "demon":
+            continue
+        # 최종장 지형은 반드시 바로 이전 스테이지의 보스 진행으로만 연결된다.
+        if destination == "outskirts" and source != "heaven":
+            continue
+        if destination == "glitch" and source != "outskirts":
+            continue
+        if destination == "lab17" and source != "glitch":
             continue
         if destination in allowed and destination in ADVENTURE_TERRAINS and destination not in result:
             result.append(destination)
@@ -8652,6 +8819,12 @@ def get_adventure(uid):
         "strength_potion_used": False,
         "luck_potion_used": False,
 
+        # 천계 이후 최종장 진행 및 엔딩 기록
+        "story_phase": None,
+        "lab_defeated": [],
+        "ending_cleared": False,
+        "ending_clear_count": 0,
+
         # /사냥과 완전히 분리된 모험 전용 성장 데이터
         "level": 1,
         "exp": 0,
@@ -8706,6 +8879,10 @@ def get_adventure(uid):
     adventure["health_potion_uses"] = max(0, min(2, int(adventure.get("health_potion_uses", 0))))
     adventure["strength_potion_used"] = bool(adventure.get("strength_potion_used", False))
     adventure["luck_potion_used"] = bool(adventure.get("luck_potion_used", False))
+    if not isinstance(adventure.get("lab_defeated"), list):
+        adventure["lab_defeated"] = []
+    adventure["ending_cleared"] = bool(adventure.get("ending_cleared", False))
+    adventure["ending_clear_count"] = max(0, int(adventure.get("ending_clear_count", 0)))
 
     # 기존 유저도 과거 최고 도달 지형 기록이나 현재 이동 기록에 마계가 있으면 자동 해금한다.
     if (
@@ -8865,6 +9042,8 @@ def calc_adventure_hospital_fee(money):
 
 def get_adventure_boss_spawn_rate(adventure, next_turn=False):
     terrain_key = adventure.get("terrain") or "grassland"
+    if terrain_key in ADVENTURE_FORCED_TERRAINS:
+        return 0.0
     defeated = set(adventure.get("defeated_bosses", []))
     terrain_steps = max(0, int(adventure.get("terrain_steps", 0)))
     if next_turn:
@@ -8931,7 +9110,13 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
 
     weapon_candidates = [
         name for name, info in WEAPONS.items()
-        if name != "무인검" and name not in owned_weapons and info.get("bonus", 0) <= allowed_bonus
+        if (
+            name != "무인검"
+            and name not in ADVENTURE_RESTRICTED_WEAPONS
+            and not info.get("obtain_only")
+            and name not in owned_weapons
+            and info.get("bonus", 0) <= allowed_bonus
+        )
     ]
     armor_candidates = [
         name for name, info in ARMORS.items()
@@ -8939,7 +9124,15 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
     ]
 
     if not weapon_candidates and not armor_candidates:
-        weapon_candidates = [name for name in WEAPONS if name != "무인검" and name not in owned_weapons]
+        weapon_candidates = [
+            name for name, info in WEAPONS.items()
+            if (
+                name != "무인검"
+                and name not in ADVENTURE_RESTRICTED_WEAPONS
+                and not info.get("obtain_only")
+                and name not in owned_weapons
+            )
+        ]
         armor_candidates = [name for name in ARMORS if name != "모험가 세트" and name not in owned_armors]
 
     kinds = []
@@ -8964,7 +9157,7 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
 def build_adventure_item_catalog():
     """코드 몇 줄로 400종이 넘는 전리품을 만든다."""
     catalog = {}
-    terrain_keys = list(ADVENTURE_TERRAINS.keys())
+    terrain_keys = list(ADVENTURE_LOOT_TERRAINS)
 
     monster_parts = [
         ("흔적", "common", 12),
@@ -9637,6 +9830,8 @@ def start_new_adventure(uid, terrain_key, hard_mode=False):
         "health_potion_uses": 0,
         "strength_potion_used": False,
         "luck_potion_used": False,
+        "story_phase": None,
+        "lab_defeated": [],
         "boosts": boosts,
     })
     save_data()
@@ -9684,6 +9879,8 @@ def finish_adventure(uid):
     adventure["health_potion_uses"] = 0
     adventure["strength_potion_used"] = False
     adventure["luck_potion_used"] = False
+    adventure["story_phase"] = None
+    adventure["lab_defeated"] = []
 
     save_data()
     return summary
@@ -9778,14 +9975,15 @@ def pick_adventure_monster(adventure, tier_name="normal", force_boss=False):
         if monster is not None
     ]
 
-    boss_name = terrain.get("boss")
+    boss_names = list(terrain.get("bosses") or ([terrain.get("boss")] if terrain.get("boss") else []))
+    boss_name = random.choice(boss_names) if boss_names else None
     defeated = set(adventure.get("defeated_bosses", []))
     is_boss = bool(force_boss and terrain_key not in defeated and boss_name)
 
     monster = find_adventure_monster_by_name(boss_name) if is_boss else None
 
     if monster is None:
-        normal_pool = [monster for monster in terrain_monsters if monster["name"] != boss_name]
+        normal_pool = [monster for monster in terrain_monsters if monster["name"] not in boss_names]
         if not normal_pool:
             normal_pool = terrain_monsters or MONSTERS
 
@@ -10175,6 +10373,9 @@ async def apply_adventure_life_loss(message, member, adventure, reason_text):
 def get_route_relic_destinations(item_id, adventure):
     route = ADVENTURE_ROUTE_RELICS.get(item_id)
     current = adventure.get("terrain")
+    # 천계 이후에는 어떤 유물도 다음 스테이지로 가는 길을 열 수 없다.
+    if current in ADVENTURE_STORY_LOCKED_TERRAINS:
+        return []
     if not route or route.get("source") != current:
         return []
     return valid_terrain_destinations(current, route.get("destinations", []))
@@ -10244,6 +10445,399 @@ async def show_terrain_choice(message, member):
     await message.edit(
         embed=build_terrain_choice_embed(adventure),
         view=AdventureTerrainChoiceView(member.id, destinations),
+    )
+
+
+def move_adventure_to_terrain(adventure, destination):
+    """갈림길 UI 없이 스토리상 다음 지형으로 강제 이동한다."""
+    if destination not in ADVENTURE_TERRAINS:
+        return False
+
+    adventure["terrain"] = destination
+    adventure["terrain_steps"] = 0
+    adventure["quiet_turns"] = 0
+    adventure["pending_event"] = None
+    clear_adventure_turn_timer(adventure)
+
+    visited = adventure.setdefault("visited_terrains", [])
+    if not visited or visited[-1] != destination:
+        visited.append(destination)
+
+    if destination == "demon":
+        adventure["hard_mode_unlocked"] = True
+    return True
+
+
+def get_story_monster_display_name(member, phase, monster_name):
+    if phase == "experiment_19":
+        return "19번 실험체 — 대마왕"
+    if phase == "experiment_1":
+        return f"1번 실험체 — {member.mention}"
+    return monster_name
+
+
+def get_story_monster_level(adventure, phase):
+    phase_info = ADVENTURE_STORY_PHASES[phase]
+
+    player_level = max(1, int(adventure.get("level", 1)))
+    level_mul = float(phase_info.get("level_mul", 1.0))
+    level_flat = int(phase_info.get("level_flat", 0))
+
+    danger_bonus = int(adventure_danger(adventure) * 0.5)
+
+    monster_level = int(
+        player_level * level_mul
+        + level_flat
+        + danger_bonus
+    )
+
+    if adventure.get("hard_mode"):
+        monster_level = int(monster_level * 1.35)
+
+    return max(1, monster_level)
+
+
+def roll_adventure_special_weapon_drop(adventure, monster_name):
+    """P90/AK12/MINIGUN은 지정된 연구소 적에게서만 획득한다."""
+    drops = ADVENTURE_SPECIAL_WEAPON_DROPS.get(monster_name, [])
+    owned = set(adventure.get("owned_weapons", []))
+
+    for weapon_name, chance in drops:
+        if weapon_name in owned:
+            continue
+        if random.random() * 100 < chance:
+            adventure.setdefault("owned_weapons", ["무인검"]).append(weapon_name)
+            return {
+                "kind": "weapon",
+                "name": weapon_name,
+                "bonus": WEAPONS[weapon_name]["bonus"],
+                "special": True,
+                "chance": chance,
+            }
+    return None
+
+
+async def show_adventure_story_scene(
+    message,
+    member,
+    *,
+    title,
+    story_text,
+    next_phase,
+    button_label="계속",
+    result_lines=None,
+    color=None,
+):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    adventure["story_phase"] = next_phase
+    adventure["pending_event"] = {
+        "type": "story_continue",
+        "next_phase": next_phase,
+        "button_label": button_label,
+    }
+    save_data()
+
+    description_parts = []
+    if result_lines:
+        description_parts.append("\n".join(result_lines))
+    description_parts.append(story_text)
+
+    embed = discord.Embed(
+        title=title,
+        description="\n\n━━━━━━━━━━━━━━━━━━\n\n".join(description_parts),
+        color=color or discord.Color.dark_purple(),
+    )
+    await message.edit(
+        embed=embed,
+        view=AdventureStoryContinueView(uid, button_label=button_label),
+    )
+
+
+async def show_adventure_forced_encounter(message, member, phase):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    phase_info = ADVENTURE_STORY_PHASES.get(phase)
+
+    if not phase_info:
+        await message.edit(
+            content="스토리 전투 정보를 찾지 못했어.",
+            embed=None,
+            view=AdventureTravelView(uid),
+        )
+        return
+
+    monster_name = phase_info["monster"]
+    monster = find_adventure_monster_by_name(monster_name)
+    if monster is None:
+        await message.edit(
+            content=f"몬스터 데이터가 없어: {monster_name}",
+            embed=None,
+            view=AdventureTravelView(uid),
+        )
+        return
+
+    terrain_key = adventure.get("terrain") or "grassland"
+    terrain = get_terrain_info(terrain_key)
+    monster_level = get_story_monster_level(adventure, phase)
+    display_name = get_story_monster_display_name(member, phase, monster_name)
+
+    adventure["story_phase"] = phase
+    adventure["pending_event"] = {
+        "type": "monster",
+        "monster_name": monster_name,
+        "monster_level": monster_level,
+        "trait_name": None,
+        "monster_tier": "normal",
+        "terrain": terrain_key,
+        "is_boss": True,
+        "story_phase": phase,
+        "display_name": display_name,
+    }
+    save_data()
+
+    preview_chance = calc_adventure_win_chance(adventure, monster, monster_level, None)
+
+    if phase == "glitch_demon_king":
+        title = "!@#%... 대마왕이 나타났다"
+        notice = (
+            "주변에는 길도, 유물도, 재료도 없어. 오직 대마왕만이 존재해.\n"
+            "**쓰러뜨리거나 도주에 성공하면 17번 연구소로 넘어갈 수 있어.**"
+        )
+    elif phase == "mad_scientist_final":
+        title = "🧬 최종보스 — 각성한 매드 사이언티스트"
+        notice = "약물을 주입한 과학자의 육체가 붕괴하며 거대한 실험체로 변했다. 이번이 진짜 마지막 전투야."
+    elif phase.startswith("experiment_"):
+        title = "🚨 실험체 격리 해제"
+        notice = "매드 사이언티스트가 다음 격리 장치를 열었다. 이 전투에서는 도망칠 수 없어."
+    else:
+        title = "🚨 17번 연구소 교전"
+        notice = "시설 봉쇄가 시작됐다. 이 적을 쓰러뜨려야 다음 구역으로 갈 수 있어."
+
+    embed = discord.Embed(
+        title=title,
+        description=(
+            f"{notice}\n\n"
+            f"위치: **{terrain['emoji']} {terrain['name']}**\n"
+            f"**Lv.{monster_level} {display_name}** 등장!\n\n"
+            f"내 모험 레벨: **Lv.{adventure['level']}**\n"
+            f"{get_adventure_equipment_text(adventure)}\n"
+            f"예상 승률: **{preview_chance}%**\n"
+            f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**"
+        ),
+        color=discord.Color.dark_red(),
+    )
+    await message.edit(
+        embed=embed,
+        view=AdventureBattleView(uid, allow_escape=bool(phase_info.get("escape"))),
+    )
+
+
+async def continue_adventure_story(message, member):
+    adventure = get_adventure(member.id)
+    pending = adventure.get("pending_event") or {}
+    phase = pending.get("next_phase") or adventure.get("story_phase")
+
+    if phase not in ADVENTURE_STORY_PHASES:
+        await message.edit(
+            embed=build_adventure_status_embed(member, adventure),
+            view=AdventureTravelView(member.id),
+        )
+        return
+
+    adventure["pending_event"] = None
+    save_data()
+    await show_adventure_forced_encounter(message, member, phase)
+
+
+async def give_adventure_ending_role(member):
+    guild = member.guild
+    role = guild.get_role(ADVENTURE_ENDING_ROLE_ID) if ADVENTURE_ENDING_ROLE_ID else None
+
+    if role is None:
+        role = discord.utils.get(guild.roles, name=ADVENTURE_ENDING_ROLE_NAME)
+
+    if role is None:
+        try:
+            role = await guild.create_role(
+                name=ADVENTURE_ENDING_ROLE_NAME,
+                reason="모험 시스템 엔딩 보상 역할 자동 생성",
+            )
+        except (discord.Forbidden, discord.HTTPException) as error:
+            print(f"모험 엔딩 역할 생성 실패: {error}")
+            return None
+
+    if role not in member.roles:
+        try:
+            await member.add_roles(role, reason="17번 연구소 모험 엔딩 클리어")
+        except (discord.Forbidden, discord.HTTPException) as error:
+            print(f"모험 엔딩 역할 지급 실패: {error}")
+            return None
+    return role
+
+
+async def complete_adventure_ending(message, member, result_lines):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    first_clear = not adventure.get("ending_cleared", False)
+    adventure["ending_cleared"] = True
+    adventure["ending_clear_count"] = int(adventure.get("ending_clear_count", 0)) + 1
+    clear_count = adventure["ending_clear_count"]
+
+    role = await give_adventure_ending_role(member)
+    summary = finish_adventure(uid)
+
+    role_text = role.mention if role else f"`{ADVENTURE_ENDING_ROLE_NAME}` (봇 역할 권한을 확인해 줘)"
+    ending_embed = discord.Embed(
+        title="🎬 ENDING — 17번 연구소",
+        description=(
+            "\n".join(result_lines)
+            + "\n\n━━━━━━━━━━━━━━━━━━\n\n"
+            + "매드 사이언티스트의 몸이 무너지자 연구소 전체의 경보가 멎었다.\n"
+            + "닫혀 있던 지상 출구가 열리고, 지금까지의 모든 모험이 하나의 실험이었다는 기록만이 남았다.\n\n"
+            + f"{member.mention}은(는) 마침내 **모험의 끝**에 도달했다.\n"
+            + f"🏅 엔딩 역할: {role_text}\n"
+            + f"🔁 엔딩 클리어: **{clear_count}회**\n\n"
+            + f"👣 최종 진행: **{summary['steps']}회**\n"
+            + f"⚔️ 최종 처치: **{summary['kills']}마리**\n"
+            + f"💰 모험 수익: **{summary['earned_mora']:,}모라**"
+        ),
+        color=discord.Color.gold(),
+    )
+    ending_embed.set_footer(text="축하해. 모험 시스템의 엔딩을 최초로 완주했어!" if first_clear else "다시 한 번 엔딩을 완주했어!")
+    await message.edit(embed=ending_embed, view=None)
+
+    channel = member.guild.get_channel(ADVENTURE_ENDING_CHANNEL_ID) or bot.get_channel(ADVENTURE_ENDING_CHANNEL_ID)
+    if channel:
+        celebration = discord.Embed(
+            title="🎉 모험 엔딩 클리어!",
+            description=(
+                f"축하합니다, {member.mention}!\n\n"
+                "**천계 → 외곽 → !@$*!& → 17번 연구소**를 돌파하고\n"
+                "각성한 매드 사이언티스트를 쓰러뜨려 모험 시스템의 엔딩에 도달했습니다.\n\n"
+                f"🏅 획득 역할: {role_text}\n"
+                f"🔁 누적 엔딩 클리어: **{clear_count}회**"
+            ),
+            color=discord.Color.gold(),
+        )
+        celebration.set_thumbnail(url=member.display_avatar.url)
+        try:
+            await channel.send(content=member.mention, embed=celebration)
+        except discord.HTTPException as error:
+            print(f"모험 엔딩 축하 메시지 전송 실패: {error}")
+
+
+async def handle_adventure_story_victory(message, member, phase, result_lines):
+    uid = str(member.id)
+    adventure = get_adventure(uid)
+    defeated = adventure.setdefault("lab_defeated", [])
+    monster_name = ADVENTURE_STORY_PHASES.get(phase, {}).get("monster")
+    if monster_name and monster_name not in defeated:
+        defeated.append(monster_name)
+
+    if phase == "glitch_demon_king":
+        move_adventure_to_terrain(adventure, "lab17")
+        await show_adventure_story_scene(
+            message,
+            member,
+            title="🧪 17번 연구소",
+            story_text=(
+                "대마왕의 뒤에서 금속제 방폭문이 모습을 드러냈다.\n"
+                "문에는 희미하게 **제17연구소**라는 글자가 적혀 있다.\n\n"
+                "시설 방송: `미인가 실험체 접근 확인. 전 구역 봉쇄.`"
+            ),
+            next_phase="lab_guard",
+            button_label="연구소에 진입한다",
+            result_lines=result_lines,
+            color=discord.Color.dark_teal(),
+        )
+        return
+
+    phase_flow = {
+        "lab_guard": (
+            "lab_mtf",
+            "🚨 2차 방어선",
+            "시설 가드가 쓰러지자 중무장한 **기동특수부대원**이 통로를 봉쇄했다.",
+            "다음 구역 돌파",
+        ),
+        "lab_mtf": (
+            "lab_alpha",
+            "⚠️ 알파 부대 투입",
+            "일반 기동부대로는 막을 수 없다고 판단한 연구소가 **알파 부대원**을 투입했다.",
+            "알파 부대와 교전",
+        ),
+        "lab_alpha": (
+            "lab_alpha_leader",
+            "🔺 지휘관 접근",
+            "알파 부대원의 통신기에서 명령이 흘러나온다.\n`부대장이 직접 처리한다.`",
+            "알파 부대장과 맞선다",
+        ),
+        "lab_alpha_leader": (
+            "lab_juggernaut",
+            "🛡️ 최종 방어 병기",
+            "알파 부대장이 쓰러지자 잠겨 있던 격납고가 열렸다.\n"
+            "**알파 부대장을 처치했기 때문에 저거너트가 출현했다.**",
+            "저거너트와 교전",
+        ),
+        "lab_juggernaut": (
+            "experiment_19",
+            "🧬 매드 사이언티스트",
+            "`훌륭해. 여기까지 도달한 개체는 네가 처음이야.`\n\n"
+            "흰 가운을 입은 남자가 박수를 치며 관제실에서 내려온다.\n"
+            "`하지만 경비를 이긴 정도로 실험이 끝났다고 생각하진 않았겠지?`\n"
+            "`19번 실험체, 격리를 해제한다.`",
+            "19번 실험체와 맞선다",
+        ),
+        "experiment_19": (
+            "experiment_39",
+            "🧫 다음 실험체",
+            "매드 사이언티스트: `대마왕조차 실패인가. 좋아, 39번의 데이터를 확인하지.`\n"
+            "정체를 알 수 없는 거대한 격리 용기가 열리기 시작한다.",
+            "39번 실험체와 맞선다",
+        ),
+        "experiment_39": (
+            "experiment_1",
+            "1️⃣ 마지막 실험체",
+            f"매드 사이언티스트: `이제 마지막이다. 최초이자 최종 실험체, 1번.`\n\n"
+            f"모니터에 표시된 1번 실험체의 이름은 다름 아닌 **{member.mention}**이었다.",
+            "1번 실험체와 맞선다",
+        ),
+        "experiment_1": (
+            "mad_scientist_final",
+            "💉 최종 실험",
+            "매드 사이언티스트: `1번마저 넘어섰다고...? 그렇다면 내가 직접 완성체가 되겠다.`\n\n"
+            "그가 검붉은 약물을 자신의 목에 꽂았다. 뼈가 뒤틀리고 연구소 전체가 진동하기 시작한다.",
+            "각성한 과학자와 최종전",
+        ),
+    }
+
+    if phase == "mad_scientist_final":
+        await complete_adventure_ending(message, member, result_lines)
+        return
+
+    next_data = phase_flow.get(phase)
+    if not next_data:
+        save_data()
+        await message.edit(
+            embed=discord.Embed(
+                title="⚔️ 전투 승리!",
+                description="\n".join(result_lines),
+                color=discord.Color.green(),
+            ),
+            view=AdventureTravelView(uid),
+        )
+        return
+
+    next_phase, title, story_text, button_label = next_data
+    await show_adventure_story_scene(
+        message,
+        member,
+        title=title,
+        story_text=story_text,
+        next_phase=next_phase,
+        button_label=button_label,
+        result_lines=result_lines,
+        color=discord.Color.dark_red(),
     )
 
 
@@ -10333,6 +10927,19 @@ async def roll_adventure_event(message, member):
     if pending and pending.get("type") == "terrain_choice":
         await show_terrain_choice(message, member)
         return
+    if pending and pending.get("type") == "story_continue":
+        await continue_adventure_story(message, member)
+        return
+
+    terrain_key = adventure.get("terrain") or "grassland"
+    if terrain_key in ADVENTURE_FORCED_TERRAINS:
+        phase = adventure.get("story_phase")
+        if not phase:
+            phase = "glitch_demon_king" if terrain_key == "glitch" else "lab_guard"
+            adventure["story_phase"] = phase
+            save_data()
+        await show_adventure_forced_encounter(message, member, phase)
+        return
 
     adventure["steps"] += 1
     adventure["terrain_steps"] = adventure.get("terrain_steps", 0) + 1
@@ -10357,7 +10964,11 @@ async def roll_adventure_event(message, member):
 
     # 아무 조건 없이 나타나는 희귀 갈림길. 특수 지형도 진입 방향 제한은 반드시 지킨다.
     route_rate = ADVENTURE_RANDOM_ROUTE_RATE + min(1.5, boosts.get("luck", 0) * 0.04)
-    if adventure["terrain_steps"] >= 2 and random.random() * 100 < route_rate:
+    if (
+        terrain_key not in ADVENTURE_STORY_LOCKED_TERRAINS
+        and adventure["terrain_steps"] >= 2
+        and random.random() * 100 < route_rate
+    ):
         destinations = valid_terrain_destinations(terrain_key)
         if len(destinations) > 2:
             destinations = random.sample(destinations, k=random.randint(2, min(3, len(destinations))))
@@ -10521,6 +11132,7 @@ async def resolve_adventure_battle(message, member):
     terrain_key = pending.get("terrain") or adventure.get("terrain") or "grassland"
     terrain = get_terrain_info(terrain_key)
     is_boss = bool(pending.get("is_boss"))
+    story_phase = pending.get("story_phase")
 
     if monster is None:
         adventure["pending_event"] = None
@@ -10529,7 +11141,7 @@ async def resolve_adventure_battle(message, member):
         return
 
     battle_level = apply_trait_to_monster_level(monster_level, trait)
-    display_name = format_adventure_monster_name(
+    display_name = pending.get("display_name") or format_adventure_monster_name(
         monster["name"],
         trait,
         monster_tier,
@@ -10564,49 +11176,66 @@ async def resolve_adventure_battle(message, member):
     adventure["total_kills"] += 1
     adventure["earned_mora"] += reward
 
-    loot_id = pick_monster_loot(monster["name"], adventure)
-    loot_amount = 1
-    if ADVENTURE_ITEM_CATALOG[loot_id]["rarity"] in {"common", "uncommon"}:
-        loot_amount = random.randint(1, 2)
+    # !@$*!&에서는 대마왕 외에 어떤 물건도 존재하지 않는다.
+    loot_id = None
+    loot_amount = 0
+    if story_phase != "glitch_demon_king":
+        loot_id = pick_monster_loot(monster["name"], adventure)
+        if loot_id:
+            loot_amount = 1
+            if ADVENTURE_ITEM_CATALOG[loot_id]["rarity"] in {"common", "uncommon"}:
+                loot_amount = random.randint(1, 2)
+            loot_amount += tier_info["loot_bonus"]
+            add_adventure_item(uid, loot_id, loot_amount)
 
-    loot_amount += tier_info["loot_bonus"]
-    add_adventure_item(uid, loot_id, loot_amount)
-
-    equipment_drop = roll_adventure_equipment_drop(
-        adventure, monster_tier=monster_tier, is_boss=is_boss
-    )
-
-    relic_chance = min(
-        20.0 if adventure.get("hard_mode") else 14.0,
-        1.2
-        + adventure.get("boosts", {}).get("relic", 0)
-        + adventure_danger(adventure) * 0.012
-        + (ADVENTURE_HARD_RELIC_BONUS if adventure.get("hard_mode") else 0.0),
-    )
+    # 연구소 스토리 전투에서는 일반 장비 추첨을 하지 않는다.
+    # P90/AK12/MINIGUN은 지정 몬스터 전용 추첨만 사용한다.
+    equipment_drop = None
+    special_weapon_drop = None
+    if story_phase:
+        special_weapon_drop = roll_adventure_special_weapon_drop(adventure, monster["name"])
+    else:
+        equipment_drop = roll_adventure_equipment_drop(
+            adventure, monster_tier=monster_tier, is_boss=is_boss
+        )
 
     relic_id = None
     relic_is_new = False
+    allow_relic_drop = not story_phase and terrain_key not in ADVENTURE_STORY_LOCKED_TERRAINS
+    if allow_relic_drop:
+        relic_chance = min(
+            20.0 if adventure.get("hard_mode") else 14.0,
+            1.2
+            + adventure.get("boosts", {}).get("relic", 0)
+            + adventure_danger(adventure) * 0.012
+            + (ADVENTURE_HARD_RELIC_BONUS if adventure.get("hard_mode") else 0.0),
+        )
 
-    if random.random() * 100 < relic_chance:
-        relic_id = pick_mystery_relic(adventure)
-        relic_is_new = relic_id not in discovered_items
-        add_adventure_item(uid, relic_id, 1)
+        if random.random() * 100 < relic_chance:
+            relic_id = pick_mystery_relic(adventure)
+            relic_is_new = relic_id not in discovered_items
+            add_adventure_item(uid, relic_id, 1)
 
-        route_destinations = get_route_relic_destinations(relic_id, adventure)
-        if route_destinations:
-            queue_terrain_choice(adventure, route_destinations, "relic", get_adventure_item_name(relic_id))
-        if relic_is_new:
-            adventure["pending_name_item_id"] = relic_id
+            route_destinations = get_route_relic_destinations(relic_id, adventure)
+            if route_destinations:
+                queue_terrain_choice(adventure, route_destinations, "relic", get_adventure_item_name(relic_id))
+            if relic_is_new:
+                adventure["pending_name_item_id"] = relic_id
 
     boss_routes = []
-    if is_boss:
+    story_transition = None
+    if is_boss and not story_phase:
         defeated = adventure.setdefault("defeated_bosses", [])
         if terrain_key not in defeated:
             defeated.append(terrain_key)
-        boss_routes = valid_terrain_destinations(terrain_key)
-        queue_terrain_choice(adventure, boss_routes, "boss", monster["name"])
 
-    save_data()
+        if terrain_key == "heaven":
+            story_transition = "outskirts"
+        elif terrain_key == "outskirts":
+            story_transition = "glitch"
+        else:
+            boss_routes = valid_terrain_destinations(terrain_key)
+            queue_terrain_choice(adventure, boss_routes, "boss", monster["name"])
 
     result_lines = [
         f"✅ **Lv.{battle_level} {display_name}** 처치!",
@@ -10616,14 +11245,24 @@ async def resolve_adventure_battle(message, member):
         "",
         f"💰 **{reward:,}모라**",
         f"⭐ 모험 경험치 **{exp} EXP**",
-        f"🎒 {get_adventure_item_line(loot_id, loot_amount)}",
     ]
+
+    if loot_id:
+        result_lines.append(f"🎒 {get_adventure_item_line(loot_id, loot_amount)}")
+    elif story_phase == "glitch_demon_king":
+        result_lines.append("🕳️ 이 공간에는 가져갈 수 있는 전리품이 없었다.")
 
     if equipment_drop:
         equipment_emoji = "🗡️" if equipment_drop["kind"] == "weapon" else "🛡️"
         result_lines.append(
             f"{equipment_emoji} 새 장비 발견: **{equipment_drop['name']}** "
             f"(승률 보너스 +{equipment_drop['bonus']})"
+        )
+
+    if special_weapon_drop:
+        result_lines.append(
+            f"🔫 전용 무기 획득: **{special_weapon_drop['name']}** "
+            f"(승률 보너스 +{special_weapon_drop['bonus']}, 드롭률 {special_weapon_drop['chance']:.0f}%)"
         )
 
     if leveled:
@@ -10635,6 +11274,49 @@ async def resolve_adventure_battle(message, member):
             result_lines.append("최초 발견 유물이야. 이름을 지어줘!")
         if get_route_relic_destinations(relic_id, adventure):
             result_lines.append("🔮 유물이 숨겨진 지형으로 이어지는 길을 열었어!")
+
+    # 강제 스토리 전투는 승리 후 다음 순서로 곧바로 연결한다.
+    if story_phase:
+        save_data()
+        await handle_adventure_story_victory(message, member, story_phase, result_lines)
+        return
+
+    # 천계 이후에는 갈림길 선택 없이 보스를 잡아야만 고정된 다음 스테이지로 간다.
+    if story_transition == "outskirts":
+        move_adventure_to_terrain(adventure, "outskirts")
+        save_data()
+        result_lines.append(
+            "\n🌌 천리의 유지자가 지키던 벽이 무너지고 **외곽**으로 향하는 단 하나의 길이 열렸다."
+        )
+        embed = discord.Embed(
+            title="👑 천계 보스 격파 — 외곽 진입",
+            description="\n".join(result_lines),
+            color=discord.Color.gold(),
+        )
+        await message.edit(embed=embed, view=AdventureTravelView(uid))
+        return
+
+    if story_transition == "glitch":
+        move_adventure_to_terrain(adventure, "glitch")
+        adventure["story_phase"] = "glitch_demon_king"
+        save_data()
+        await show_adventure_story_scene(
+            message,
+            member,
+            title="� !@$*!&",
+            story_text=(
+                "외곽의 신이 쓰러진 순간 공간이 찢어졌다.\n"
+                "빛도 길도 사라지고, 깨진 문자 사이에서 하나의 형체만 다가온다.\n\n"
+                "이곳에서는 탐색도, 유물 발견도, 다른 행동도 할 수 없다."
+            ),
+            next_phase="glitch_demon_king",
+            button_label="대마왕을 마주한다",
+            result_lines=result_lines,
+            color=discord.Color.dark_purple(),
+        )
+        return
+
+    save_data()
 
     if is_boss:
         if boss_routes:
@@ -10682,10 +11364,43 @@ async def resolve_adventure_escape(message, member):
         await message.edit(content="도망칠 상대가 없어.", embed=None, view=AdventureTravelView(uid))
         return
 
+    story_phase = pending.get("story_phase")
+    if story_phase and story_phase != "glitch_demon_king":
+        await message.edit(
+            embed=discord.Embed(
+                title="🚫 퇴로가 차단됐다",
+                description="17번 연구소의 격리문이 닫혀 있어 이 전투에서는 도망칠 수 없어.",
+                color=discord.Color.dark_red(),
+            ),
+            view=AdventureBattleView(uid, allow_escape=False),
+        )
+        return
+
     escape_chance = calc_adventure_escape_chance(adventure)
     adventure["pending_event"] = None
 
     if random.randint(1, 100) <= escape_chance:
+        if story_phase == "glitch_demon_king":
+            move_adventure_to_terrain(adventure, "lab17")
+            adventure["story_phase"] = "lab_guard"
+            save_data()
+            await show_adventure_story_scene(
+                message,
+                member,
+                title="💨 도주 성공 — 17번 연구소 발견",
+                story_text=(
+                    f"도주 확률 **{escape_chance}%**\n"
+                    f"{get_adventure_equipment_text(adventure)}\n\n"
+                    "대마왕의 공격을 피해 깨진 공간의 틈으로 뛰어들었다.\n"
+                    "눈을 뜨자 거대한 철문과 함께 **제17연구소**라는 표식이 보였다.\n\n"
+                    "시설 방송: `미인가 실험체 접근 확인. 전 구역 봉쇄.`"
+                ),
+                next_phase="lab_guard",
+                button_label="연구소에 진입한다",
+                color=discord.Color.blue(),
+            )
+            return
+
         save_data()
         embed = discord.Embed(
             title="💨 도주 성공!",
@@ -10739,6 +11454,32 @@ def build_adventure_start_embed(uid, hard_mode=False):
         ),
         color=discord.Color.red() if hard_mode else discord.Color.blurple(),
     )
+
+
+class AdventureStoryContinueView(discord.ui.View):
+    def __init__(self, user_id, button_label="계속"):
+        super().__init__(timeout=900)
+        self.user_id = str(user_id)
+        self.continue_story.label = button_label
+
+    @discord.ui.button(label="계속", style=discord.ButtonStyle.danger)
+    async def continue_story(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        lock = get_adventure_lock(self.user_id)
+        if lock.locked():
+            await interaction.response.send_message("이미 다음 장면을 처리 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            adventure = get_adventure(self.user_id)
+            if not adventure.get("active"):
+                await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+                return
+
+            await interaction.response.defer()
+            await continue_adventure_story(interaction.message, interaction.user)
 
 
 class AdventureStartTerrainView(discord.ui.View):
@@ -11286,6 +12027,26 @@ class AdventureTravelView(discord.ui.View):
             await interaction.response.send_message("먼저 발견한 유물의 이름을 지어줘.", ephemeral=True)
             return
 
+        pending = adventure.get("pending_event") or {}
+        lock = get_adventure_lock(uid)
+
+        if pending.get("type") == "story_continue" or adventure.get("terrain") in ADVENTURE_FORCED_TERRAINS:
+            if lock.locked():
+                await interaction.response.send_message("이미 스토리를 진행 중이야.", ephemeral=True)
+                return
+            async with lock:
+                await interaction.response.defer()
+                if pending.get("type") == "story_continue":
+                    await continue_adventure_story(interaction.message, interaction.user)
+                else:
+                    phase = adventure.get("story_phase")
+                    if not phase:
+                        phase = "glitch_demon_king" if adventure.get("terrain") == "glitch" else "lab_guard"
+                        adventure["story_phase"] = phase
+                        save_data()
+                    await show_adventure_forced_encounter(interaction.message, interaction.user, phase)
+            return
+
         lock = get_adventure_lock(uid)
         if lock.locked():
             await interaction.response.send_message("이미 이동 중이야.", ephemeral=True)
@@ -11339,9 +12100,13 @@ class AdventureTravelView(discord.ui.View):
 
 
 class AdventureBattleView(discord.ui.View):
-    def __init__(self, user_id):
+    def __init__(self, user_id, allow_escape=True):
         super().__init__(timeout=180)
         self.user_id = str(user_id)
+        self.allow_escape = bool(allow_escape)
+        self.escape.disabled = not self.allow_escape
+        if not self.allow_escape:
+            self.escape.label = "🚫 도주 불가"
 
     @discord.ui.button(label="⚔️ 전투 시작", style=discord.ButtonStyle.danger)
     async def battle(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -11390,6 +12155,9 @@ class AdventureBattleView(discord.ui.View):
     @discord.ui.button(label="💨 도망가기", style=discord.ButtonStyle.secondary)
     async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
+            return
+        if not self.allow_escape:
+            await interaction.response.send_message("이 전투에서는 도망칠 수 없어.", ephemeral=True)
             return
 
         uid = self.user_id
@@ -11801,13 +12569,32 @@ async def send_adventure_screen(channel, member, uid):
             )
             return
 
+        if pending_event and pending_event.get("type") == "story_continue":
+            next_phase = pending_event.get("next_phase") or adventure.get("story_phase")
+            terrain = get_terrain_info(adventure.get("terrain"))
+            await channel.send(
+                embed=discord.Embed(
+                    title="📖 최종장 진행 중",
+                    description=(
+                        f"현재 위치: **{terrain['emoji']} {terrain['name']}**\n"
+                        "중단된 장면부터 계속 진행할 수 있어."
+                    ),
+                    color=discord.Color.dark_purple(),
+                ),
+                view=AdventureStoryContinueView(
+                    uid,
+                    button_label=pending_event.get("button_label", "계속"),
+                ),
+            )
+            return
+
         if pending_event and pending_event.get("type") == "monster":
             monster = find_adventure_monster_by_name(pending_event.get("monster_name"))
             trait = get_trait_by_name(pending_event.get("trait_name"))
 
             if monster:
                 monster_tier = pending_event.get("monster_tier", "normal")
-                display_name = format_adventure_monster_name(monster["name"], trait, monster_tier)
+                display_name = pending_event.get("display_name") or format_adventure_monster_name(monster["name"], trait, monster_tier)
                 terrain = get_terrain_info(pending_event.get("terrain") or adventure.get("terrain"))
 
                 if pending_event.get("is_boss"):
@@ -11834,7 +12621,15 @@ async def send_adventure_screen(channel, member, uid):
                     ),
                     color=resume_color,
                 )
-                await channel.send(embed=embed, view=AdventureBattleView(uid))
+                story_phase = pending_event.get("story_phase")
+                allow_escape = bool(
+                    not story_phase
+                    or ADVENTURE_STORY_PHASES.get(story_phase, {}).get("escape", False)
+                )
+                await channel.send(
+                    embed=embed,
+                    view=AdventureBattleView(uid, allow_escape=allow_escape),
+                )
                 return
 
             adventure["pending_event"] = None
@@ -11843,6 +12638,18 @@ async def send_adventure_screen(channel, member, uid):
         if adventure.get("turn_ready_at"):
             embed = build_adventure_waiting_embed(member, adventure)
             await channel.send(embed=embed, view=AdventureTurnWaitingView(uid))
+            return
+
+        if adventure.get("terrain") in ADVENTURE_FORCED_TERRAINS:
+            terrain = get_terrain_info(adventure.get("terrain"))
+            await channel.send(
+                embed=discord.Embed(
+                    title="📖 최종장 진행 중",
+                    description=f"현재 위치: **{terrain['emoji']} {terrain['name']}**\n계속 버튼을 눌러 전투를 이어가.",
+                    color=discord.Color.dark_purple(),
+                ),
+                view=AdventureStoryContinueView(uid, button_label="전투 계속"),
+            )
             return
 
         embed = build_adventure_status_embed(member, adventure)
