@@ -8828,7 +8828,12 @@ ADVENTURE_POTION_CATALOG = {
 # 이름은 코드에 넣지 않고, 서버에서 해당 레시피를 최초 발견한 유저가 직접 정한다.
 # 같은 레시피의 버프는 한 모험에서 한 번만 받을 수 있다.
 ADVENTURE_COOKING_PAGE_SIZE = 25
-ADVENTURE_COOKING_RECIPES = {
+ADVENTURE_COOKING_RECIPE_TOTAL = 150
+
+# 앞의 12종은 직접 설계한 대표 레시피다.
+# 나머지는 서버가 재시작돼도 절대로 바뀌지 않는 고정 해시 순서로 생성한다.
+# 즉, 실행할 때마다 무작위로 달라지는 레시피가 아니라 코드상 고정된 150종이다.
+ADVENTURE_COOKING_BASE_RECIPES = {
     "dish_001": {
         "ingredients": ["terrain_00_00", "terrain_00_03", "terrain_00_05"],
         "effects": {"battle": 6, "loot": 4},
@@ -8878,6 +8883,118 @@ ADVENTURE_COOKING_RECIPES = {
         "effects": {"battle": 8, "loot": 8, "relic": 2},
     },
 }
+
+# 자동 생성 요리들의 효과 원형. 뒤쪽 번호일수록 조금씩 강해진다.
+ADVENTURE_COOKING_EFFECT_PATTERNS = [
+    {"battle": 5, "loot": 4},
+    {"luck": 5, "loot": 5},
+    {"escape": 7, "battle": 3},
+    {"life_save": 6, "luck": 3},
+    {"relic": 1.2, "loot": 4},
+    {"battle": 7, "luck": 4},
+    {"loot": 7, "escape": 5},
+    {"heal": 1, "battle": 3},
+    {"life_save": 8, "loot": 3},
+    {"relic": 1.8, "luck": 5},
+    {"battle": 8, "escape": 6},
+    {"luck": 7, "life_save": 5},
+    {"loot": 8, "relic": 1.0},
+    {"battle": 6, "loot": 6, "luck": 3},
+    {"escape": 9, "relic": 1.5},
+    {"life_save": 9, "battle": 4},
+    {"heal": 1, "loot": 5, "luck": 3},
+    {"battle": 9, "relic": 1.2},
+    {"loot": 9, "escape": 7},
+    {"luck": 9, "battle": 4},
+]
+
+
+def build_adventure_cooking_recipes():
+    recipes = {
+        recipe_id: {
+            "ingredients": list(recipe["ingredients"]),
+            "effects": dict(recipe["effects"]),
+        }
+        for recipe_id, recipe in ADVENTURE_COOKING_BASE_RECIPES.items()
+    }
+
+    # 현재 모험 지형 8개 × 지형별 전리품 6개 = 요리 가능한 기본 재료 48종.
+    ingredient_ids = [
+        f"terrain_{terrain_index:02d}_{loot_index:02d}"
+        for terrain_index in range(8)
+        for loot_index in range(6)
+    ]
+
+    existing_keys = {
+        tuple(sorted(recipe["ingredients"]))
+        for recipe in recipes.values()
+    }
+
+    candidates = []
+    for first_index in range(len(ingredient_ids) - 2):
+        for second_index in range(first_index + 1, len(ingredient_ids) - 1):
+            for third_index in range(second_index + 1, len(ingredient_ids)):
+                combo = (
+                    ingredient_ids[first_index],
+                    ingredient_ids[second_index],
+                    ingredient_ids[third_index],
+                )
+                if combo in existing_keys:
+                    continue
+
+                # 파이썬 hash()는 실행마다 달라질 수 있으므로 SHA-256으로 고정 순서를 만든다.
+                fixed_order_key = hashlib.sha256(
+                    ("adventure-cooking-v2|" + "|".join(combo)).encode("utf-8")
+                ).hexdigest()
+                candidates.append((fixed_order_key, combo))
+
+    candidates.sort(key=lambda pair: pair[0])
+
+    next_number = len(recipes) + 1
+    for _, combo in candidates:
+        if next_number > ADVENTURE_COOKING_RECIPE_TOTAL:
+            break
+
+        pattern_index = (next_number - 13) % len(ADVENTURE_COOKING_EFFECT_PATTERNS)
+        tier = min(4, (next_number - 1) // 30)
+        base_effects = ADVENTURE_COOKING_EFFECT_PATTERNS[pattern_index]
+        effects = {}
+
+        for effect_key, base_value in base_effects.items():
+            if effect_key in ("heal", "max_lives"):
+                effects[effect_key] = int(base_value)
+            elif effect_key == "relic":
+                effects[effect_key] = round(float(base_value) + tier * 0.35, 2)
+            else:
+                effects[effect_key] = int(round(float(base_value) * (1 + tier * 0.12)))
+
+        # 30종마다 한 번씩 희귀한 최대 목숨 증가 요리가 등장한다.
+        # 너무 많이 쌓이지 않도록 해당 요리의 다른 효과는 비교적 낮게 유지한다.
+        if next_number in (30, 60, 90, 120, 150):
+            effects = {
+                "max_lives": 1,
+                "heal": 1,
+                "life_save": 5 + tier * 2,
+            }
+
+        recipe_id = f"dish_{next_number:03d}"
+        recipes[recipe_id] = {
+            "ingredients": list(combo),
+            "effects": effects,
+        }
+        existing_keys.add(combo)
+        next_number += 1
+
+    if len(recipes) != ADVENTURE_COOKING_RECIPE_TOTAL:
+        raise RuntimeError(
+            f"요리 레시피 생성 실패: {len(recipes)}/{ADVENTURE_COOKING_RECIPE_TOTAL}종"
+        )
+
+    return recipes
+
+
+ADVENTURE_COOKING_RECIPES = build_adventure_cooking_recipes()
+
 
 adventure_action_locks = {}
 
@@ -9600,17 +9717,24 @@ def cook_adventure_food(uid, selected_item_ids, member):
 
     recipe_key = tuple(sorted(selected_item_ids))
     recipe_id = ADVENTURE_COOKING_RECIPE_LOOKUP.get(recipe_key)
-    if not recipe_id:
-        return False, "🥣 아무 요리도 완성되지 않았어. 재료는 소모되지 않았어.", None, False
 
+    # 이미 이번 모험에서 먹은 완성 요리는 조리 자체를 막고 재료도 건드리지 않는다.
+    # 틀린 조합은 실제 조리 실패로 처리하여 아래에서 재료를 전부 소모한다.
     used = adventure.setdefault("cooked_recipe_ids", [])
-    if recipe_id in used:
+    if recipe_id and recipe_id in used:
         return False, "❌ 같은 레시피의 버프는 한 모험에서 한 번만 받을 수 있어.", recipe_id, False
 
     for item_id, amount in required.items():
         inventory[item_id] = int(inventory.get(item_id, 0)) - amount
         if inventory[item_id] <= 0:
             inventory.pop(item_id, None)
+
+    if not recipe_id:
+        save_data()
+        return False, (
+            "🔥 요리에 실패했어! 정체불명의 검은 덩어리만 남았고 "
+            "넣었던 재료 3개는 전부 사라졌어."
+        ), None, False
 
     used.append(recipe_id)
     healed = apply_adventure_food_effect(adventure, recipe_id)
@@ -12387,7 +12511,7 @@ def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_tex
         description=(
             "가방의 전리품을 세 칸에 하나씩 넣어 조합해. 재료 순서는 상관없어.\n"
             "정확한 레시피면 재료가 소모되고, 완성한 요리를 바로 먹어 이번 모험 버프를 받아.\n"
-            "틀린 조합은 재료를 소모하지 않아. 같은 레시피 버프는 모험당 1회만 적용돼.\n\n"
+            "틀린 조합도 조리에 실패하면서 넣은 재료 3개를 전부 잃어. 같은 레시피 버프는 모험당 1회만 적용돼.\n\n"
             "## 조리대\n" + "\n".join(slot_lines)
             + f"\n\n## 재료 목록 ({page + 1}/{total_pages}쪽)\n"
             + ("\n".join(page_lines) if page_lines else "요리에 쓸 수 있는 전리품이 없어.")
