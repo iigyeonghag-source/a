@@ -71,6 +71,7 @@ data = {
     "adventures": {},
     "inventories": {},
     "discovered_items": {},
+    "discovered_foods": {},
     "relic_upgrades": {},
     "shop_items": {}
 }
@@ -87,6 +88,7 @@ warnings = {}
 adventures = {}
 inventories = {}
 discovered_items = {}
+discovered_foods = {}
 relic_upgrades = {}
 shop_items = {}
 
@@ -101,7 +103,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, relic_upgrades, shop_items
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, discovered_foods, relic_upgrades, shop_items
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -114,6 +116,7 @@ def load_data():
         data["adventures"] = loaded.get("adventures", {})
         data["inventories"] = loaded.get("inventories", {})
         data["discovered_items"] = loaded.get("discovered_items", {})
+        data["discovered_foods"] = loaded.get("discovered_foods", {})
         data["relic_upgrades"] = loaded.get("relic_upgrades", {})
         data["shop_items"] = loaded.get("shop_items", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
@@ -149,7 +152,8 @@ def load_data():
     character_pity = data["character_pity"]
     adventures = data["adventures"]
     inventories = data["inventories"]
-    discovered_items = data["discovered_items"]
+    discovered_items = data.get("discovered_items", {})
+    discovered_foods = data.get("discovered_foods", {})
     relic_upgrades = data["relic_upgrades"]
     shop_items = data["shop_items"]
     
@@ -174,6 +178,7 @@ def save_data():
     data["adventures"] = adventures
     data["inventories"] = inventories
     data["discovered_items"] = discovered_items
+    data["discovered_foods"] = discovered_foods
     data["relic_upgrades"] = relic_upgrades
     data["shop_items"] = shop_items
     data["warnings"] = warnings
@@ -5154,6 +5159,11 @@ WEAPONS = {
     "P90": {"price": 0, "bonus": 95, "obtain_only": True},
     "AK12": {"price": 0, "bonus": 145, "obtain_only": True},
     "MINIGUN": {"price": 0, "bonus": 235, "obtain_only": True},
+
+    # 외곽 / !@$*!& 전용 장비. 지정된 적 외에는 절대 드롭하지 않는다.
+    "홍련의 신검": {"price": 0, "bonus": 310, "obtain_only": True},
+    "폭풍의 신검": {"price": 0, "bonus": 320, "obtain_only": True},
+    "종말의 마검": {"price": 0, "bonus": 420, "obtain_only": True},
 }
 
 ARMORS = {
@@ -5168,7 +5178,11 @@ ARMORS = {
     "그림자 사냥꾼": {"price": 15000, "bonus": 45},
     "황금 극단": {"price": 20000, "bonus": 60},
     "화려한 꿈의 껍데기": {"price": 100000, "bonus": 80},
-    "용사의 갑옷": {"price": 5000000, "bonus": 200}
+    "용사의 갑옷": {"price": 5000000, "bonus": 200},
+
+    # 외곽 신 전용 방어구. 일반 장비 추첨에서는 제외된다.
+    "심해신의 예복": {"price": 0, "bonus": 260, "obtain_only": True},
+    "대지신의 갑주": {"price": 0, "bonus": 280, "obtain_only": True},
 }
 
 
@@ -8485,7 +8499,7 @@ ADVENTURE_TERRAINS = {
     },
     "glitch": {
         "name": "!@$*!&",
-        "emoji": "�",
+        "emoji": " ",
         "color": 0x16051F,
         "description": "공간과 글자가 무너진 장소. 이곳에는 대마왕 외에는 아무것도 존재하지 않는다.",
         "danger_mul": 2.0,
@@ -8567,13 +8581,27 @@ ADVENTURE_ENDING_CHANNEL_ID = 1523946840310157323
 ADVENTURE_ENDING_ROLE_ID = 0
 ADVENTURE_ENDING_ROLE_NAME = "THE END"
 
-# 연구소 전용 총기. 일반 장비 드롭에서는 제외되며 아래 적에게서만 나온다.
-ADVENTURE_RESTRICTED_WEAPONS = {"P90", "AK12", "MINIGUN"}
-ADVENTURE_SPECIAL_WEAPON_DROPS = {
-    "기동특수부대원": [("P90", 18.0)],
-    "알파 부대원": [("AK12", 14.0)],
-    "알파 부대장": [("AK12", 30.0)],
-    "저거너트": [("MINIGUN", 20.0)],
+# 지정 몬스터 전용 장비. 일반 장비 드롭에서는 제외되며
+# 아래 몬스터를 직접 쓰러뜨렸을 때만 각 확률로 획득할 수 있다.
+ADVENTURE_RESTRICTED_WEAPONS = {
+    "P90", "AK12", "MINIGUN",
+    "홍련의 신검", "폭풍의 신검", "종말의 마검",
+}
+ADVENTURE_EXCLUSIVE_EQUIPMENT_DROPS = {
+    # 17번 연구소
+    "기동특수부대원": [("weapon", "P90", 18.0)],
+    "알파 부대원": [("weapon", "AK12", 14.0)],
+    "알파 부대장": [("weapon", "AK12", 30.0)],
+    "저거너트": [("weapon", "MINIGUN", 20.0)],
+
+    # 외곽의 네 신
+    "불의 신": [("weapon", "홍련의 신검", 10.0)],
+    "물의 신": [("armor", "심해신의 예복", 10.0)],
+    "바람의 신": [("weapon", "폭풍의 신검", 10.0)],
+    "땅의 신": [("armor", "대지신의 갑주", 10.0)],
+
+    # !@$*!&
+    "대마왕": [("weapon", "종말의 마검", 6.0)],
 }
 
 ADVENTURE_STORY_PHASES = {
@@ -8796,6 +8824,61 @@ ADVENTURE_POTION_CATALOG = {
     },
 }
 
+# 요리는 정확히 3개의 전리품을 조합한다. 재료 순서는 상관없다.
+# 이름은 코드에 넣지 않고, 서버에서 해당 레시피를 최초 발견한 유저가 직접 정한다.
+# 같은 레시피의 버프는 한 모험에서 한 번만 받을 수 있다.
+ADVENTURE_COOKING_PAGE_SIZE = 25
+ADVENTURE_COOKING_RECIPES = {
+    "dish_001": {
+        "ingredients": ["terrain_00_00", "terrain_00_03", "terrain_00_05"],
+        "effects": {"battle": 6, "loot": 4},
+    },
+    "dish_002": {
+        "ingredients": ["terrain_01_01", "terrain_01_04", "terrain_01_05"],
+        "effects": {"heal": 1, "life_save": 6},
+    },
+    "dish_003": {
+        "ingredients": ["terrain_02_00", "terrain_02_02", "terrain_02_03"],
+        "effects": {"luck": 8, "loot": 6},
+    },
+    "dish_004": {
+        "ingredients": ["terrain_03_02", "terrain_03_04", "terrain_03_05"],
+        "effects": {"relic": 2.5, "escape": 8},
+    },
+    "dish_005": {
+        "ingredients": ["terrain_04_01", "terrain_04_04", "terrain_04_05"],
+        "effects": {"battle": 10, "life_save": 5},
+    },
+    "dish_006": {
+        "ingredients": ["terrain_05_00", "terrain_05_01", "terrain_05_05"],
+        "effects": {"escape": 14, "luck": 5},
+    },
+    "dish_007": {
+        "ingredients": ["terrain_06_00", "terrain_06_04", "terrain_06_05"],
+        "effects": {"battle": 18, "loot": 12},
+    },
+    "dish_008": {
+        "ingredients": ["terrain_07_00", "terrain_07_03", "terrain_07_04"],
+        "effects": {"max_lives": 1, "heal": 1, "relic": 4},
+    },
+    "dish_009": {
+        "ingredients": ["terrain_00_04", "terrain_03_03", "terrain_04_02"],
+        "effects": {"life_save": 15, "battle": 5},
+    },
+    "dish_010": {
+        "ingredients": ["terrain_01_02", "terrain_02_05", "terrain_05_02"],
+        "effects": {"luck": 15, "relic": 3},
+    },
+    "dish_011": {
+        "ingredients": ["terrain_02_04", "terrain_04_00", "terrain_05_04"],
+        "effects": {"battle": 12, "loot": 14},
+    },
+    "dish_012": {
+        "ingredients": ["terrain_03_01", "terrain_06_01", "terrain_07_01"],
+        "effects": {"battle": 8, "loot": 8, "relic": 2},
+    },
+}
+
 adventure_action_locks = {}
 
 
@@ -8828,6 +8911,8 @@ def get_adventure(uid):
         "turn_duration_seconds": 0,
         "pending_event": None,
         "pending_name_item_id": None,
+        "pending_food_recipe_id": None,
+        "cooked_recipe_ids": [],
         "terrain": None,
         "terrain_steps": 0,
         "quiet_turns": 0,  # 몬스터 없이 지나간 연속 턴 수
@@ -8904,6 +8989,14 @@ def get_adventure(uid):
     adventure["health_potion_uses"] = max(0, min(2, int(adventure.get("health_potion_uses", 0))))
     adventure["strength_potion_used"] = bool(adventure.get("strength_potion_used", False))
     adventure["luck_potion_used"] = bool(adventure.get("luck_potion_used", False))
+    if not isinstance(adventure.get("cooked_recipe_ids"), list):
+        adventure["cooked_recipe_ids"] = []
+    adventure["cooked_recipe_ids"] = [
+        recipe_id for recipe_id in adventure["cooked_recipe_ids"]
+        if recipe_id in ADVENTURE_COOKING_RECIPES
+    ]
+    if adventure.get("pending_food_recipe_id") not in ADVENTURE_COOKING_RECIPES:
+        adventure["pending_food_recipe_id"] = None
     if not isinstance(adventure.get("lab_defeated"), list):
         adventure["lab_defeated"] = []
     adventure["ending_cleared"] = bool(adventure.get("ending_cleared", False))
@@ -9145,7 +9238,12 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
     ]
     armor_candidates = [
         name for name, info in ARMORS.items()
-        if name != "모험가 세트" and name not in owned_armors and info.get("bonus", 0) <= allowed_bonus
+        if (
+            name != "모험가 세트"
+            and not info.get("obtain_only")
+            and name not in owned_armors
+            and info.get("bonus", 0) <= allowed_bonus
+        )
     ]
 
     if not weapon_candidates and not armor_candidates:
@@ -9158,7 +9256,10 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
                 and name not in owned_weapons
             )
         ]
-        armor_candidates = [name for name in ARMORS if name != "모험가 세트" and name not in owned_armors]
+        armor_candidates = [
+            name for name, info in ARMORS.items()
+            if name != "모험가 세트" and not info.get("obtain_only") and name not in owned_armors
+        ]
 
     kinds = []
     if weapon_candidates:
@@ -9394,6 +9495,147 @@ def build_adventure_item_catalog():
 
 
 ADVENTURE_ITEM_CATALOG = build_adventure_item_catalog()
+
+
+# 재료의 순서를 무시하기 위해 정렬된 3개 ID를 레시피 키로 사용한다.
+ADVENTURE_COOKING_RECIPE_LOOKUP = {
+    tuple(sorted(recipe["ingredients"])): recipe_id
+    for recipe_id, recipe in ADVENTURE_COOKING_RECIPES.items()
+}
+
+
+def get_discovered_food_name(recipe_id):
+    info = discovered_foods.get(recipe_id, {})
+    return str(info.get("name") or "이름 없는 요리")
+
+
+def get_adventure_food_effect_text(recipe_id):
+    recipe = ADVENTURE_COOKING_RECIPES.get(recipe_id, {})
+    effects = recipe.get("effects", {})
+    labels = {
+        "battle": "전투",
+        "luck": "행운",
+        "loot": "전리품",
+        "escape": "도주",
+        "life_save": "생존",
+        "relic": "유물 발견률",
+    }
+    parts = []
+    for key, label in labels.items():
+        value = effects.get(key, 0)
+        if value:
+            suffix = "%p" if key == "relic" else "%"
+            parts.append(f"{label} +{value:g}{suffix}")
+    if effects.get("max_lives"):
+        parts.append(f"최대 목숨 +{int(effects['max_lives'])}")
+    if effects.get("heal"):
+        parts.append(f"목숨 회복 +{int(effects['heal'])}")
+    return ", ".join(parts) if parts else "효과 없음"
+
+
+def get_adventure_cooking_entries(uid):
+    inventory = get_adventure_inventory(uid)
+    entries = []
+    for item_id, amount in inventory.items():
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+        amount = int(amount)
+        if not item or amount <= 0 or item.get("kind") == "relic":
+            continue
+        entries.append((item_id, amount))
+
+    entries.sort(
+        key=lambda pair: (
+            -ADVENTURE_RARITY_ORDER.get(ADVENTURE_ITEM_CATALOG[pair[0]]["rarity"], 0),
+            get_adventure_item_name(pair[0]),
+        )
+    )
+    return entries
+
+
+def apply_adventure_food_effect(adventure, recipe_id):
+    recipe = ADVENTURE_COOKING_RECIPES[recipe_id]
+    effects = recipe.get("effects", {})
+    boosts = adventure.setdefault("boosts", {})
+
+    max_lives_gain = max(0, int(effects.get("max_lives", 0)))
+    if max_lives_gain:
+        adventure["max_lives"] = max(3, int(adventure.get("max_lives", 3))) + max_lives_gain
+
+    healed = 0
+    heal_amount = max(0, int(effects.get("heal", 0)))
+    if heal_amount:
+        before = int(adventure.get("lives", 0))
+        adventure["lives"] = min(int(adventure.get("max_lives", 3)), before + heal_amount)
+        healed = adventure["lives"] - before
+
+    for key in ("battle", "luck", "loot", "escape", "life_save", "relic"):
+        value = effects.get(key, 0)
+        if value:
+            boosts[key] = boosts.get(key, 0) + value
+
+    return healed
+
+
+def cook_adventure_food(uid, selected_item_ids, member):
+    uid = str(uid)
+    adventure = get_adventure(uid)
+    inventory = get_adventure_inventory(uid)
+
+    if not adventure.get("active"):
+        return False, "❌ 현재 진행 중인 모험이 없어.", None, False
+
+    if len(selected_item_ids) != 3 or any(not item_id for item_id in selected_item_ids):
+        return False, "❌ 세 칸에 재료를 전부 넣어야 해.", None, False
+
+    required = {}
+    for item_id in selected_item_ids:
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+        if not item or item.get("kind") == "relic":
+            return False, "❌ 유물이나 존재하지 않는 물건은 요리 재료로 쓸 수 없어.", None, False
+        required[item_id] = required.get(item_id, 0) + 1
+
+    for item_id, amount in required.items():
+        if int(inventory.get(item_id, 0)) < amount:
+            return False, f"❌ **{get_adventure_item_name(item_id)}** 수량이 부족해.", None, False
+
+    recipe_key = tuple(sorted(selected_item_ids))
+    recipe_id = ADVENTURE_COOKING_RECIPE_LOOKUP.get(recipe_key)
+    if not recipe_id:
+        return False, "🥣 아무 요리도 완성되지 않았어. 재료는 소모되지 않았어.", None, False
+
+    used = adventure.setdefault("cooked_recipe_ids", [])
+    if recipe_id in used:
+        return False, "❌ 같은 레시피의 버프는 한 모험에서 한 번만 받을 수 있어.", recipe_id, False
+
+    for item_id, amount in required.items():
+        inventory[item_id] = int(inventory.get(item_id, 0)) - amount
+        if inventory[item_id] <= 0:
+            inventory.pop(item_id, None)
+
+    used.append(recipe_id)
+    healed = apply_adventure_food_effect(adventure, recipe_id)
+
+    first_discovery = recipe_id not in discovered_foods
+    if first_discovery:
+        discovered_foods[recipe_id] = {
+            "name": None,
+            "discoverer_id": uid,
+            "discoverer_name": member.display_name,
+            "discovered_at": datetime.now(KST).isoformat(),
+        }
+        adventure["pending_food_recipe_id"] = recipe_id
+
+    food_name = get_discovered_food_name(recipe_id)
+    effect_text = get_adventure_food_effect_text(recipe_id)
+    heal_note = ""
+    if ADVENTURE_COOKING_RECIPES[recipe_id].get("effects", {}).get("heal"):
+        heal_note = f"\n실제 회복: **{healed}** · 현재 목숨 **{adventure['lives']}/{adventure['max_lives']}**"
+
+    save_data()
+    return True, (
+        f"🍽️ **{food_name}** 완성! 바로 먹어서 버프를 받았어.\n"
+        f"효과: **{effect_text}**{heal_note}"
+    ), recipe_id, first_discovery
 
 
 def get_adventure_item_name(item_id):
@@ -9928,6 +10170,8 @@ def start_new_adventure(uid, terrain_key, hard_mode=False):
         "turn_duration_seconds": 0,
         "pending_event": None,
         "pending_name_item_id": None,
+        "pending_food_recipe_id": None,
+        "cooked_recipe_ids": [],
         "terrain": terrain_key,
         "terrain_steps": 0,
         "quiet_turns": 0,
@@ -9975,6 +10219,8 @@ def finish_adventure(uid):
     adventure["turn_duration_seconds"] = 0
     adventure["pending_event"] = None
     adventure["pending_name_item_id"] = None
+    adventure["pending_food_recipe_id"] = None
+    adventure["cooked_recipe_ids"] = []
     adventure["lives"] = 3
     adventure["max_lives"] = 3
     adventure["terrain"] = None
@@ -10353,7 +10599,8 @@ def build_adventure_status_embed(member, adventure, title="🧭 모험 중"):
             f"❤️ 목숨: **{adventure['lives']}/{adventure.get('max_lives', 3)}**\n"
             f"💰 이번 모험 수익: **{adventure['earned_mora']:,}모라**\n"
             f"☠️ 위험도: **{danger:.1f}**\n\n"
-            f"🎒 적용 효과: {format_adventure_boosts(adventure.get('boosts', {}))}"
+            f"🎒 적용 효과: {format_adventure_boosts(adventure.get('boosts', {}))}\n"
+            f"🍳 이번 모험 요리: **{len(adventure.get('cooked_recipe_ids', []))}종**"
         ),
         color=discord.Color(terrain["color"]),
     )
@@ -10422,6 +10669,36 @@ def validate_relic_name(name):
         old_name = str(info.get("name", ""))
         if normalize_item_name_for_filter(old_name) == normalized:
             return False, "이미 다른 유물이 쓰고 있는 이름이야."
+
+    return True, clean_name
+
+
+def validate_food_name(name):
+    import re
+
+    clean_name = name.strip()
+    if not 1 <= len(clean_name) <= 12:
+        return False, "요리 이름은 1~12자로 지어야 해."
+    if not re.fullmatch(r"[가-힣a-zA-Z0-9 ]+", clean_name):
+        return False, "한글, 영어, 숫자, 공백만 사용할 수 있어."
+
+    normalized = normalize_item_name_for_filter(clean_name)
+    if not normalized:
+        return False, "사용할 수 없는 이름이야."
+
+    for banned in set(ANGRY_WORDS + DIRTY_WORDS):
+        banned_normalized = normalize_item_name_for_filter(banned)
+        if banned_normalized and banned_normalized in normalized:
+            return False, "금지어가 들어간 이름은 사용할 수 없어."
+
+    meaningless = {"ㅋㅋ", "ㅋㅋㅋ", "ㅎㅎ", "ㅎㅎㅎ", "123", "1234", "asdf", "test", "테스트"}
+    if normalized in {normalize_item_name_for_filter(v) for v in meaningless}:
+        return False, "조금 더 제대로 된 이름을 지어줘."
+
+    for info in discovered_foods.values():
+        old_name = str(info.get("name") or "")
+        if old_name and normalize_item_name_for_filter(old_name) == normalized:
+            return False, "이미 다른 요리가 쓰고 있는 이름이야."
 
     return True, clean_name
 
@@ -10639,23 +10916,41 @@ def get_story_monster_level(adventure, phase):
     return max(1, monster_level)
 
 
-def roll_adventure_special_weapon_drop(adventure, monster_name):
-    """P90/AK12/MINIGUN은 지정된 연구소 적에게서만 획득한다."""
-    drops = ADVENTURE_SPECIAL_WEAPON_DROPS.get(monster_name, [])
-    owned = set(adventure.get("owned_weapons", []))
+def roll_adventure_exclusive_equipment_drop(adventure, monster_name):
+    """전용 장비는 지정된 몬스터에게서만 각 고정 확률로 획득한다."""
+    drops = ADVENTURE_EXCLUSIVE_EQUIPMENT_DROPS.get(monster_name, [])
+    owned_weapons = set(adventure.get("owned_weapons", []))
+    owned_armors = set(adventure.get("owned_armors", []))
 
-    for weapon_name, chance in drops:
-        if weapon_name in owned:
-            continue
-        if random.random() * 100 < chance:
-            adventure.setdefault("owned_weapons", ["무인검"]).append(weapon_name)
-            return {
-                "kind": "weapon",
-                "name": weapon_name,
-                "bonus": WEAPONS[weapon_name]["bonus"],
-                "special": True,
-                "chance": chance,
-            }
+    for kind, equipment_name, chance in drops:
+        if kind == "weapon":
+            if equipment_name in owned_weapons or equipment_name not in WEAPONS:
+                continue
+            if random.random() * 100 < chance:
+                adventure.setdefault("owned_weapons", ["무인검"]).append(equipment_name)
+                return {
+                    "kind": "weapon",
+                    "name": equipment_name,
+                    "bonus": WEAPONS[equipment_name]["bonus"],
+                    "special": True,
+                    "chance": chance,
+                    "source_monster": monster_name,
+                }
+
+        elif kind == "armor":
+            if equipment_name in owned_armors or equipment_name not in ARMORS:
+                continue
+            if random.random() * 100 < chance:
+                adventure.setdefault("owned_armors", ["모험가 세트"]).append(equipment_name)
+                return {
+                    "kind": "armor",
+                    "name": equipment_name,
+                    "bonus": ARMORS[equipment_name]["bonus"],
+                    "special": True,
+                    "chance": chance,
+                    "source_monster": monster_name,
+                }
+
     return None
 
 
@@ -11330,13 +11625,13 @@ async def resolve_adventure_battle(message, member):
             loot_amount += tier_info["loot_bonus"]
             add_adventure_item(uid, loot_id, loot_amount)
 
-    # 연구소 스토리 전투에서는 일반 장비 추첨을 하지 않는다.
-    # P90/AK12/MINIGUN은 지정 몬스터 전용 추첨만 사용한다.
+    # 전용 장비가 지정된 적은 오직 자신의 전용 장비 추첨만 사용한다.
+    # 따라서 외곽의 신/대마왕/연구소 적 장비가 일반 장비 풀에 섞이지 않는다.
     equipment_drop = None
-    special_weapon_drop = None
-    if story_phase:
-        special_weapon_drop = roll_adventure_special_weapon_drop(adventure, monster["name"])
-    else:
+    exclusive_equipment_drop = roll_adventure_exclusive_equipment_drop(
+        adventure, monster["name"]
+    )
+    if not story_phase and monster["name"] not in ADVENTURE_EXCLUSIVE_EQUIPMENT_DROPS:
         equipment_drop = roll_adventure_equipment_drop(
             adventure, monster_tier=monster_tier, is_boss=is_boss
         )
@@ -11401,10 +11696,13 @@ async def resolve_adventure_battle(message, member):
             f"(승률 보너스 +{equipment_drop['bonus']})"
         )
 
-    if special_weapon_drop:
+    if exclusive_equipment_drop:
+        equipment_emoji = "🔫" if exclusive_equipment_drop["kind"] == "weapon" else "🛡️"
+        equipment_label = "전용 무기" if exclusive_equipment_drop["kind"] == "weapon" else "전용 방어구"
         result_lines.append(
-            f"🔫 전용 무기 획득: **{special_weapon_drop['name']}** "
-            f"(승률 보너스 +{special_weapon_drop['bonus']}, 드롭률 {special_weapon_drop['chance']:.0f}%)"
+            f"{equipment_emoji} {equipment_label} 획득: **{exclusive_equipment_drop['name']}** "
+            f"(승률 보너스 +{exclusive_equipment_drop['bonus']}, "
+            f"{exclusive_equipment_drop['source_monster']} 전용 · 드롭률 {exclusive_equipment_drop['chance']:g}%)"
         )
 
     if leveled:
@@ -11445,7 +11743,7 @@ async def resolve_adventure_battle(message, member):
         await show_adventure_story_scene(
             message,
             member,
-            title="� !@$*!&",
+            title="  !@$*!&",
             story_text=(
                 "외곽의 신이 쓰러진 순간 공간이 찢어졌다.\n"
                 "빛도 길도 사라지고, 깨진 문자 사이에서 하나의 형체만 다가온다.\n\n"
@@ -11623,6 +11921,10 @@ class AdventureStoryContinueView(discord.ui.View):
             await interaction.response.defer()
             await continue_adventure_story(interaction.message, interaction.user)
 
+    @discord.ui.button(label="🍳 요리하기", style=discord.ButtonStyle.success)
+    async def cook_food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_cooking_menu(interaction, self.user_id)
+
 
 class AdventureStartTerrainView(discord.ui.View):
     def __init__(self, user_id, hard_mode=False):
@@ -11768,6 +12070,14 @@ class AdventureTerrainChoiceView(discord.ui.View):
 
         potion_button.callback = potion_callback
         self.add_item(potion_button)
+
+        cooking_button = discord.ui.Button(label="🍳 요리하기", style=discord.ButtonStyle.success)
+
+        async def cooking_callback(interaction):
+            await open_adventure_cooking_menu(interaction, self.user_id)
+
+        cooking_button.callback = cooking_callback
+        self.add_item(cooking_button)
 
 
 def build_adventure_equipment_embed(member, uid):
@@ -12044,6 +12354,312 @@ async def open_adventure_potion_menu(interaction, user_id):
     )
 
 
+def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_text=None):
+    selected = list(selected or [None, None, None])
+    entries = get_adventure_cooking_entries(uid)
+    total_pages = max(1, (len(entries) + ADVENTURE_COOKING_PAGE_SIZE - 1) // ADVENTURE_COOKING_PAGE_SIZE)
+    page = max(0, min(int(page), total_pages - 1))
+    start = page * ADVENTURE_COOKING_PAGE_SIZE
+    page_entries = entries[start:start + ADVENTURE_COOKING_PAGE_SIZE]
+
+    slot_lines = []
+    for index, item_id in enumerate(selected, start=1):
+        if item_id and item_id in ADVENTURE_ITEM_CATALOG:
+            owned = int(get_adventure_inventory(uid).get(item_id, 0))
+            slot_lines.append(f"**{index}번 칸:** {get_adventure_item_name(item_id)} · 보유 {owned}개")
+        else:
+            slot_lines.append(f"**{index}번 칸:** 비어 있음")
+
+    page_lines = []
+    for item_id, amount in page_entries:
+        item = ADVENTURE_ITEM_CATALOG[item_id]
+        rarity = ADVENTURE_RARITIES[item["rarity"]]
+        page_lines.append(f"{rarity['emoji']} {get_adventure_item_name(item_id)} ×{amount}")
+
+    pending_recipe = get_adventure(uid).get("pending_food_recipe_id")
+    pending_text = ""
+    if pending_recipe:
+        pending_text = "\n\n✨ **최초 발견한 요리의 이름을 아직 정하지 않았어.** 아래 이름 짓기 버튼을 눌러줘."
+
+    result_block = f"\n\n## 조리 결과\n{result_text}" if result_text else ""
+    embed = discord.Embed(
+        title=f"🍳 {member.display_name}의 야전 요리",
+        description=(
+            "가방의 전리품을 세 칸에 하나씩 넣어 조합해. 재료 순서는 상관없어.\n"
+            "정확한 레시피면 재료가 소모되고, 완성한 요리를 바로 먹어 이번 모험 버프를 받아.\n"
+            "틀린 조합은 재료를 소모하지 않아. 같은 레시피 버프는 모험당 1회만 적용돼.\n\n"
+            "## 조리대\n" + "\n".join(slot_lines)
+            + f"\n\n## 재료 목록 ({page + 1}/{total_pages}쪽)\n"
+            + ("\n".join(page_lines) if page_lines else "요리에 쓸 수 있는 전리품이 없어.")
+            + pending_text
+            + result_block
+        ),
+        color=discord.Color.orange(),
+    )
+    embed.set_footer(text=f"발견된 요리 {sum(1 for info in discovered_foods.values() if info.get('name'))}/{len(ADVENTURE_COOKING_RECIPES)}종")
+    return embed, page, total_pages, page_entries
+
+
+class AdventureCookingIngredientSelect(discord.ui.Select):
+    def __init__(self, user_id, slot_index, selected, page, page_entries):
+        self.user_id = str(user_id)
+        self.slot_index = int(slot_index)
+        self.selected_state = list(selected)
+        self.page = int(page)
+
+        options = []
+        current = self.selected_state[self.slot_index]
+        for item_id, amount in page_entries:
+            item = ADVENTURE_ITEM_CATALOG[item_id]
+            rarity = ADVENTURE_RARITIES[item["rarity"]]
+            options.append(
+                discord.SelectOption(
+                    label=get_adventure_item_name(item_id)[:100],
+                    value=item_id,
+                    description=f"{rarity['name']} · 보유 {amount}개"[:100],
+                    emoji=rarity["emoji"],
+                    default=(item_id == current),
+                )
+            )
+
+        super().__init__(
+            placeholder=f"{self.slot_index + 1}번 칸 재료 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            row=self.slot_index,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        selected = list(self.selected_state)
+        selected[self.slot_index] = self.values[0]
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user, self.user_id, selected, self.page
+        )
+        await interaction.response.edit_message(
+            embed=embed,
+            view=AdventureCookingView(self.user_id, selected, page),
+        )
+
+
+class AdventureCookingView(discord.ui.View):
+    def __init__(self, user_id, selected=None, page=0):
+        super().__init__(timeout=600)
+        self.user_id = str(user_id)
+        self.selected = list(selected or [None, None, None])
+        entries = get_adventure_cooking_entries(self.user_id)
+        self.total_pages = max(1, (len(entries) + ADVENTURE_COOKING_PAGE_SIZE - 1) // ADVENTURE_COOKING_PAGE_SIZE)
+        self.page = max(0, min(int(page), self.total_pages - 1))
+        start = self.page * ADVENTURE_COOKING_PAGE_SIZE
+        page_entries = entries[start:start + ADVENTURE_COOKING_PAGE_SIZE]
+
+        if page_entries:
+            for slot_index in range(3):
+                self.add_item(
+                    AdventureCookingIngredientSelect(
+                        self.user_id, slot_index, self.selected, self.page, page_entries
+                    )
+                )
+
+        self.previous_page.disabled = self.total_pages <= 1
+        self.next_page.disabled = self.total_pages <= 1
+
+    @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.secondary, row=3)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        new_page = (self.page - 1) % self.total_pages
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user, self.user_id, self.selected, new_page
+        )
+        await interaction.response.edit_message(
+            embed=embed, view=AdventureCookingView(self.user_id, self.selected, page)
+        )
+
+    @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.secondary, row=3)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        new_page = (self.page + 1) % self.total_pages
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user, self.user_id, self.selected, new_page
+        )
+        await interaction.response.edit_message(
+            embed=embed, view=AdventureCookingView(self.user_id, self.selected, page)
+        )
+
+    @discord.ui.button(label="🧹 칸 비우기", style=discord.ButtonStyle.secondary, row=3)
+    async def clear_slots(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        selected = [None, None, None]
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user, self.user_id, selected, self.page
+        )
+        await interaction.response.edit_message(
+            embed=embed, view=AdventureCookingView(self.user_id, selected, page)
+        )
+
+    @discord.ui.button(label="🔥 요리하기", style=discord.ButtonStyle.danger, row=3)
+    async def cook(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        lock = get_adventure_lock(self.user_id)
+        if lock.locked():
+            await interaction.response.send_message("이미 다른 행동을 처리 중이야.", ephemeral=True)
+            return
+
+        async with lock:
+            success, result, recipe_id, first_discovery = cook_adventure_food(
+                self.user_id, self.selected, interaction.user
+            )
+
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user, self.user_id, [None, None, None], self.page, result
+        )
+        if success and first_discovery:
+            embed.add_field(
+                name="🌟 서버 최초 발견!",
+                value="이 레시피를 처음 완성했어. 이 요리의 이름을 직접 지을 수 있어!",
+                inline=False,
+            )
+            view = FoodNamingView(self.user_id, recipe_id)
+        else:
+            view = AdventureCookingView(self.user_id, [None, None, None], page)
+
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class FoodNameModal(discord.ui.Modal, title="새 요리 이름 짓기"):
+    food_name = discord.ui.TextInput(
+        label="요리 이름",
+        placeholder="12자 이하",
+        min_length=1,
+        max_length=12,
+        required=True,
+    )
+
+    def __init__(self, user_id, recipe_id):
+        super().__init__()
+        self.user_id = str(user_id)
+        self.recipe_id = recipe_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네가 최초 발견한 요리가 아니야.", ephemeral=True)
+            return
+
+        adventure = get_adventure(self.user_id)
+        info = discovered_foods.get(self.recipe_id)
+        if not info or str(info.get("discoverer_id")) != self.user_id:
+            adventure["pending_food_recipe_id"] = None
+            save_data()
+            await interaction.response.send_message("이 요리의 작명 권한을 찾지 못했어.", ephemeral=True)
+            return
+
+        if info.get("name"):
+            adventure["pending_food_recipe_id"] = None
+            save_data()
+            embed, page, _, _ = build_adventure_cooking_embed(
+                interaction.user, self.user_id, result_text=f"이미 **{info['name']}**(으)로 등록된 요리야."
+            )
+            await interaction.response.edit_message(
+                embed=embed, view=AdventureCookingView(self.user_id, page=page)
+            )
+            return
+
+        valid, result = validate_food_name(str(self.food_name.value))
+        if not valid:
+            await interaction.response.send_message(f"❌ {result}", ephemeral=True)
+            return
+
+        info["name"] = result
+        info["named_at"] = datetime.now(KST).isoformat()
+        adventure["pending_food_recipe_id"] = None
+        save_data()
+
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user,
+            self.user_id,
+            result_text=(
+                f"📖 새로운 요리 **{result}**이(가) 서버 레시피 도감에 등록됐어!\n"
+                f"최초 발견자: {interaction.user.mention}\n"
+                f"효과: **{get_adventure_food_effect_text(self.recipe_id)}**"
+            ),
+        )
+        await interaction.response.edit_message(
+            embed=embed, view=AdventureCookingView(self.user_id, page=page)
+        )
+
+
+class FoodNamingView(discord.ui.View):
+    def __init__(self, user_id, recipe_id):
+        super().__init__(timeout=900)
+        self.user_id = str(user_id)
+        self.recipe_id = recipe_id
+
+    @discord.ui.button(label="✍️ 요리 이름 짓기", style=discord.ButtonStyle.success)
+    async def name_food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        info = discovered_foods.get(self.recipe_id, {})
+        if info.get("name"):
+            adventure["pending_food_recipe_id"] = None
+            save_data()
+            embed, page, _, _ = build_adventure_cooking_embed(
+                interaction.user, self.user_id, result_text=f"이미 **{info['name']}**(으)로 등록됐어."
+            )
+            await interaction.response.edit_message(
+                embed=embed, view=AdventureCookingView(self.user_id, page=page)
+            )
+            return
+
+        if str(info.get("discoverer_id")) != self.user_id:
+            await interaction.response.send_message("작명 권한이 없어.", ephemeral=True)
+            return
+
+        await interaction.response.send_modal(FoodNameModal(self.user_id, self.recipe_id))
+
+
+async def open_adventure_cooking_menu(interaction, user_id):
+    if not await check_adventure_owner(interaction, user_id):
+        return
+
+    adventure = get_adventure(user_id)
+    if not adventure.get("active"):
+        await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
+        return
+
+
+    pending_recipe = adventure.get("pending_food_recipe_id")
+    if pending_recipe:
+        info = discovered_foods.get(pending_recipe, {})
+        if info.get("name"):
+            adventure["pending_food_recipe_id"] = None
+            save_data()
+        elif str(info.get("discoverer_id")) == str(user_id):
+            embed, _, _, _ = build_adventure_cooking_embed(interaction.user, user_id)
+            await interaction.response.send_message(
+                embed=embed,
+                view=FoodNamingView(user_id, pending_recipe),
+                ephemeral=True,
+            )
+            return
+
+    embed, page, _, _ = build_adventure_cooking_embed(interaction.user, user_id)
+    await interaction.response.send_message(
+        embed=embed,
+        view=AdventureCookingView(user_id, page=page),
+        ephemeral=True,
+    )
+
+
 class AdventureTurnWaitingView(discord.ui.View):
     def __init__(self, user_id):
         # 최대 대기 시간이 5분이라 여유 있게 15분 동안 버튼을 유지한다.
@@ -12119,6 +12735,10 @@ class AdventureTurnWaitingView(discord.ui.View):
     @discord.ui.button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
     async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await open_adventure_potion_menu(interaction, self.user_id)
+
+    @discord.ui.button(label="🍳 요리하기", style=discord.ButtonStyle.success)
+    async def cook_food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_cooking_menu(interaction, self.user_id)
 
     @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
     async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -12212,6 +12832,10 @@ class AdventureTravelView(discord.ui.View):
     async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await open_adventure_potion_menu(interaction, self.user_id)
 
+    @discord.ui.button(label="🍳 요리하기", style=discord.ButtonStyle.success)
+    async def cook_food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_cooking_menu(interaction, self.user_id)
+
     @discord.ui.button(label="🏠 귀환", style=discord.ButtonStyle.secondary)
     async def return_home(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
@@ -12293,6 +12917,10 @@ class AdventureBattleView(discord.ui.View):
     @discord.ui.button(label="🧪 포션 사용", style=discord.ButtonStyle.primary)
     async def use_potion(self, interaction: discord.Interaction, button: discord.ui.Button):
         await open_adventure_potion_menu(interaction, self.user_id)
+
+    @discord.ui.button(label="🍳 요리하기", style=discord.ButtonStyle.success)
+    async def cook_food(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await open_adventure_cooking_menu(interaction, self.user_id)
 
     @discord.ui.button(label="💨 도망가기", style=discord.ButtonStyle.secondary)
     async def escape(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -12916,8 +13544,15 @@ async def relic_dex_command(interaction: discord.Interaction):
 
 
 @bot.tree.command(name="모험상점", description="모험용 아이템과 포션을 구매한다", guild=GUILD)
-@app_commands.describe(아이템="구매하거나 장착할 아이템 이름. 비워두면 목록 표시")
-async def adventure_shop_command(interaction: discord.Interaction, 아이템: str = None):
+@app_commands.describe(
+    아이템="구매하거나 장착할 아이템 이름. 비워두면 목록 표시",
+    수량="포션을 한꺼번에 구매할 수량 (1~999)",
+)
+async def adventure_shop_command(
+    interaction: discord.Interaction,
+    아이템: str = None,
+    수량: app_commands.Range[int, 1, 999] = 1,
+):
     uid = str(interaction.user.id)
     info = get_adventure_shop_user(uid)
     adventure = get_adventure(uid)
@@ -12955,7 +13590,7 @@ async def adventure_shop_command(interaction: discord.Interaction, 아이템: st
         embed.set_footer(
             text=(
                 f"영구 아이템은 최대 {ADVENTURE_MAX_EQUIPPED}개 장착 · "
-                "포션은 모험 전에 구매하고 모험 중 '포션 사용' 버튼으로 사용"
+                "포션은 수량을 입력해 한꺼번에 구매 가능 · 모험 중에는 '포션 사용' 버튼으로 사용"
             )
         )
         await interaction.response.send_message(embed=embed)
@@ -12973,24 +13608,38 @@ async def adventure_shop_command(interaction: discord.Interaction, 아이템: st
             )
             return
 
+        quantity = max(1, int(수량))
+        total_price = potion["price"] * quantity
         money = get_poker_money(uid)
-        if money < potion["price"]:
+        if money < total_price:
+            affordable = money // potion["price"]
             await interaction.response.send_message(
-                f"❌ 모라 부족!\n필요: **{potion['price']:,}모라**\n보유: **{money:,}모라**",
+                f"❌ 모라 부족!\n필요: **{total_price:,}모라** "
+                f"({potion['price']:,} × {quantity})\n"
+                f"보유: **{money:,}모라** · 최대 구매 가능: **{affordable}개**",
                 ephemeral=True,
             )
             return
 
-        remove_poker_money(uid, potion["price"])
-        info["potions"][아이템] = int(info["potions"].get(아이템, 0)) + 1
+        remove_poker_money(uid, total_price)
+        info["potions"][아이템] = int(info["potions"].get(아이템, 0)) + quantity
         save_data()
         await interaction.response.send_message(
-            f"🛒 **{아이템}** 1개 구매 완료!\n현재 보유: **{info['potions'][아이템]}개**"
+            f"🛒 **{아이템}** {quantity}개 구매 완료!\n"
+            f"사용 모라: **{total_price:,}모라**\n"
+            f"현재 보유: **{info['potions'][아이템]}개**"
         )
         return
 
     if 아이템 not in ADVENTURE_SHOP_CATALOG:
         await interaction.response.send_message("❌ 그런 모험 아이템은 없어.", ephemeral=True)
+        return
+
+    if int(수량) != 1:
+        await interaction.response.send_message(
+            "❌ 영구 모험 아이템은 한 번에 하나만 구매하거나 장착할 수 있어. 수량은 포션 구매에만 적용돼.",
+            ephemeral=True,
+        )
         return
 
     if adventure["active"]:
