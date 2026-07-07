@@ -8197,7 +8197,13 @@ RELIC_UPGRADE_RULES = {
         "amount_range": (8, 16),
         "success": [70, 58, 46, 34, 24, 15, 8],
     },
+    "transcendent": {
+        "type_range": (5, 6),
+        "amount_range": (14, 28),
+        "success": [55, 42, 30, 20, 12, 6, 2],
+    },
 }
+
 
 # 최초 발견자가 지은 이름에 아래 키워드가 포함되면 해당 계열 재료가 우선적으로 뽑힌다.
 # 그래도 매 단계 일부는 전체 전리품에서 뽑혀, 모든 모험 전리품이 강화 재료로 쓰일 수 있다.
@@ -8684,6 +8690,7 @@ ADVENTURE_RARITIES = {
     "epic": {"name": "영웅", "emoji": "🟣", "value_mul": 6.0},
     "legendary": {"name": "전설", "emoji": "🟡", "value_mul": 12.0},
     "mythic": {"name": "신화", "emoji": "🔴", "value_mul": 25.0},
+    "transcendent": {"name": "초월", "emoji": "🌌", "value_mul": 100.0},
 }
 
 ADVENTURE_RARITY_ORDER = {
@@ -8693,6 +8700,7 @@ ADVENTURE_RARITY_ORDER = {
     "epic": 3,
     "legendary": 4,
     "mythic": 5,
+    "transcendent": 6,
 }
 
 ADVENTURE_DROP_WEIGHTS = {
@@ -8702,7 +8710,24 @@ ADVENTURE_DROP_WEIGHTS = {
     "epic": 4,
     "legendary": 0.8,
     "mythic": 0.12,
+    # 초월 유물은 이 가중치로 뽑지 않는다.
+    # pick_mystery_relic()에서 정확히 0.00015%로 별도 판정한다.
+    "transcendent": 0.00015,
 }
+
+ADVENTURE_RELIC_TOTAL_COUNT = 1000
+ADVENTURE_RELIC_RARITY_COUNTS = {
+    "uncommon": 665,
+    "rare": 230,
+    "epic": 86,
+    "legendary": 15,
+    "mythic": 3,
+    "transcendent": 1,
+}
+
+# 퍼센트 단위다. 0.00015% = 약 666,667번에 1번.
+ADVENTURE_TRANSCENDENT_RELIC_CHANCE_PERCENT = 0.00015
+
 
 ADVENTURE_SHOP_CATALOG = {
     "낡은 나침반": {
@@ -9154,8 +9179,97 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
     return {"kind": "armor", "name": name, "bonus": ARMORS[name]["bonus"]}
 
 
+def build_adventure_relic_rarity_map():
+    """
+    유물 1~120번은 기존 등급을 그대로 유지하고,
+    121~1000번만 추가 배치하여 기존 보유 유물의 등급이 바뀌지 않게 한다.
+    """
+    rarity_map = {}
+
+    # 기존 120종의 등급 배치를 그대로 보존한다.
+    for relic_number in range(1, 121):
+        if relic_number % 97 == 0:
+            rarity = "mythic"
+        elif relic_number % 29 == 0:
+            rarity = "legendary"
+        elif relic_number % 11 == 0:
+            rarity = "epic"
+        elif relic_number % 4 == 0:
+            rarity = "rare"
+        else:
+            rarity = "uncommon"
+        rarity_map[relic_number] = rarity
+
+    # 기존 신화 1개/전설 4개를 유지한 채 목표 개수까지 추가한다.
+    for relic_number in {499, 997}:
+        rarity_map[relic_number] = "mythic"
+
+    for relic_number in {
+        174, 232, 290, 348, 406, 464,
+        522, 580, 638, 696, 754,
+    }:
+        rarity_map[relic_number] = "legendary"
+
+    # 1000번은 단 하나뿐인 초월 유물이다.
+    rarity_map[1000] = "transcendent"
+
+    available_numbers = [
+        relic_number
+        for relic_number in range(121, 1000)
+        if relic_number not in rarity_map
+    ]
+
+    # 새 일반/희귀/영웅 유물은 고정 시드로 섞어 서버 재시작 후에도 등급이 유지된다.
+    rng = random.Random(20260707)
+    rng.shuffle(available_numbers)
+
+    current_counts = {
+        rarity: list(rarity_map.values()).count(rarity)
+        for rarity in ADVENTURE_RELIC_RARITY_COUNTS
+    }
+    epic_needed = ADVENTURE_RELIC_RARITY_COUNTS["epic"] - current_counts["epic"]
+    rare_needed = ADVENTURE_RELIC_RARITY_COUNTS["rare"] - current_counts["rare"]
+    uncommon_needed = ADVENTURE_RELIC_RARITY_COUNTS["uncommon"] - current_counts["uncommon"]
+
+    expected_remaining = epic_needed + rare_needed + uncommon_needed
+    if expected_remaining != len(available_numbers):
+        raise RuntimeError(
+            f"유물 등급 배치 수가 맞지 않음: 필요 {expected_remaining}, 남은 ID {len(available_numbers)}"
+        )
+
+    cursor = 0
+    for relic_number in available_numbers[cursor:cursor + epic_needed]:
+        rarity_map[relic_number] = "epic"
+    cursor += epic_needed
+
+    for relic_number in available_numbers[cursor:cursor + rare_needed]:
+        rarity_map[relic_number] = "rare"
+    cursor += rare_needed
+
+    for relic_number in available_numbers[cursor:cursor + uncommon_needed]:
+        rarity_map[relic_number] = "uncommon"
+
+    actual_counts = {
+        rarity: list(rarity_map.values()).count(rarity)
+        for rarity in ADVENTURE_RELIC_RARITY_COUNTS
+    }
+    if len(rarity_map) != ADVENTURE_RELIC_TOTAL_COUNT:
+        raise RuntimeError(
+            f"유물 총 개수 오류: {len(rarity_map)} / {ADVENTURE_RELIC_TOTAL_COUNT}"
+        )
+    if actual_counts != ADVENTURE_RELIC_RARITY_COUNTS:
+        raise RuntimeError(
+            f"유물 등급 개수 오류: {actual_counts}"
+        )
+
+    return rarity_map
+
+
+ADVENTURE_RELIC_RARITY_MAP = build_adventure_relic_rarity_map()
+
+
 def build_adventure_item_catalog():
-    """코드 몇 줄로 400종이 넘는 전리품을 만든다."""
+    """몬스터 전리품, 월드 재료, 이름을 붙이는 유물 1000종을 만든다."""
     catalog = {}
     terrain_keys = list(ADVENTURE_LOOT_TERRAINS)
 
@@ -9254,19 +9368,11 @@ def build_adventure_item_catalog():
                 "terrain": terrain_key,
             }
 
-    # 이름을 최초 발견자가 붙이는 유물 120종
-    for relic_number in range(1, 121):
-        if relic_number % 97 == 0:
-            rarity = "mythic"
-        elif relic_number % 29 == 0:
-            rarity = "legendary"
-        elif relic_number % 11 == 0:
-            rarity = "epic"
-        elif relic_number % 4 == 0:
-            rarity = "rare"
-        else:
-            rarity = "uncommon"
+    # 이름을 최초 발견자가 붙이는 유물 1000종
+    for relic_number in range(1, ADVENTURE_RELIC_TOTAL_COUNT + 1):
+        rarity = ADVENTURE_RELIC_RARITY_MAP[relic_number]
 
+        # :03d는 1~999번의 기존 ID 형식을 보존하고, 1000번은 relic_1000이 된다.
         item_id = f"relic_{relic_number:03d}"
         relic_terrain = terrain_keys[(relic_number - 1) % len(terrain_keys)]
         if item_id in ADVENTURE_ROUTE_RELICS:
@@ -9282,6 +9388,7 @@ def build_adventure_item_catalog():
             "terrain": relic_terrain,
             "route_relic": item_id in ADVENTURE_ROUTE_RELICS,
         }
+
 
     return catalog
 
@@ -10080,27 +10187,62 @@ def pick_world_loot(adventure):
 
 
 def pick_mystery_relic(adventure=None):
+    """
+    초월 유물은 일반 유물 풀에서 완전히 제외하고,
+    유물 획득 시도마다 정확히 0.00015% 확률로만 별도 등장한다.
+    """
     terrain_key = (adventure or {}).get("terrain") or "grassland"
+
+    transcendent_relics = [
+        item_id
+        for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+        if item.get("kind") == "relic"
+        and item.get("rarity") == "transcendent"
+    ]
+
+    # random.random() * 100은 0~100 퍼센트 값이므로
+    # 0.00015와 비교하면 정확히 0.00015% 확률이다.
+    if (
+        transcendent_relics
+        and random.random() * 100 < ADVENTURE_TRANSCENDENT_RELIC_CHANCE_PERCENT
+    ):
+        undiscovered_transcendent = [
+            item_id
+            for item_id in transcendent_relics
+            if item_id not in discovered_items
+        ]
+        return random.choice(undiscovered_transcendent or transcendent_relics)
+
+    # 초월 판정에 실패했을 때는 절대로 일반 랜덤에서 초월이 나오지 않는다.
     all_relics = [
         item_id
         for item_id, item in ADVENTURE_ITEM_CATALOG.items()
-        if item["kind"] == "relic" and item.get("terrain") == terrain_key
+        if item.get("kind") == "relic"
+        and item.get("rarity") != "transcendent"
+        and item.get("terrain") == terrain_key
     ]
 
     if not all_relics:
         all_relics = [
             item_id
             for item_id, item in ADVENTURE_ITEM_CATALOG.items()
-            if item["kind"] == "relic"
+            if item.get("kind") == "relic"
+            and item.get("rarity") != "transcendent"
         ]
 
-    undiscovered = [item_id for item_id in all_relics if item_id not in discovered_items]
+    undiscovered = [
+        item_id
+        for item_id in all_relics
+        if item_id not in discovered_items
+    ]
 
-    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나온다.
+    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나오지만,
+    # 이 보정으로 초월 유물이 끼어들지는 못한다.
     if undiscovered and random.random() < 0.78:
         return random.choice(undiscovered)
 
     return random.choice(all_relics)
+
 
 
 def format_adventure_boosts(boosts):
