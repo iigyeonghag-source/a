@@ -8824,176 +8824,628 @@ ADVENTURE_POTION_CATALOG = {
     },
 }
 
-# 요리는 정확히 3개의 전리품을 조합한다. 재료 순서는 상관없다.
-# 이름은 코드에 넣지 않고, 서버에서 해당 레시피를 최초 발견한 유저가 직접 정한다.
-# 같은 레시피의 버프는 한 모험에서 한 번만 받을 수 있다.
+# 요리는 정확히 3개의 전리품을 조합한다.
+# 아래 150종은 자동 생성하지 않고, 레시피와 버프를 전부 코드에 직접 고정해 둔다.
+# 음식 이름은 서버 최초 발견자가 정하며, 재료를 넣는 순서는 판정에 영향을 주지 않는다.
 ADVENTURE_COOKING_PAGE_SIZE = 25
 ADVENTURE_COOKING_RECIPE_TOTAL = 150
 
-# 앞의 12종은 직접 설계한 대표 레시피다.
-# 나머지는 서버가 재시작돼도 절대로 바뀌지 않는 고정 해시 순서로 생성한다.
-# 즉, 실행할 때마다 무작위로 달라지는 레시피가 아니라 코드상 고정된 150종이다.
-ADVENTURE_COOKING_BASE_RECIPES = {
-    "dish_001": {
-        "ingredients": ["terrain_00_00", "terrain_00_03", "terrain_00_05"],
-        "effects": {"battle": 6, "loot": 4},
+ADVENTURE_COOKING_RECIPES = {
+    'dish_001': {
+        "ingredients": ['terrain_00_00', 'terrain_00_03', 'terrain_00_05'],
+        "effects": {'battle': 6, 'loot': 4},
     },
-    "dish_002": {
-        "ingredients": ["terrain_01_01", "terrain_01_04", "terrain_01_05"],
-        "effects": {"heal": 1, "life_save": 6},
+    'dish_002': {
+        "ingredients": ['terrain_01_01', 'terrain_01_04', 'terrain_01_05'],
+        "effects": {'heal': 1, 'life_save': 6},
     },
-    "dish_003": {
-        "ingredients": ["terrain_02_00", "terrain_02_02", "terrain_02_03"],
-        "effects": {"luck": 8, "loot": 6},
+    'dish_003': {
+        "ingredients": ['terrain_02_00', 'terrain_02_02', 'terrain_02_03'],
+        "effects": {'luck': 8, 'loot': 6},
     },
-    "dish_004": {
-        "ingredients": ["terrain_03_02", "terrain_03_04", "terrain_03_05"],
-        "effects": {"relic": 2.5, "escape": 8},
+    'dish_004': {
+        "ingredients": ['terrain_03_02', 'terrain_03_04', 'terrain_03_05'],
+        "effects": {'relic': 2.5, 'escape': 8},
     },
-    "dish_005": {
-        "ingredients": ["terrain_04_01", "terrain_04_04", "terrain_04_05"],
-        "effects": {"battle": 10, "life_save": 5},
+    'dish_005': {
+        "ingredients": ['terrain_04_01', 'terrain_04_04', 'terrain_04_05'],
+        "effects": {'battle': 10, 'life_save': 5},
     },
-    "dish_006": {
-        "ingredients": ["terrain_05_00", "terrain_05_01", "terrain_05_05"],
-        "effects": {"escape": 14, "luck": 5},
+    'dish_006': {
+        "ingredients": ['terrain_05_00', 'terrain_05_01', 'terrain_05_05'],
+        "effects": {'escape': 14, 'luck': 5},
     },
-    "dish_007": {
-        "ingredients": ["terrain_06_00", "terrain_06_04", "terrain_06_05"],
-        "effects": {"battle": 18, "loot": 12},
+    'dish_007': {
+        "ingredients": ['terrain_06_00', 'terrain_06_04', 'terrain_06_05'],
+        "effects": {'battle': 18, 'loot': 12},
     },
-    "dish_008": {
-        "ingredients": ["terrain_07_00", "terrain_07_03", "terrain_07_04"],
-        "effects": {"max_lives": 1, "heal": 1, "relic": 4},
+    'dish_008': {
+        "ingredients": ['terrain_07_00', 'terrain_07_03', 'terrain_07_04'],
+        "effects": {'max_lives': 1, 'heal': 1, 'relic': 4},
     },
-    "dish_009": {
-        "ingredients": ["terrain_00_04", "terrain_03_03", "terrain_04_02"],
-        "effects": {"life_save": 15, "battle": 5},
+    'dish_009': {
+        "ingredients": ['terrain_00_04', 'terrain_03_03', 'terrain_04_02'],
+        "effects": {'life_save': 15, 'battle': 5},
     },
-    "dish_010": {
-        "ingredients": ["terrain_01_02", "terrain_02_05", "terrain_05_02"],
-        "effects": {"luck": 15, "relic": 3},
+    'dish_010': {
+        "ingredients": ['terrain_01_02', 'terrain_02_05', 'terrain_05_02'],
+        "effects": {'luck': 15, 'relic': 3},
     },
-    "dish_011": {
-        "ingredients": ["terrain_02_04", "terrain_04_00", "terrain_05_04"],
-        "effects": {"battle": 12, "loot": 14},
+    'dish_011': {
+        "ingredients": ['terrain_02_04', 'terrain_04_00', 'terrain_05_04'],
+        "effects": {'battle': 12, 'loot': 14},
     },
-    "dish_012": {
-        "ingredients": ["terrain_03_01", "terrain_06_01", "terrain_07_01"],
-        "effects": {"battle": 8, "loot": 8, "relic": 2},
+    'dish_012': {
+        "ingredients": ['terrain_03_01', 'terrain_06_01', 'terrain_07_01'],
+        "effects": {'battle': 8, 'loot': 8, 'relic': 2},
+    },
+    'dish_013': {
+        "ingredients": ['terrain_00_01', 'terrain_04_01', 'terrain_05_00'],
+        "effects": {'battle': 5, 'loot': 4},
+    },
+    'dish_014': {
+        "ingredients": ['terrain_00_04', 'terrain_03_04', 'terrain_06_02'],
+        "effects": {'luck': 5, 'loot': 5},
+    },
+    'dish_015': {
+        "ingredients": ['terrain_01_01', 'terrain_03_05', 'terrain_07_04'],
+        "effects": {'escape': 7, 'battle': 3},
+    },
+    'dish_016': {
+        "ingredients": ['terrain_01_03', 'terrain_06_03', 'terrain_07_05'],
+        "effects": {'life_save': 6, 'luck': 3},
+    },
+    'dish_017': {
+        "ingredients": ['terrain_02_01', 'terrain_03_00', 'terrain_06_00'],
+        "effects": {'relic': 1.2, 'loot': 4},
+    },
+    'dish_018': {
+        "ingredients": ['terrain_04_01', 'terrain_05_01', 'terrain_06_05'],
+        "effects": {'battle': 7, 'luck': 4},
+    },
+    'dish_019': {
+        "ingredients": ['terrain_00_02', 'terrain_03_02', 'terrain_06_04'],
+        "effects": {'loot': 7, 'escape': 5},
+    },
+    'dish_020': {
+        "ingredients": ['terrain_02_02', 'terrain_03_02', 'terrain_05_04'],
+        "effects": {'heal': 1, 'battle': 3},
+    },
+    'dish_021': {
+        "ingredients": ['terrain_04_00', 'terrain_04_05', 'terrain_05_02'],
+        "effects": {'life_save': 8, 'loot': 3},
+    },
+    'dish_022': {
+        "ingredients": ['terrain_00_05', 'terrain_04_03', 'terrain_07_00'],
+        "effects": {'relic': 1.8, 'luck': 5},
+    },
+    'dish_023': {
+        "ingredients": ['terrain_04_00', 'terrain_04_03', 'terrain_07_03'],
+        "effects": {'battle': 8, 'escape': 6},
+    },
+    'dish_024': {
+        "ingredients": ['terrain_02_05', 'terrain_04_03', 'terrain_07_04'],
+        "effects": {'luck': 7, 'life_save': 5},
+    },
+    'dish_025': {
+        "ingredients": ['terrain_00_03', 'terrain_01_03', 'terrain_04_00'],
+        "effects": {'loot': 8, 'relic': 1.0},
+    },
+    'dish_026': {
+        "ingredients": ['terrain_01_00', 'terrain_03_05', 'terrain_04_03'],
+        "effects": {'battle': 6, 'loot': 6, 'luck': 3},
+    },
+    'dish_027': {
+        "ingredients": ['terrain_00_04', 'terrain_06_00', 'terrain_06_03'],
+        "effects": {'escape': 9, 'relic': 1.5},
+    },
+    'dish_028': {
+        "ingredients": ['terrain_01_05', 'terrain_02_03', 'terrain_04_03'],
+        "effects": {'life_save': 9, 'battle': 4},
+    },
+    'dish_029': {
+        "ingredients": ['terrain_05_03', 'terrain_06_02', 'terrain_07_05'],
+        "effects": {'heal': 1, 'loot': 5, 'luck': 3},
+    },
+    'dish_030': {
+        "ingredients": ['terrain_00_03', 'terrain_04_04', 'terrain_06_03'],
+        "effects": {'max_lives': 1, 'heal': 1, 'life_save': 5},
+    },
+    'dish_031': {
+        "ingredients": ['terrain_01_00', 'terrain_01_05', 'terrain_07_03'],
+        "effects": {'loot': 10, 'escape': 8},
+    },
+    'dish_032': {
+        "ingredients": ['terrain_00_03', 'terrain_00_05', 'terrain_04_01'],
+        "effects": {'luck': 10, 'battle': 4},
+    },
+    'dish_033': {
+        "ingredients": ['terrain_02_03', 'terrain_06_00', 'terrain_06_01'],
+        "effects": {'battle': 6, 'loot': 4},
+    },
+    'dish_034': {
+        "ingredients": ['terrain_01_01', 'terrain_06_02', 'terrain_07_02'],
+        "effects": {'luck': 6, 'loot': 6},
+    },
+    'dish_035': {
+        "ingredients": ['terrain_00_01', 'terrain_02_05', 'terrain_06_04'],
+        "effects": {'escape': 8, 'battle': 3},
+    },
+    'dish_036': {
+        "ingredients": ['terrain_00_00', 'terrain_04_00', 'terrain_05_00'],
+        "effects": {'life_save': 7, 'luck': 3},
+    },
+    'dish_037': {
+        "ingredients": ['terrain_01_01', 'terrain_01_05', 'terrain_05_03'],
+        "effects": {'relic': 1.55, 'loot': 4},
+    },
+    'dish_038': {
+        "ingredients": ['terrain_04_04', 'terrain_05_05', 'terrain_07_05'],
+        "effects": {'battle': 8, 'luck': 4},
+    },
+    'dish_039': {
+        "ingredients": ['terrain_04_04', 'terrain_05_03', 'terrain_05_04'],
+        "effects": {'loot': 8, 'escape': 6},
+    },
+    'dish_040': {
+        "ingredients": ['terrain_02_03', 'terrain_05_05', 'terrain_06_00'],
+        "effects": {'heal': 1, 'battle': 3},
+    },
+    'dish_041': {
+        "ingredients": ['terrain_03_05', 'terrain_05_00', 'terrain_05_01'],
+        "effects": {'life_save': 9, 'loot': 3},
+    },
+    'dish_042': {
+        "ingredients": ['terrain_00_00', 'terrain_05_02', 'terrain_05_05'],
+        "effects": {'relic': 2.15, 'luck': 6},
+    },
+    'dish_043': {
+        "ingredients": ['terrain_01_02', 'terrain_02_04', 'terrain_06_00'],
+        "effects": {'battle': 9, 'escape': 7},
+    },
+    'dish_044': {
+        "ingredients": ['terrain_00_04', 'terrain_02_01', 'terrain_07_03'],
+        "effects": {'luck': 8, 'life_save': 6},
+    },
+    'dish_045': {
+        "ingredients": ['terrain_01_01', 'terrain_02_04', 'terrain_04_02'],
+        "effects": {'loot': 9, 'relic': 1.35},
+    },
+    'dish_046': {
+        "ingredients": ['terrain_01_01', 'terrain_03_03', 'terrain_07_05'],
+        "effects": {'battle': 7, 'loot': 7, 'luck': 3},
+    },
+    'dish_047': {
+        "ingredients": ['terrain_02_02', 'terrain_06_01', 'terrain_06_05'],
+        "effects": {'escape': 10, 'relic': 1.85},
+    },
+    'dish_048': {
+        "ingredients": ['terrain_00_03', 'terrain_01_01', 'terrain_02_03'],
+        "effects": {'life_save': 10, 'battle': 4},
+    },
+    'dish_049': {
+        "ingredients": ['terrain_00_01', 'terrain_06_00', 'terrain_07_01'],
+        "effects": {'heal': 1, 'loot': 6, 'luck': 3},
+    },
+    'dish_050': {
+        "ingredients": ['terrain_03_00', 'terrain_03_01', 'terrain_05_03'],
+        "effects": {'battle': 10, 'relic': 1.55},
+    },
+    'dish_051': {
+        "ingredients": ['terrain_04_05', 'terrain_05_02', 'terrain_06_01'],
+        "effects": {'loot': 10, 'escape': 8},
+    },
+    'dish_052': {
+        "ingredients": ['terrain_02_02', 'terrain_05_00', 'terrain_07_02'],
+        "effects": {'luck': 10, 'battle': 4},
+    },
+    'dish_053': {
+        "ingredients": ['terrain_03_03', 'terrain_04_05', 'terrain_05_01'],
+        "effects": {'battle': 6, 'loot': 4},
+    },
+    'dish_054': {
+        "ingredients": ['terrain_01_00', 'terrain_03_03', 'terrain_05_01'],
+        "effects": {'luck': 6, 'loot': 6},
+    },
+    'dish_055': {
+        "ingredients": ['terrain_00_04', 'terrain_04_03', 'terrain_06_02'],
+        "effects": {'escape': 8, 'battle': 3},
+    },
+    'dish_056': {
+        "ingredients": ['terrain_01_02', 'terrain_06_04', 'terrain_07_02'],
+        "effects": {'life_save': 7, 'luck': 3},
+    },
+    'dish_057': {
+        "ingredients": ['terrain_00_00', 'terrain_02_04', 'terrain_04_01'],
+        "effects": {'relic': 1.55, 'loot': 4},
+    },
+    'dish_058': {
+        "ingredients": ['terrain_00_05', 'terrain_05_00', 'terrain_07_02'],
+        "effects": {'battle': 8, 'luck': 4},
+    },
+    'dish_059': {
+        "ingredients": ['terrain_02_04', 'terrain_05_04', 'terrain_07_02'],
+        "effects": {'loot': 8, 'escape': 6},
+    },
+    'dish_060': {
+        "ingredients": ['terrain_01_03', 'terrain_07_00', 'terrain_07_02'],
+        "effects": {'max_lives': 1, 'heal': 1, 'life_save': 7},
+    },
+    'dish_061': {
+        "ingredients": ['terrain_01_02', 'terrain_04_00', 'terrain_05_04'],
+        "effects": {'life_save': 10, 'loot': 4},
+    },
+    'dish_062': {
+        "ingredients": ['terrain_00_00', 'terrain_00_03', 'terrain_03_04'],
+        "effects": {'relic': 2.5, 'luck': 6},
+    },
+    'dish_063': {
+        "ingredients": ['terrain_00_01', 'terrain_00_05', 'terrain_03_00'],
+        "effects": {'battle': 10, 'escape': 7},
+    },
+    'dish_064': {
+        "ingredients": ['terrain_00_02', 'terrain_02_00', 'terrain_04_03'],
+        "effects": {'luck': 9, 'life_save': 6},
+    },
+    'dish_065': {
+        "ingredients": ['terrain_00_05', 'terrain_02_03', 'terrain_06_04'],
+        "effects": {'loot': 10, 'relic': 1.7},
+    },
+    'dish_066': {
+        "ingredients": ['terrain_00_03', 'terrain_05_04', 'terrain_07_02'],
+        "effects": {'battle': 7, 'loot': 7, 'luck': 4},
+    },
+    'dish_067': {
+        "ingredients": ['terrain_00_01', 'terrain_05_03', 'terrain_07_04'],
+        "effects": {'escape': 11, 'relic': 2.2},
+    },
+    'dish_068': {
+        "ingredients": ['terrain_02_01', 'terrain_04_05', 'terrain_05_02'],
+        "effects": {'life_save': 11, 'battle': 5},
+    },
+    'dish_069': {
+        "ingredients": ['terrain_03_00', 'terrain_04_01', 'terrain_07_05'],
+        "effects": {'heal': 1, 'loot': 6, 'luck': 4},
+    },
+    'dish_070': {
+        "ingredients": ['terrain_00_05', 'terrain_03_02', 'terrain_04_04'],
+        "effects": {'battle': 11, 'relic': 1.9},
+    },
+    'dish_071': {
+        "ingredients": ['terrain_04_05', 'terrain_05_05', 'terrain_07_04'],
+        "effects": {'loot': 11, 'escape': 9},
+    },
+    'dish_072': {
+        "ingredients": ['terrain_06_00', 'terrain_06_01', 'terrain_07_01'],
+        "effects": {'luck': 11, 'battle': 5},
+    },
+    'dish_073': {
+        "ingredients": ['terrain_03_01', 'terrain_04_03', 'terrain_06_03'],
+        "effects": {'battle': 6, 'loot': 5},
+    },
+    'dish_074': {
+        "ingredients": ['terrain_00_03', 'terrain_05_01', 'terrain_07_05'],
+        "effects": {'luck': 6, 'loot': 6},
+    },
+    'dish_075': {
+        "ingredients": ['terrain_00_05', 'terrain_04_04', 'terrain_07_00'],
+        "effects": {'escape': 9, 'battle': 4},
+    },
+    'dish_076': {
+        "ingredients": ['terrain_04_03', 'terrain_05_00', 'terrain_06_04'],
+        "effects": {'life_save': 7, 'luck': 4},
+    },
+    'dish_077': {
+        "ingredients": ['terrain_03_04', 'terrain_05_00', 'terrain_05_02'],
+        "effects": {'relic': 1.9, 'loot': 5},
+    },
+    'dish_078': {
+        "ingredients": ['terrain_01_05', 'terrain_03_03', 'terrain_04_05'],
+        "effects": {'battle': 9, 'luck': 5},
+    },
+    'dish_079': {
+        "ingredients": ['terrain_05_03', 'terrain_06_02', 'terrain_06_05'],
+        "effects": {'loot': 9, 'escape': 6},
+    },
+    'dish_080': {
+        "ingredients": ['terrain_00_03', 'terrain_03_02', 'terrain_04_03'],
+        "effects": {'heal': 1, 'battle': 4},
+    },
+    'dish_081': {
+        "ingredients": ['terrain_04_01', 'terrain_04_05', 'terrain_06_03'],
+        "effects": {'life_save': 10, 'loot': 4},
+    },
+    'dish_082': {
+        "ingredients": ['terrain_01_05', 'terrain_04_00', 'terrain_06_05'],
+        "effects": {'relic': 2.5, 'luck': 6},
+    },
+    'dish_083': {
+        "ingredients": ['terrain_02_04', 'terrain_05_01', 'terrain_07_05'],
+        "effects": {'battle': 10, 'escape': 7},
+    },
+    'dish_084': {
+        "ingredients": ['terrain_01_02', 'terrain_03_01', 'terrain_05_03'],
+        "effects": {'luck': 9, 'life_save': 6},
+    },
+    'dish_085': {
+        "ingredients": ['terrain_03_02', 'terrain_05_01', 'terrain_06_02'],
+        "effects": {'loot': 10, 'relic': 1.7},
+    },
+    'dish_086': {
+        "ingredients": ['terrain_01_01', 'terrain_03_03', 'terrain_06_04'],
+        "effects": {'battle': 7, 'loot': 7, 'luck': 4},
+    },
+    'dish_087': {
+        "ingredients": ['terrain_00_03', 'terrain_03_03', 'terrain_06_05'],
+        "effects": {'escape': 11, 'relic': 2.2},
+    },
+    'dish_088': {
+        "ingredients": ['terrain_00_02', 'terrain_02_02', 'terrain_07_01'],
+        "effects": {'life_save': 11, 'battle': 5},
+    },
+    'dish_089': {
+        "ingredients": ['terrain_00_05', 'terrain_04_01', 'terrain_04_03'],
+        "effects": {'heal': 1, 'loot': 6, 'luck': 4},
+    },
+    'dish_090': {
+        "ingredients": ['terrain_02_02', 'terrain_02_03', 'terrain_03_03'],
+        "effects": {'max_lives': 1, 'heal': 1, 'life_save': 9},
+    },
+    'dish_091': {
+        "ingredients": ['terrain_01_02', 'terrain_03_02', 'terrain_07_00'],
+        "effects": {'loot': 12, 'escape': 10},
+    },
+    'dish_092': {
+        "ingredients": ['terrain_03_02', 'terrain_07_01', 'terrain_07_04'],
+        "effects": {'luck': 12, 'battle': 5},
+    },
+    'dish_093': {
+        "ingredients": ['terrain_01_03', 'terrain_02_04', 'terrain_06_02'],
+        "effects": {'battle': 7, 'loot': 5},
+    },
+    'dish_094': {
+        "ingredients": ['terrain_01_04', 'terrain_05_01', 'terrain_06_02'],
+        "effects": {'luck': 7, 'loot': 7},
+    },
+    'dish_095': {
+        "ingredients": ['terrain_01_01', 'terrain_03_05', 'terrain_04_00'],
+        "effects": {'escape': 10, 'battle': 4},
+    },
+    'dish_096': {
+        "ingredients": ['terrain_04_03', 'terrain_05_00', 'terrain_05_02'],
+        "effects": {'life_save': 8, 'luck': 4},
+    },
+    'dish_097': {
+        "ingredients": ['terrain_02_04', 'terrain_06_02', 'terrain_07_01'],
+        "effects": {'relic': 2.25, 'loot': 5},
+    },
+    'dish_098': {
+        "ingredients": ['terrain_03_00', 'terrain_05_02', 'terrain_07_01'],
+        "effects": {'battle': 10, 'luck': 5},
+    },
+    'dish_099': {
+        "ingredients": ['terrain_03_05', 'terrain_05_02', 'terrain_07_05'],
+        "effects": {'loot': 10, 'escape': 7},
+    },
+    'dish_100': {
+        "ingredients": ['terrain_01_04', 'terrain_02_05', 'terrain_03_03'],
+        "effects": {'heal': 1, 'battle': 4},
+    },
+    'dish_101': {
+        "ingredients": ['terrain_05_05', 'terrain_06_04', 'terrain_06_05'],
+        "effects": {'life_save': 11, 'loot': 4},
+    },
+    'dish_102': {
+        "ingredients": ['terrain_02_05', 'terrain_04_04', 'terrain_05_00'],
+        "effects": {'relic': 2.85, 'luck': 7},
+    },
+    'dish_103': {
+        "ingredients": ['terrain_01_05', 'terrain_04_01', 'terrain_04_02'],
+        "effects": {'battle': 11, 'escape': 8},
+    },
+    'dish_104': {
+        "ingredients": ['terrain_03_05', 'terrain_06_00', 'terrain_07_01'],
+        "effects": {'luck': 10, 'life_save': 7},
+    },
+    'dish_105': {
+        "ingredients": ['terrain_00_01', 'terrain_03_00', 'terrain_03_04'],
+        "effects": {'loot': 11, 'relic': 2.05},
+    },
+    'dish_106': {
+        "ingredients": ['terrain_00_04', 'terrain_05_03', 'terrain_07_05'],
+        "effects": {'battle': 8, 'loot': 8, 'luck': 4},
+    },
+    'dish_107': {
+        "ingredients": ['terrain_01_00', 'terrain_05_03', 'terrain_05_05'],
+        "effects": {'escape': 12, 'relic': 2.55},
+    },
+    'dish_108': {
+        "ingredients": ['terrain_00_03', 'terrain_02_00', 'terrain_04_01'],
+        "effects": {'life_save': 12, 'battle': 5},
+    },
+    'dish_109': {
+        "ingredients": ['terrain_00_02', 'terrain_02_05', 'terrain_04_03'],
+        "effects": {'heal': 1, 'loot': 7, 'luck': 4},
+    },
+    'dish_110': {
+        "ingredients": ['terrain_00_01', 'terrain_02_01', 'terrain_05_04'],
+        "effects": {'battle': 12, 'relic': 2.25},
+    },
+    'dish_111': {
+        "ingredients": ['terrain_01_03', 'terrain_02_01', 'terrain_04_05'],
+        "effects": {'loot': 12, 'escape': 10},
+    },
+    'dish_112': {
+        "ingredients": ['terrain_00_02', 'terrain_02_03', 'terrain_03_00'],
+        "effects": {'luck': 12, 'battle': 5},
+    },
+    'dish_113': {
+        "ingredients": ['terrain_02_05', 'terrain_03_02', 'terrain_05_02'],
+        "effects": {'battle': 7, 'loot': 5},
+    },
+    'dish_114': {
+        "ingredients": ['terrain_01_04', 'terrain_02_03', 'terrain_07_04'],
+        "effects": {'luck': 7, 'loot': 7},
+    },
+    'dish_115': {
+        "ingredients": ['terrain_01_05', 'terrain_02_05', 'terrain_03_00'],
+        "effects": {'escape': 10, 'battle': 4},
+    },
+    'dish_116': {
+        "ingredients": ['terrain_00_00', 'terrain_04_03', 'terrain_05_03'],
+        "effects": {'life_save': 8, 'luck': 4},
+    },
+    'dish_117': {
+        "ingredients": ['terrain_01_01', 'terrain_03_01', 'terrain_04_03'],
+        "effects": {'relic': 2.25, 'loot': 5},
+    },
+    'dish_118': {
+        "ingredients": ['terrain_00_02', 'terrain_02_00', 'terrain_07_02'],
+        "effects": {'battle': 10, 'luck': 5},
+    },
+    'dish_119': {
+        "ingredients": ['terrain_00_03', 'terrain_03_03', 'terrain_07_05'],
+        "effects": {'loot': 10, 'escape': 7},
+    },
+    'dish_120': {
+        "ingredients": ['terrain_04_01', 'terrain_05_03', 'terrain_06_00'],
+        "effects": {'max_lives': 1, 'heal': 1, 'life_save': 11},
+    },
+    'dish_121': {
+        "ingredients": ['terrain_04_05', 'terrain_06_01', 'terrain_07_00'],
+        "effects": {'life_save': 12, 'loot': 4},
+    },
+    'dish_122': {
+        "ingredients": ['terrain_02_04', 'terrain_07_01', 'terrain_07_03'],
+        "effects": {'relic': 3.2, 'luck': 7},
+    },
+    'dish_123': {
+        "ingredients": ['terrain_00_05', 'terrain_03_02', 'terrain_05_02'],
+        "effects": {'battle': 12, 'escape': 9},
+    },
+    'dish_124': {
+        "ingredients": ['terrain_01_02', 'terrain_01_04', 'terrain_03_04'],
+        "effects": {'luck': 10, 'life_save': 7},
+    },
+    'dish_125': {
+        "ingredients": ['terrain_02_04', 'terrain_04_03', 'terrain_07_03'],
+        "effects": {'loot': 12, 'relic': 2.4},
+    },
+    'dish_126': {
+        "ingredients": ['terrain_03_05', 'terrain_05_00', 'terrain_06_05'],
+        "effects": {'battle': 9, 'loot': 9, 'luck': 4},
+    },
+    'dish_127': {
+        "ingredients": ['terrain_01_03', 'terrain_04_00', 'terrain_07_01'],
+        "effects": {'escape': 13, 'relic': 2.9},
+    },
+    'dish_128': {
+        "ingredients": ['terrain_02_02', 'terrain_04_02', 'terrain_07_01'],
+        "effects": {'life_save': 13, 'battle': 6},
+    },
+    'dish_129': {
+        "ingredients": ['terrain_06_00', 'terrain_06_04', 'terrain_07_03'],
+        "effects": {'heal': 1, 'loot': 7, 'luck': 4},
+    },
+    'dish_130': {
+        "ingredients": ['terrain_02_02', 'terrain_06_01', 'terrain_06_04'],
+        "effects": {'battle': 13, 'relic': 2.6},
+    },
+    'dish_131': {
+        "ingredients": ['terrain_02_04', 'terrain_05_00', 'terrain_05_02'],
+        "effects": {'loot': 13, 'escape': 10},
+    },
+    'dish_132': {
+        "ingredients": ['terrain_00_04', 'terrain_03_03', 'terrain_05_05'],
+        "effects": {'luck': 13, 'battle': 6},
+    },
+    'dish_133': {
+        "ingredients": ['terrain_04_03', 'terrain_05_05', 'terrain_07_05'],
+        "effects": {'battle': 7, 'loot': 6},
+    },
+    'dish_134': {
+        "ingredients": ['terrain_04_01', 'terrain_05_00', 'terrain_07_00'],
+        "effects": {'luck': 7, 'loot': 7},
+    },
+    'dish_135': {
+        "ingredients": ['terrain_00_03', 'terrain_05_01', 'terrain_06_01'],
+        "effects": {'escape': 10, 'battle': 4},
+    },
+    'dish_136': {
+        "ingredients": ['terrain_02_00', 'terrain_04_02', 'terrain_04_03'],
+        "effects": {'life_save': 9, 'luck': 4},
+    },
+    'dish_137': {
+        "ingredients": ['terrain_00_05', 'terrain_02_03', 'terrain_05_01'],
+        "effects": {'relic': 2.6, 'loot': 6},
+    },
+    'dish_138': {
+        "ingredients": ['terrain_00_00', 'terrain_02_00', 'terrain_04_05'],
+        "effects": {'battle': 10, 'luck': 6},
+    },
+    'dish_139': {
+        "ingredients": ['terrain_01_01', 'terrain_01_04', 'terrain_02_00'],
+        "effects": {'loot': 10, 'escape': 7},
+    },
+    'dish_140': {
+        "ingredients": ['terrain_01_01', 'terrain_02_03', 'terrain_05_02'],
+        "effects": {'heal': 1, 'battle': 4},
+    },
+    'dish_141': {
+        "ingredients": ['terrain_01_04', 'terrain_04_05', 'terrain_05_03'],
+        "effects": {'life_save': 12, 'loot': 4},
+    },
+    'dish_142': {
+        "ingredients": ['terrain_04_04', 'terrain_04_05', 'terrain_07_00'],
+        "effects": {'relic': 3.2, 'luck': 7},
+    },
+    'dish_143': {
+        "ingredients": ['terrain_00_04', 'terrain_00_05', 'terrain_04_05'],
+        "effects": {'battle': 12, 'escape': 9},
+    },
+    'dish_144': {
+        "ingredients": ['terrain_01_03', 'terrain_02_01', 'terrain_02_02'],
+        "effects": {'luck': 10, 'life_save': 7},
+    },
+    'dish_145': {
+        "ingredients": ['terrain_01_03', 'terrain_05_05', 'terrain_06_04'],
+        "effects": {'loot': 12, 'relic': 2.4},
+    },
+    'dish_146': {
+        "ingredients": ['terrain_01_04', 'terrain_02_01', 'terrain_04_00'],
+        "effects": {'battle': 9, 'loot': 9, 'luck': 4},
+    },
+    'dish_147': {
+        "ingredients": ['terrain_04_01', 'terrain_06_01', 'terrain_07_05'],
+        "effects": {'escape': 13, 'relic': 2.9},
+    },
+    'dish_148': {
+        "ingredients": ['terrain_00_04', 'terrain_06_05', 'terrain_07_02'],
+        "effects": {'life_save': 13, 'battle': 6},
+    },
+    'dish_149': {
+        "ingredients": ['terrain_01_03', 'terrain_03_05', 'terrain_07_04'],
+        "effects": {'heal': 1, 'loot': 7, 'luck': 4},
+    },
+    'dish_150': {
+        "ingredients": ['terrain_01_02', 'terrain_03_03', 'terrain_06_02'],
+        "effects": {'max_lives': 1, 'heal': 1, 'life_save': 13},
     },
 }
 
-# 자동 생성 요리들의 효과 원형. 뒤쪽 번호일수록 조금씩 강해진다.
-ADVENTURE_COOKING_EFFECT_PATTERNS = [
-    {"battle": 5, "loot": 4},
-    {"luck": 5, "loot": 5},
-    {"escape": 7, "battle": 3},
-    {"life_save": 6, "luck": 3},
-    {"relic": 1.2, "loot": 4},
-    {"battle": 7, "luck": 4},
-    {"loot": 7, "escape": 5},
-    {"heal": 1, "battle": 3},
-    {"life_save": 8, "loot": 3},
-    {"relic": 1.8, "luck": 5},
-    {"battle": 8, "escape": 6},
-    {"luck": 7, "life_save": 5},
-    {"loot": 8, "relic": 1.0},
-    {"battle": 6, "loot": 6, "luck": 3},
-    {"escape": 9, "relic": 1.5},
-    {"life_save": 9, "battle": 4},
-    {"heal": 1, "loot": 5, "luck": 3},
-    {"battle": 9, "relic": 1.2},
-    {"loot": 9, "escape": 7},
-    {"luck": 9, "battle": 4},
+# 실수로 레시피를 빼거나 같은 조합을 두 번 넣으면 시작할 때 바로 알려준다.
+if len(ADVENTURE_COOKING_RECIPES) != ADVENTURE_COOKING_RECIPE_TOTAL:
+    raise RuntimeError(
+        f"요리 레시피 수 오류: {len(ADVENTURE_COOKING_RECIPES)}/{ADVENTURE_COOKING_RECIPE_TOTAL}종"
+    )
+
+ADVENTURE_COOKING_RECIPE_KEYS = [
+    tuple(sorted(recipe["ingredients"]))
+    for recipe in ADVENTURE_COOKING_RECIPES.values()
 ]
+if len(set(ADVENTURE_COOKING_RECIPE_KEYS)) != len(ADVENTURE_COOKING_RECIPE_KEYS):
+    raise RuntimeError("서로 같은 재료 구성의 요리 레시피가 중복되어 있어.")
 
-
-def build_adventure_cooking_recipes():
-    recipes = {
-        recipe_id: {
-            "ingredients": list(recipe["ingredients"]),
-            "effects": dict(recipe["effects"]),
-        }
-        for recipe_id, recipe in ADVENTURE_COOKING_BASE_RECIPES.items()
-    }
-
-    # 현재 모험 지형 8개 × 지형별 전리품 6개 = 요리 가능한 기본 재료 48종.
-    ingredient_ids = [
-        f"terrain_{terrain_index:02d}_{loot_index:02d}"
-        for terrain_index in range(8)
-        for loot_index in range(6)
-    ]
-
-    existing_keys = {
-        tuple(sorted(recipe["ingredients"]))
-        for recipe in recipes.values()
-    }
-
-    candidates = []
-    for first_index in range(len(ingredient_ids) - 2):
-        for second_index in range(first_index + 1, len(ingredient_ids) - 1):
-            for third_index in range(second_index + 1, len(ingredient_ids)):
-                combo = (
-                    ingredient_ids[first_index],
-                    ingredient_ids[second_index],
-                    ingredient_ids[third_index],
-                )
-                if combo in existing_keys:
-                    continue
-
-                # 파이썬 hash()는 실행마다 달라질 수 있으므로 SHA-256으로 고정 순서를 만든다.
-                fixed_order_key = hashlib.sha256(
-                    ("adventure-cooking-v2|" + "|".join(combo)).encode("utf-8")
-                ).hexdigest()
-                candidates.append((fixed_order_key, combo))
-
-    candidates.sort(key=lambda pair: pair[0])
-
-    next_number = len(recipes) + 1
-    for _, combo in candidates:
-        if next_number > ADVENTURE_COOKING_RECIPE_TOTAL:
-            break
-
-        pattern_index = (next_number - 13) % len(ADVENTURE_COOKING_EFFECT_PATTERNS)
-        tier = min(4, (next_number - 1) // 30)
-        base_effects = ADVENTURE_COOKING_EFFECT_PATTERNS[pattern_index]
-        effects = {}
-
-        for effect_key, base_value in base_effects.items():
-            if effect_key in ("heal", "max_lives"):
-                effects[effect_key] = int(base_value)
-            elif effect_key == "relic":
-                effects[effect_key] = round(float(base_value) + tier * 0.35, 2)
-            else:
-                effects[effect_key] = int(round(float(base_value) * (1 + tier * 0.12)))
-
-        # 30종마다 한 번씩 희귀한 최대 목숨 증가 요리가 등장한다.
-        # 너무 많이 쌓이지 않도록 해당 요리의 다른 효과는 비교적 낮게 유지한다.
-        if next_number in (30, 60, 90, 120, 150):
-            effects = {
-                "max_lives": 1,
-                "heal": 1,
-                "life_save": 5 + tier * 2,
-            }
-
-        recipe_id = f"dish_{next_number:03d}"
-        recipes[recipe_id] = {
-            "ingredients": list(combo),
-            "effects": effects,
-        }
-        existing_keys.add(combo)
-        next_number += 1
-
-    if len(recipes) != ADVENTURE_COOKING_RECIPE_TOTAL:
-        raise RuntimeError(
-            f"요리 레시피 생성 실패: {len(recipes)}/{ADVENTURE_COOKING_RECIPE_TOTAL}종"
-        )
-
-    return recipes
-
-
-ADVENTURE_COOKING_RECIPES = build_adventure_cooking_recipes()
 
 
 adventure_action_locks = {}
@@ -9614,9 +10066,14 @@ def build_adventure_item_catalog():
 ADVENTURE_ITEM_CATALOG = build_adventure_item_catalog()
 
 
-# 재료의 순서를 무시하기 위해 정렬된 3개 ID를 레시피 키로 사용한다.
+# 정렬된 튜플은 순서만 없애고 같은 재료의 개수는 그대로 보존한다.
+# 예: A+B+C, C+A+B, B+C+A는 모두 같은 구성으로 판정된다.
+def normalize_adventure_cooking_ingredients(ingredient_ids):
+    return tuple(sorted(str(item_id) for item_id in ingredient_ids))
+
+
 ADVENTURE_COOKING_RECIPE_LOOKUP = {
-    tuple(sorted(recipe["ingredients"])): recipe_id
+    normalize_adventure_cooking_ingredients(recipe["ingredients"]): recipe_id
     for recipe_id, recipe in ADVENTURE_COOKING_RECIPES.items()
 }
 
@@ -9715,7 +10172,7 @@ def cook_adventure_food(uid, selected_item_ids, member):
         if int(inventory.get(item_id, 0)) < amount:
             return False, f"❌ **{get_adventure_item_name(item_id)}** 수량이 부족해.", None, False
 
-    recipe_key = tuple(sorted(selected_item_ids))
+    recipe_key = normalize_adventure_cooking_ingredients(selected_item_ids)
     recipe_id = ADVENTURE_COOKING_RECIPE_LOOKUP.get(recipe_key)
 
     # 이미 이번 모험에서 먹은 완성 요리는 조리 자체를 막고 재료도 건드리지 않는다.
