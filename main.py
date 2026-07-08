@@ -12069,11 +12069,20 @@ async def resolve_adventure_escape(message, member):
 def build_adventure_start_embed(uid, hard_mode=False):
     adventure = get_adventure(uid)
     unlocked = is_adventure_hard_mode_unlocked(adventure)
+    weapon = adventure.get("weapon", "무인검")
+    armor = adventure.get("armor", "모험가 세트")
 
     lines = []
     for terrain_key in ADVENTURE_START_TERRAINS:
         terrain = get_terrain_info(terrain_key)
         lines.append(f"{terrain['emoji']} **{terrain['name']}** — {terrain['description']}")
+
+    start_equipment_text = (
+        "\n\n🧰 **시작 장비**\n"
+        f"🗡️ {weapon} (+{WEAPONS[weapon]['bonus']}) · "
+        f"🛡️ {armor} (+{ARMORS[armor]['bonus']})\n"
+        "바꾸려면 `/모험장비변경`을 사용해."
+    )
 
     mode_text = "🔥 **하드모드 ON**" if hard_mode else "🟢 **일반모드**"
     hard_description = ""
@@ -12093,6 +12102,7 @@ def build_adventure_start_embed(uid, hard_mode=False):
             + "\n\n".join(lines)
             + "\n\n😈 마계는 고산지대 또는 얼음 지대에서만 진입 가능\n"
             + "☁️ 천계는 마계에서만 진입 가능"
+            + start_equipment_text
             + hard_description
         ),
         color=discord.Color.red() if hard_mode else discord.Color.blurple(),
@@ -12287,16 +12297,19 @@ def build_adventure_equipment_embed(member, uid):
     adventure = get_adventure(uid)
     weapon = adventure.get("weapon", "무인검")
     armor = adventure.get("armor", "모험가 세트")
+    mode_label = "현재 모험 장비" if adventure.get("active") else "다음 모험 시작 장비"
 
     embed = discord.Embed(
         title=f"🧰 {member.display_name}의 모험 장비",
         description=(
-            "아래 선택 메뉴에서 모험 중 발견한 장비를 즉시 교체할 수 있어.\n"
-            "전투 직전에 바꿔도 실제 승률에 바로 반영돼.\n"
+            "아래 선택 메뉴에서 모험 장비를 바꿀 수 있어.\n"
+            "모험 시작 전에 바꾸면 다음 모험을 그 장비로 시작하고, "
+            "모험 중에 바꾸면 전투 승률에 바로 반영돼.\n"
             "장비는 돈으로 살 수 없고, 병원행이면 기본 장비만 남아.\n\n"
             f"🎖️ 모험 레벨: **Lv.{adventure['level']}**\n"
-            f"🗡️ 현재 무기: **{weapon}** (+{WEAPONS[weapon]['bonus']})\n"
-            f"🛡️ 현재 갑옷: **{armor}** (+{ARMORS[armor]['bonus']})\n\n"
+            f"📌 상태: **{mode_label}**\n"
+            f"🗡️ 무기: **{weapon}** (+{WEAPONS[weapon]['bonus']})\n"
+            f"🛡️ 갑옷: **{armor}** (+{ARMORS[armor]['bonus']})\n\n"
             f"보유 무기: **{len(adventure['owned_weapons'])}개**\n"
             f"보유 갑옷: **{len(adventure['owned_armors'])}개**"
         ),
@@ -13750,6 +13763,18 @@ async def adventure_command(interaction: discord.Interaction):
         result_text = f"🧭 진행 중인 모험 스레드로 이어졌어: {thread.mention}"
 
     await interaction.followup.send(result_text, ephemeral=True)
+
+
+@bot.tree.command(name="모험장비변경", description="다음 모험 시작 장비 또는 현재 모험 장비를 변경한다", guild=GUILD)
+async def adventure_equipment_change_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    get_adventure(uid)
+
+    await interaction.response.send_message(
+        embed=build_adventure_equipment_embed(interaction.user, uid),
+        view=AdventureEquipmentView(uid),
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="가방", description="모험에서 얻은 전리품을 확인한다", guild=GUILD)
