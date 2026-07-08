@@ -9273,6 +9273,68 @@ def get_equipped_adventure_boosts(uid):
     return boosts
 
 
+def get_adventure_shop_item_effect_text(item_name):
+    item = ADVENTURE_SHOP_CATALOG.get(item_name, {})
+    labels = {
+        "battle": "전투",
+        "luck": "행운",
+        "loot": "전리품",
+        "escape": "도주",
+        "life_save": "생존",
+        "relic": "유물",
+        "max_lives": "최대 목숨",
+    }
+
+    parts = []
+    for key in ["battle", "luck", "loot", "escape", "life_save", "relic", "max_lives"]:
+        value = item.get(key, 0)
+        if not value:
+            continue
+        if key == "max_lives":
+            parts.append(f"{labels[key]} +{int(value)}")
+        elif key == "relic":
+            parts.append(f"{labels[key]} +{value:g}%p")
+        else:
+            parts.append(f"{labels[key]} +{value:g}%")
+
+    return " · ".join(parts) if parts else "효과 없음"
+
+
+def get_adventure_shop_equipment_text(uid):
+    info = get_adventure_shop_user(uid)
+    equipped = [name for name in info.get("equipped", []) if name in ADVENTURE_SHOP_CATALOG]
+
+    if not equipped:
+        return "장착 중인 모험상점 장비 없음"
+
+    return "\n".join(
+        f"✅ **{name}** — {get_adventure_shop_item_effect_text(name)}"
+        for name in equipped
+    )
+
+
+def get_adventure_shop_boost_summary_text(uid):
+    boosts = get_equipped_adventure_boosts(uid)
+    parts = []
+
+    if boosts.get("battle"):
+        parts.append(f"전투 +{boosts['battle']:g}%")
+    if boosts.get("luck"):
+        parts.append(f"행운 +{boosts['luck']:g}%")
+    if boosts.get("loot"):
+        parts.append(f"전리품 +{boosts['loot']:g}%")
+    if boosts.get("escape"):
+        parts.append(f"도주 +{boosts['escape']:g}%")
+    if boosts.get("life_save"):
+        parts.append(f"생존 +{boosts['life_save']:g}%")
+    if boosts.get("relic"):
+        parts.append(f"유물 +{boosts['relic']:g}%p")
+    if boosts.get("max_lives"):
+        parts.append(f"최대 목숨 +{int(boosts['max_lives'])}")
+
+    return " · ".join(parts) if parts else "효과 없음"
+
+
 
 def get_adventure_required_exp(level):
     """모험 전용 레벨 요구 경험치. /사냥 레벨과는 전혀 공유하지 않는다."""
@@ -12078,10 +12140,13 @@ def build_adventure_start_embed(uid, hard_mode=False):
         lines.append(f"{terrain['emoji']} **{terrain['name']}** — {terrain['description']}")
 
     start_equipment_text = (
-        "\n\n🧰 **시작 장비**\n"
-        f"🗡️ {weapon} (+{WEAPONS[weapon]['bonus']}) · "
-        f"🛡️ {armor} (+{ARMORS[armor]['bonus']})\n"
-        "바꾸려면 `/모험장비변경`을 사용해."
+        "\n\n🧰 **시작 모험상점 장비**\n"
+        f"{get_adventure_shop_equipment_text(uid)}\n"
+        f"📊 합산 효과: **{get_adventure_shop_boost_summary_text(uid)}**\n"
+        "바꾸려면 `/모험장비변경`을 사용해. "
+        "이 장비 효과는 모험 시작 순간에 이번 모험 버프로 적용돼.\n"
+        f"⚔️ 전투 드랍 장비: 🗡️ {weapon} (+{WEAPONS[weapon]['bonus']}) · "
+        f"🛡️ {armor} (+{ARMORS[armor]['bonus']})"
     )
 
     mode_text = "🔥 **하드모드 ON**" if hard_mode else "🟢 **일반모드**"
@@ -12393,6 +12458,169 @@ class AdventureEquipmentView(discord.ui.View):
         self.user_id = str(user_id)
         self.add_item(AdventureWeaponSelect(self.user_id))
         self.add_item(AdventureArmorSelect(self.user_id))
+
+
+class AdventureShopEquipmentSelect(discord.ui.Select):
+    def __init__(self, user_id):
+        self.user_id = str(user_id)
+        adventure = get_adventure(self.user_id)
+        info = get_adventure_shop_user(self.user_id)
+        owned = [name for name in info.get("owned", []) if name in ADVENTURE_SHOP_CATALOG]
+
+        if owned:
+            options = [
+                discord.SelectOption(
+                    label=name,
+                    description=(
+                        ("장착 중 · " if name in info.get("equipped", []) else "보유 중 · ")
+                        + get_adventure_shop_item_effect_text(name)
+                    )[:100],
+                    default=(name in info.get("equipped", [])),
+                )
+                for name in owned
+            ][:25]
+            placeholder = "🧰 장착/해제할 모험상점 장비 선택"
+            disabled = bool(adventure.get("active"))
+        else:
+            options = [
+                discord.SelectOption(
+                    label="구매한 모험상점 장비 없음",
+                    value="__none__",
+                    description="/모험상점에서 영구 모험 아이템을 먼저 구매해줘.",
+                )
+            ]
+            placeholder = "구매한 모험상점 장비가 없어"
+            disabled = True
+
+        super().__init__(
+            placeholder=placeholder,
+            min_values=1,
+            max_values=1,
+            options=options,
+            disabled=disabled,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        if adventure.get("active"):
+            await interaction.response.send_message(
+                "❌ 모험상점 장비는 모험 시작 전에만 바꿀 수 있어. "
+                "이번 모험에는 시작할 때 장착한 장비 효과가 적용 중이야.",
+                ephemeral=True,
+            )
+            return
+
+        selected = self.values[0]
+        if selected == "__none__":
+            await interaction.response.send_message("구매한 모험상점 장비가 없어.", ephemeral=True)
+            return
+
+        info = get_adventure_shop_user(self.user_id)
+        if selected not in info.get("owned", []):
+            await interaction.response.send_message("보유하지 않은 모험상점 장비야.", ephemeral=True)
+            return
+
+        if selected in info["equipped"]:
+            info["equipped"].remove(selected)
+            result_text = f"📦 **{selected}** 장착 해제 완료."
+        else:
+            if len(info["equipped"]) >= ADVENTURE_MAX_EQUIPPED:
+                await interaction.response.send_message(
+                    f"❌ 최대 {ADVENTURE_MAX_EQUIPPED}개까지만 장착할 수 있어. 먼저 하나 해제해줘.",
+                    ephemeral=True,
+                )
+                return
+
+            info["equipped"].append(selected)
+            result_text = f"✅ **{selected}** 장착 완료. 다음 모험 시작부터 적용돼!"
+
+        save_data()
+        await interaction.response.edit_message(
+            embed=build_adventure_shop_equipment_embed(interaction.user, self.user_id, result_text),
+            view=AdventureShopEquipmentView(self.user_id),
+        )
+
+
+def build_adventure_shop_equipment_embed(member, uid, result_text=None):
+    uid = str(uid)
+    adventure = get_adventure(uid)
+    info = get_adventure_shop_user(uid)
+
+    lines = []
+    for name, item in ADVENTURE_SHOP_CATALOG.items():
+        if name in info["equipped"]:
+            state = "✅ 장착 중"
+        elif name in info["owned"]:
+            state = "📦 보유 중"
+        else:
+            state = f"🔒 미보유 · {item['price']:,}모라"
+
+        lines.append(
+            f"**{name}** — {state}\n"
+            f"└ {item['desc']}\n"
+            f"└ 효과: {get_adventure_shop_item_effect_text(name)}"
+        )
+
+    active_notice = ""
+    if adventure.get("active"):
+        active_notice = (
+            "\n\n⚠️ 지금은 모험 중이라 모험상점 장비를 바꿀 수 없어. "
+            "이번 모험에는 시작할 때 장착한 장비 효과가 이미 적용돼 있어."
+        )
+
+    result_part = f"\n\n{result_text}" if result_text else ""
+
+    embed = discord.Embed(
+        title=f"🧰 {member.display_name}의 모험상점 장비",
+        description=(
+            f"모험 시작 전에 장착할 영구 모험 아이템을 고르는 메뉴야.\n"
+            f"최대 **{ADVENTURE_MAX_EQUIPPED}개**까지 장착 가능하고, "
+            "장착 효과는 `/모험`으로 새 모험을 시작하는 순간 이번 모험 버프로 들어가.\n\n"
+            f"현재 장착: **{len(info['equipped'])}/{ADVENTURE_MAX_EQUIPPED}개**\n"
+            f"합산 효과: **{get_adventure_shop_boost_summary_text(uid)}**"
+            f"{result_part}"
+            f"{active_notice}\n\n"
+            + "\n\n".join(lines)
+        ),
+        color=discord.Color.dark_gold(),
+    )
+    embed.set_footer(text="구매는 /모험상점 · 장착 변경은 모험 시작 전에만 가능")
+    return embed
+
+
+class AdventureShopEquipmentView(discord.ui.View):
+    def __init__(self, user_id):
+        super().__init__(timeout=300)
+        self.user_id = str(user_id)
+        self.add_item(AdventureShopEquipmentSelect(self.user_id))
+
+    @discord.ui.button(label="장착 전부 해제", style=discord.ButtonStyle.secondary)
+    async def clear_equipment(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        adventure = get_adventure(self.user_id)
+        if adventure.get("active"):
+            await interaction.response.send_message(
+                "❌ 모험상점 장비는 모험 시작 전에만 바꿀 수 있어.",
+                ephemeral=True,
+            )
+            return
+
+        info = get_adventure_shop_user(self.user_id)
+        if not info.get("equipped"):
+            await interaction.response.send_message("이미 장착한 모험상점 장비가 없어.", ephemeral=True)
+            return
+
+        info["equipped"] = []
+        save_data()
+        await interaction.response.edit_message(
+            embed=build_adventure_shop_equipment_embed(interaction.user, self.user_id, "📦 모든 모험상점 장비를 해제했어."),
+            view=AdventureShopEquipmentView(self.user_id),
+        )
 
 
 def get_adventure_potion_usage_text(adventure, potion_name):
@@ -13765,14 +13993,15 @@ async def adventure_command(interaction: discord.Interaction):
     await interaction.followup.send(result_text, ephemeral=True)
 
 
-@bot.tree.command(name="모험장비변경", description="다음 모험 시작 장비 또는 현재 모험 장비를 변경한다", guild=GUILD)
+@bot.tree.command(name="모험장비변경", description="다음 모험 시작 때 적용할 모험상점 장비를 변경한다", guild=GUILD)
 async def adventure_equipment_change_command(interaction: discord.Interaction):
     uid = str(interaction.user.id)
     get_adventure(uid)
+    get_adventure_shop_user(uid)
 
     await interaction.response.send_message(
-        embed=build_adventure_equipment_embed(interaction.user, uid),
-        view=AdventureEquipmentView(uid),
+        embed=build_adventure_shop_equipment_embed(interaction.user, uid),
+        view=AdventureShopEquipmentView(uid),
         ephemeral=True,
     )
 
