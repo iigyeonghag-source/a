@@ -12557,8 +12557,10 @@ async def open_adventure_potion_menu(interaction, user_id):
     )
 
 
-def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_text=None):
-    selected = list(selected or [None, None, None])
+def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_text=None, active_slot=0):
+    selected = (list(selected or []) + [None, None, None])[:3]
+    active_slot = max(0, min(int(active_slot), 2))
+
     entries = get_adventure_cooking_entries(uid)
     total_pages = max(1, (len(entries) + ADVENTURE_COOKING_PAGE_SIZE - 1) // ADVENTURE_COOKING_PAGE_SIZE)
     page = max(0, min(int(page), total_pages - 1))
@@ -12566,12 +12568,14 @@ def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_tex
     page_entries = entries[start:start + ADVENTURE_COOKING_PAGE_SIZE]
 
     slot_lines = []
+    inventory = get_adventure_inventory(uid)
     for index, item_id in enumerate(selected, start=1):
+        marker = "👉 " if index - 1 == active_slot else ""
         if item_id and item_id in ADVENTURE_ITEM_CATALOG:
-            owned = int(get_adventure_inventory(uid).get(item_id, 0))
-            slot_lines.append(f"**{index}번 칸:** {get_adventure_item_name(item_id)} · 보유 {owned}개")
+            owned = int(inventory.get(item_id, 0))
+            slot_lines.append(f"{marker}**{index}번 칸:** {get_adventure_item_name(item_id)} · 보유 {owned}개")
         else:
-            slot_lines.append(f"**{index}번 칸:** 비어 있음")
+            slot_lines.append(f"{marker}**{index}번 칸:** 비어 있음")
 
     page_lines = []
     for item_id, amount in page_entries:
@@ -12589,9 +12593,11 @@ def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_tex
         title=f"🍳 {member.display_name}의 야전 요리",
         description=(
             "가방의 전리품을 세 칸에 하나씩 넣어 조합해. 재료 순서는 상관없어.\n"
+            "먼저 아래 버튼으로 넣을 칸을 고른 뒤, 재료 목록 페이지에서 재료를 선택하면 돼.\n"
+            "페이지를 넘겨도 조리대에 넣은 재료는 유지돼.\n"
             "정확한 레시피면 재료가 소모되고, 완성한 요리를 바로 먹어 이번 모험 버프를 받아.\n"
             "틀린 조합도 조리에 실패하면서 넣은 재료 3개를 전부 잃어. 같은 레시피 버프는 모험당 1회만 적용돼.\n\n"
-            "## 조리대\n" + "\n".join(slot_lines)
+            f"## 조리대 · 현재 선택 칸: {active_slot + 1}번\n" + "\n".join(slot_lines)
             + f"\n\n## 재료 목록 ({page + 1}/{total_pages}쪽)\n"
             + ("\n".join(page_lines) if page_lines else "요리에 쓸 수 있는 전리품이 없어.")
             + pending_text
@@ -12604,14 +12610,14 @@ def build_adventure_cooking_embed(member, uid, selected=None, page=0, result_tex
 
 
 class AdventureCookingIngredientSelect(discord.ui.Select):
-    def __init__(self, user_id, slot_index, selected, page, page_entries):
+    def __init__(self, user_id, selected, page, page_entries, active_slot=0):
         self.user_id = str(user_id)
-        self.slot_index = int(slot_index)
-        self.selected_state = list(selected)
+        self.selected_state = (list(selected or []) + [None, None, None])[:3]
         self.page = int(page)
+        self.active_slot = max(0, min(int(active_slot), 2))
 
         options = []
-        current = self.selected_state[self.slot_index]
+        current = self.selected_state[self.active_slot]
         for item_id, amount in page_entries:
             item = ADVENTURE_ITEM_CATALOG[item_id]
             rarity = ADVENTURE_RARITIES[item["rarity"]]
@@ -12626,11 +12632,11 @@ class AdventureCookingIngredientSelect(discord.ui.Select):
             )
 
         super().__init__(
-            placeholder=f"{self.slot_index + 1}번 칸 재료 선택",
+            placeholder=f"{self.active_slot + 1}번 칸에 넣을 재료 선택",
             min_values=1,
             max_values=1,
             options=options,
-            row=self.slot_index,
+            row=0,
         )
 
     async def callback(self, interaction: discord.Interaction):
@@ -12638,21 +12644,27 @@ class AdventureCookingIngredientSelect(discord.ui.Select):
             return
 
         selected = list(self.selected_state)
-        selected[self.slot_index] = self.values[0]
+        selected[self.active_slot] = self.values[0]
         embed, page, _, _ = build_adventure_cooking_embed(
-            interaction.user, self.user_id, selected, self.page
+            interaction.user,
+            self.user_id,
+            selected,
+            self.page,
+            active_slot=self.active_slot,
         )
         await interaction.response.edit_message(
             embed=embed,
-            view=AdventureCookingView(self.user_id, selected, page),
+            view=AdventureCookingView(self.user_id, selected, page, self.active_slot),
         )
 
 
 class AdventureCookingView(discord.ui.View):
-    def __init__(self, user_id, selected=None, page=0):
+    def __init__(self, user_id, selected=None, page=0, active_slot=0):
         super().__init__(timeout=600)
         self.user_id = str(user_id)
-        self.selected = list(selected or [None, None, None])
+        self.selected = (list(selected or []) + [None, None, None])[:3]
+        self.active_slot = max(0, min(int(active_slot), 2))
+
         entries = get_adventure_cooking_entries(self.user_id)
         self.total_pages = max(1, (len(entries) + ADVENTURE_COOKING_PAGE_SIZE - 1) // ADVENTURE_COOKING_PAGE_SIZE)
         self.page = max(0, min(int(page), self.total_pages - 1))
@@ -12660,38 +12672,84 @@ class AdventureCookingView(discord.ui.View):
         page_entries = entries[start:start + ADVENTURE_COOKING_PAGE_SIZE]
 
         if page_entries:
-            for slot_index in range(3):
-                self.add_item(
-                    AdventureCookingIngredientSelect(
-                        self.user_id, slot_index, self.selected, self.page, page_entries
-                    )
+            self.add_item(
+                AdventureCookingIngredientSelect(
+                    self.user_id,
+                    self.selected,
+                    self.page,
+                    page_entries,
+                    self.active_slot,
                 )
+            )
+
+        slot_buttons = [self.slot_1, self.slot_2, self.slot_3]
+        for index, slot_button in enumerate(slot_buttons):
+            slot_button.label = f"{'✅ ' if index == self.active_slot else ''}{index + 1}번 칸"
+            slot_button.style = discord.ButtonStyle.primary if index == self.active_slot else discord.ButtonStyle.secondary
 
         self.previous_page.disabled = self.total_pages <= 1
         self.next_page.disabled = self.total_pages <= 1
 
-    @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.secondary, row=3)
+    async def change_active_slot(self, interaction: discord.Interaction, slot_index: int):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+
+        embed, page, _, _ = build_adventure_cooking_embed(
+            interaction.user,
+            self.user_id,
+            self.selected,
+            self.page,
+            active_slot=slot_index,
+        )
+        await interaction.response.edit_message(
+            embed=embed,
+            view=AdventureCookingView(self.user_id, self.selected, page, slot_index),
+        )
+
+    @discord.ui.button(label="1번 칸", style=discord.ButtonStyle.secondary, row=1)
+    async def slot_1(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.change_active_slot(interaction, 0)
+
+    @discord.ui.button(label="2번 칸", style=discord.ButtonStyle.secondary, row=1)
+    async def slot_2(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.change_active_slot(interaction, 1)
+
+    @discord.ui.button(label="3번 칸", style=discord.ButtonStyle.secondary, row=1)
+    async def slot_3(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.change_active_slot(interaction, 2)
+
+    @discord.ui.button(label="◀ 이전", style=discord.ButtonStyle.secondary, row=2)
     async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
             return
         new_page = (self.page - 1) % self.total_pages
         embed, page, _, _ = build_adventure_cooking_embed(
-            interaction.user, self.user_id, self.selected, new_page
+            interaction.user,
+            self.user_id,
+            self.selected,
+            new_page,
+            active_slot=self.active_slot,
         )
         await interaction.response.edit_message(
-            embed=embed, view=AdventureCookingView(self.user_id, self.selected, page)
+            embed=embed,
+            view=AdventureCookingView(self.user_id, self.selected, page, self.active_slot),
         )
 
-    @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.secondary, row=3)
+    @discord.ui.button(label="다음 ▶", style=discord.ButtonStyle.secondary, row=2)
     async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
         if not await check_adventure_owner(interaction, self.user_id):
             return
         new_page = (self.page + 1) % self.total_pages
         embed, page, _, _ = build_adventure_cooking_embed(
-            interaction.user, self.user_id, self.selected, new_page
+            interaction.user,
+            self.user_id,
+            self.selected,
+            new_page,
+            active_slot=self.active_slot,
         )
         await interaction.response.edit_message(
-            embed=embed, view=AdventureCookingView(self.user_id, self.selected, page)
+            embed=embed,
+            view=AdventureCookingView(self.user_id, self.selected, page, self.active_slot),
         )
 
     @discord.ui.button(label="🧹 칸 비우기", style=discord.ButtonStyle.secondary, row=3)
@@ -12700,10 +12758,15 @@ class AdventureCookingView(discord.ui.View):
             return
         selected = [None, None, None]
         embed, page, _, _ = build_adventure_cooking_embed(
-            interaction.user, self.user_id, selected, self.page
+            interaction.user,
+            self.user_id,
+            selected,
+            self.page,
+            active_slot=self.active_slot,
         )
         await interaction.response.edit_message(
-            embed=embed, view=AdventureCookingView(self.user_id, selected, page)
+            embed=embed,
+            view=AdventureCookingView(self.user_id, selected, page, self.active_slot),
         )
 
     @discord.ui.button(label="🔥 요리하기", style=discord.ButtonStyle.danger, row=3)
@@ -12722,7 +12785,12 @@ class AdventureCookingView(discord.ui.View):
             )
 
         embed, page, _, _ = build_adventure_cooking_embed(
-            interaction.user, self.user_id, [None, None, None], self.page, result
+            interaction.user,
+            self.user_id,
+            [None, None, None],
+            self.page,
+            result,
+            active_slot=self.active_slot,
         )
         if success and first_discovery:
             embed.add_field(
@@ -12732,7 +12800,7 @@ class AdventureCookingView(discord.ui.View):
             )
             view = FoodNamingView(self.user_id, recipe_id)
         else:
-            view = AdventureCookingView(self.user_id, [None, None, None], page)
+            view = AdventureCookingView(self.user_id, [None, None, None], page, self.active_slot)
 
         await interaction.response.edit_message(embed=embed, view=view)
 
@@ -12768,10 +12836,13 @@ class FoodNameModal(discord.ui.Modal, title="새 요리 이름 짓기"):
             adventure["pending_food_recipe_id"] = None
             save_data()
             embed, page, _, _ = build_adventure_cooking_embed(
-                interaction.user, self.user_id, result_text=f"이미 **{info['name']}**(으)로 등록된 요리야."
+                interaction.user,
+                self.user_id,
+                result_text=f"이미 **{info['name']}**(으)로 등록된 요리야.",
             )
             await interaction.response.edit_message(
-                embed=embed, view=AdventureCookingView(self.user_id, page=page)
+                embed=embed,
+                view=AdventureCookingView(self.user_id, page=page),
             )
             return
 
@@ -12795,7 +12866,8 @@ class FoodNameModal(discord.ui.Modal, title="새 요리 이름 짓기"):
             ),
         )
         await interaction.response.edit_message(
-            embed=embed, view=AdventureCookingView(self.user_id, page=page)
+            embed=embed,
+            view=AdventureCookingView(self.user_id, page=page),
         )
 
 
@@ -12816,10 +12888,13 @@ class FoodNamingView(discord.ui.View):
             adventure["pending_food_recipe_id"] = None
             save_data()
             embed, page, _, _ = build_adventure_cooking_embed(
-                interaction.user, self.user_id, result_text=f"이미 **{info['name']}**(으)로 등록됐어."
+                interaction.user,
+                self.user_id,
+                result_text=f"이미 **{info['name']}**(으)로 등록됐어.",
             )
             await interaction.response.edit_message(
-                embed=embed, view=AdventureCookingView(self.user_id, page=page)
+                embed=embed,
+                view=AdventureCookingView(self.user_id, page=page),
             )
             return
 
@@ -12838,7 +12913,6 @@ async def open_adventure_cooking_menu(interaction, user_id):
     if not adventure.get("active"):
         await interaction.response.send_message("이미 끝난 모험이야.", ephemeral=True)
         return
-
 
     pending_recipe = adventure.get("pending_food_recipe_id")
     if pending_recipe:
@@ -12861,7 +12935,6 @@ async def open_adventure_cooking_menu(interaction, user_id):
         view=AdventureCookingView(user_id, page=page),
         ephemeral=True,
     )
-
 
 class AdventureTurnWaitingView(discord.ui.View):
     def __init__(self, user_id):
