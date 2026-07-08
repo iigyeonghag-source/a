@@ -12475,7 +12475,7 @@ class AdventureShopEquipmentSelect(discord.ui.Select):
                         ("장착 중 · " if name in info.get("equipped", []) else "보유 중 · ")
                         + get_adventure_shop_item_effect_text(name)
                     )[:100],
-                    default=(name in info.get("equipped", [])),
+                    default=False,
                 )
                 for name in owned
             ][:25]
