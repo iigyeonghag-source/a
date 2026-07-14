@@ -14733,10 +14733,12 @@ PARTY_TOTAL_SLOTS = 4
 PARTY_CAMP_INTERVAL = 5
 PARTY_REST_COOLDOWN_TURNS = 10
 PARTY_BOSS_INTERVAL = 10
-PARTY_BALANCE_VERSION = 3
+PARTY_BALANCE_VERSION = 4
 PARTY_EXPLORE_WAIT_MIN = 2
 PARTY_EXPLORE_WAIT_MAX = 5
 PARTY_BATTLE_SAFE_TURNS = 1
+PARTY_LEVEL_SYSTEM_VERSION = 1
+PARTY_BOT_STORAGE_CHANCE = 0.30
 
 # 파티 모험에서만 사용되는 판별 유물. 획득 즉시 파티 전체에 적용되고 한 판이 끝나면 사라진다.
 PARTY_RELICS = {
@@ -15233,6 +15235,8 @@ def build_party_recruit_embed(party):
         status_text = "🏆 모험 완료"
     elif status == "failed":
         status_text = "☠️ 전멸"
+    elif status == "abandoned":
+        status_text = "🏳️ 중도 종료"
     else:
         status_text = "🔒 모집 종료"
 
@@ -15262,7 +15266,7 @@ def build_party_lobby_embed(party):
         job = party.get("jobs", {}).get(uid)
         leader = "👑 " if uid == str(party.get("leader_id")) else ""
         job_text = party_job_text(job) if job in PARTY_JOB_INFO else "🎭 미선택"
-        lines.append(f"{leader}**{name}** · Lv.{get_party_member_level(uid)} · {job_text}")
+        lines.append(f"{leader}**{name}** · 파티 Lv.1 시작 · {job_text}")
 
     missing = PARTY_TOTAL_SLOTS - len(lines)
     if missing > 0:
@@ -15286,7 +15290,7 @@ def build_party_lobby_embed(party):
         ),
         color=discord.Color.dark_teal(),
     )
-    embed.set_footer(text="파티원은 직업을 선택하고, 파티장은 시작 지형과 난이도를 정한 뒤 시작할 수 있어.")
+    embed.set_footer(text="파티 모험 레벨은 기존 서버 레벨과 별개이며, 유저와 용병 모두 Lv.1에서 시작해.")
     return embed
 
 
@@ -15368,10 +15372,13 @@ def build_party_status_lines(party):
         max_hp = max(1, int(player.get("max_hp", 1)))
         marker = "🤖" if player.get("is_bot") else "👤"
         state = f"❤️ {hp}/{max_hp}" if alive else "💀 관전 중"
-        rookie = " · 🌱 초보자 강화 +15%" if int(player.get("level", 1)) <= 20 else ""
+        level = max(1, int(player.get("level", 1)))
+        exp = max(0, int(player.get("party_exp", 0)))
+        need_exp = party_level_exp_required(level)
+        rookie = " · 🌱 초보자 강화 +15%" if level <= 20 else ""
         lines.append(
-            f"{marker} **{player.get('name')}** · {party_job_text(player.get('job', '전사'))} · "
-            f"{state}{rookie}\n"
+            f"{marker} **{player.get('name')}** · 파티 Lv.{level} ({exp}/{need_exp} EXP) · "
+            f"{party_job_text(player.get('job', '전사'))} · {state}{rookie}\n"
             f"└ 🗡️ {player.get('weapon')} / 🛡️ {player.get('armor')}"
         )
     return lines
@@ -15396,9 +15403,12 @@ def build_party_explore_embed(party, result_text=None):
     ) or "아직 발견한 유물 없음"
     battle_rate = get_party_battle_spawn_rate(party) * 100
     safe_text = " · 전투 직후 안전 구간" if int(run.get("battle_safe_turns", 0)) > 0 else ""
+    end_votes = [uid for uid in run.get("end_votes", []) if uid in party_human_members(party)]
+    end_needed = party_end_vote_needed(party)
     description += (
         f"## 이번 판 유물\n{relic_text}\n\n"
-        f"다음 탐험 몬스터 조우 확률: **{battle_rate:.0f}%**{safe_text}\n\n"
+        f"다음 탐험 몬스터 조우 확률: **{battle_rate:.0f}%**{safe_text}\n"
+        f"종료 투표: **{len(end_votes)}/{end_needed}표** · `/파티종료`\n\n"
         "## 파티 상태\n" + "\n".join(build_party_status_lines(party))
     )
     embed = discord.Embed(
@@ -15720,13 +15730,128 @@ def roll_party_equipment(run, low_tier=False, special_only=False):
     return None
 
 
-def give_party_equipment_to_player(player, equipment):
-    if not equipment:
-        return
+def party_level_exp_required(level):
+    level = max(1, int(level))
+    return 50 + (level - 1) * 35
+
+
+def party_equipment_bonus_value(kind, name):
+    catalog = WEAPONS if kind == "weapon" else ARMORS
+    return int(catalog.get(name, {}).get("bonus", 0))
+
+
+def party_bot_equip_best(player, run=None):
+    """용병이 가방과 착용 장비를 비교해 가장 강한 장비를 자동 착용한다."""
+    if not player or not player.get("is_bot"):
+        return []
+
+    changes = []
+    for kind, equipped_key, bag_key, basic in [
+        ("weapon", "weapon", "bag_weapons", PARTY_BASIC_WEAPON),
+        ("armor", "armor", "bag_armors", PARTY_BASIC_ARMOR),
+    ]:
+        bag = player.setdefault(bag_key, [])
+        equipped = player.get(equipped_key, basic)
+        candidates = [equipped] + list(bag)
+        best = max(candidates, key=lambda name: party_equipment_bonus_value(kind, name))
+        if best == equipped:
+            continue
+
+        bag.remove(best)
+        if equipped != basic:
+            bag.append(equipped)
+        player[equipped_key] = best
+        changes.append({"kind": kind, "name": best, "old": equipped})
+
+    if any(change["kind"] == "armor" for change in changes):
+        refresh_party_player_max_hp(player, run, keep_ratio=True)
+    return changes
+
+
+def give_party_equipment_to_player(player, equipment, run=None):
+    if not equipment or not player:
+        return {"equipped": False, "changes": []}
     if equipment.get("kind") == "weapon":
         player.setdefault("bag_weapons", []).append(equipment.get("name"))
     else:
         player.setdefault("bag_armors", []).append(equipment.get("name"))
+
+    changes = party_bot_equip_best(player, run)
+    equipped = any(change.get("name") == equipment.get("name") for change in changes)
+    return {"equipped": equipped, "changes": changes}
+
+
+def party_equipment_receive_suffix(player, equipment, receive_result):
+    if player.get("is_bot") and receive_result.get("equipped"):
+        return f" **{player.get('name')}**이 성능을 비교한 뒤 바로 착용했다."
+    return f" **{player.get('name')}**의 가방에 들어갔다."
+
+
+def handle_party_bot_camp_actions(run):
+    """캠프 도착 시 용병이 장비를 정리하고 30% 확률로 남는 장비 하나를 공유한다."""
+    notices = []
+    storage = run.setdefault("shared_storage", [])
+    for player in run.get("players", {}).values():
+        if not player.get("is_bot"):
+            continue
+
+        changes = party_bot_equip_best(player, run)
+        for change in changes:
+            notices.append(f"🤖 **{player.get('name')}**이 **{change.get('name')}**을 자동 착용했다.")
+
+        candidates = []
+        for name in player.setdefault("bag_weapons", []):
+            candidates.append({"kind": "weapon", "name": name})
+        for name in player.setdefault("bag_armors", []):
+            candidates.append({"kind": "armor", "name": name})
+
+        if candidates and random.random() < PARTY_BOT_STORAGE_CHANCE:
+            item = random.choice(candidates)
+            bag_key = "bag_weapons" if item["kind"] == "weapon" else "bag_armors"
+            try:
+                player[bag_key].remove(item["name"])
+            except ValueError:
+                continue
+            storage.append(item)
+            notices.append(
+                f"📦 **{player.get('name')}**이 남는 **{item.get('name')}**을 공용 보관함에 올렸다."
+            )
+    return notices
+
+
+def grant_party_battle_experience(party):
+    run = party.get("run") or {}
+    monster = (run.get("battle") or {}).get("monster") or {}
+    monster_level = max(1, int(monster.get("level", 1)))
+    gained = 28 + monster_level * 7
+    if monster.get("is_elite"):
+        gained = int(round(gained * 1.45))
+    if monster.get("is_boss"):
+        gained = int(round(gained * 2.0))
+    if party.get("hard_mode"):
+        gained = int(round(gained * 1.15))
+
+    leveled = []
+    for player in run.get("players", {}).values():
+        player["party_exp"] = max(0, int(player.get("party_exp", 0))) + gained
+        old_level = max(1, int(player.get("level", 1)))
+        while player["party_exp"] >= party_level_exp_required(player.get("level", 1)):
+            need = party_level_exp_required(player.get("level", 1))
+            player["party_exp"] -= need
+            player["level"] = int(player.get("level", 1)) + 1
+        if int(player.get("level", 1)) > old_level:
+            refresh_party_player_max_hp(player, run, keep_ratio=True)
+            leveled.append(f"{player.get('name')} Lv.{old_level}→Lv.{player.get('level')}")
+
+    text = f"\n⭐ 파티 모험 경험치 **+{gained} EXP**"
+    if leveled:
+        text += "\n🎉 레벨 업: " + ", ".join(leveled)
+    return text
+
+
+def party_end_vote_needed(party):
+    human_count = max(1, len(party_human_members(party)))
+    return human_count // 2 + 1
 
 
 def generate_party_merchant_offers(run):
@@ -15783,6 +15908,7 @@ def create_party_player(uid, name, job, level, is_bot=False):
         "name": name,
         "job": job,
         "level": max(1, int(level)),
+        "party_exp": 0,
         "is_bot": bool(is_bot),
         "alive": True,
         "lives": 1,
@@ -15805,14 +15931,12 @@ def create_party_player(uid, name, job, level, is_bot=False):
 def initialize_party_run(party):
     guild = bot.get_guild(int(party.get("guild_id", 0)))
     humans = party_human_members(party)
-    human_levels = [get_party_member_level(uid) for uid in humans]
-    average_level = max(1, int(round(sum(human_levels) / max(1, len(human_levels)))))
     players = {}
 
     for uid in humans:
         job = party.get("jobs", {}).get(uid, "전사")
         name = get_party_member_name(guild, uid)
-        players[uid] = create_party_player(uid, name, job, get_party_member_level(uid), is_bot=False)
+        players[uid] = create_party_player(uid, name, job, 1, is_bot=False)
 
     bot_jobs = list(PARTY_JOB_INFO.keys())
     random.shuffle(bot_jobs)
@@ -15823,7 +15947,7 @@ def initialize_party_run(party):
             bot_id,
             f"용병 {index + 1}",
             job,
-            average_level,
+            1,
             is_bot=True,
         )
 
@@ -15854,6 +15978,8 @@ def initialize_party_run(party):
         "turns_without_battle": 0,
         "battle_safe_turns": 0,
         "last_result": None,
+        "end_votes": [],
+        "level_system_version": PARTY_LEVEL_SYSTEM_VERSION,
         "started_at": datetime.now(KST).isoformat(),
     }
 
@@ -16229,11 +16355,12 @@ def reward_party_battle(party):
         )
         if equipment:
             receiver = random.choice(living)
-            give_party_equipment_to_player(receiver, equipment)
+            receive_result = give_party_equipment_to_player(receiver, equipment, run)
             run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
             equipment_text = (
                 f"\n{'🗡️' if equipment.get('kind') == 'weapon' else '🛡️'} "
-                f"**{receiver.get('name')}** 장비 획득: **{equipment.get('name')}**"
+                f"장비 획득: **{equipment.get('name')}**"
+                + party_equipment_receive_suffix(receiver, equipment, receive_result)
             )
 
     # 사제와 유물의 전투 후 회복.
@@ -16253,8 +16380,11 @@ def reward_party_battle(party):
             player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
         relic_heal_text = f"\n🔥 잔불 부적이 생존자들의 체력을 {relic_heal_rate * 100:.0f}% 회복했다."
 
+    experience_text = grant_party_battle_experience(party)
+
     return (
         f"🏆 **{monster.get('name')}** 격파! 공용 모라 **+{reward:,}**"
+        + experience_text
         + material_text
         + equipment_text
         + priest_text
@@ -16282,10 +16412,16 @@ def revive_party_at_camp(run):
     return revived
 
 
-def party_run_summary_embed(party, victory=False, reason=None):
+def party_run_summary_embed(party, victory=False, reason=None, voluntary=False):
     run = party.get("run") or {}
-    title = "🏆 파티 모험 종료" if victory else "☠️ 파티 모험 실패"
-    color = discord.Color.gold() if victory else discord.Color.dark_red()
+    if voluntary:
+        title = "🏳️ 파티 모험 중도 종료"
+        color = discord.Color.orange()
+    else:
+        title = "🏆 파티 모험 종료" if victory else "☠️ 파티 모험 실패"
+        color = discord.Color.gold() if victory else discord.Color.dark_red()
+    player_levels = [max(1, int(player.get("level", 1))) for player in run.get("players", {}).values()]
+    average_party_level = sum(player_levels) / max(1, len(player_levels))
     description = (
         f"파티: **{party.get('name')}**\n"
         f"도달 지형: **{get_terrain_display(run.get('terrain'))}**\n"
@@ -16294,6 +16430,7 @@ def party_run_summary_embed(party, victory=False, reason=None):
         f"보스 처치: **{int(run.get('boss_kills', 0))}마리**\n"
         f"발견 장비: **{int(run.get('equipment_found', 0))}개**\n"
         f"발견 유물: **{len(run.get('relics', []))}개**\n"
+        f"평균 파티 레벨: **Lv.{average_party_level:.1f}**\n"
         f"남은 공용 모라: **{int(run.get('coins', 0)):,}모라**"
     )
     if reason:
@@ -16384,6 +16521,7 @@ async def party_complete_turn(interaction, party, result_text=None):
 
     if int(run.get("turn", 0)) % PARTY_CAMP_INTERVAL == 0:
         revived = revive_party_at_camp(run)
+        bot_camp_notices = handle_party_bot_camp_actions(run)
         run["phase"] = "camp"
         run["rest_votes"] = []
         run["camp_locked"] = {uid: False for uid in party_human_members(party)}
@@ -16392,6 +16530,7 @@ async def party_complete_turn(interaction, party, result_text=None):
             notice_parts.append(result_text)
         if revived:
             notice_parts.append("💫 캠프 도착으로 부활: " + ", ".join(revived))
+        notice_parts.extend(bot_camp_notices)
         save_party_data()
         await party_edit_interaction(
             interaction,
@@ -16519,14 +16658,14 @@ async def start_party_encounter(interaction, party):
         receiver = party_random_living_player(run)
         equipment = roll_party_equipment(run, low_tier=(turn <= 5))
         if receiver and equipment:
-            give_party_equipment_to_player(receiver, equipment)
+            receive_result = give_party_equipment_to_player(receiver, equipment, run)
             run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
             icon = "🗡️" if equipment.get("kind") == "weapon" else "🛡️"
             await party_complete_turn(
                 interaction,
                 party,
-                f"{icon} 길가의 상자에서 **{equipment.get('name')}**을 발견했다! "
-                f"**{receiver.get('name')}**의 가방에 넣었어. 캠프에서 착용할 수 있어.",
+                f"{icon} 길가의 상자에서 **{equipment.get('name')}**을 발견했다!"
+                + party_equipment_receive_suffix(receiver, equipment, receive_result),
             )
             return
         selected = "materials"
@@ -16645,7 +16784,7 @@ def resolve_party_event_outcome(party, choice):
             amount = 180 + int(run.get("turn", 1)) * 20
             run["coins"] = int(run.get("coins", 0)) + amount
             return "done", f"쓸 만한 장비는 없었지만 모라 **{amount:,}**을 발견했다."
-        give_party_equipment_to_player(receiver, equipment)
+        give_party_equipment_to_player(receiver, equipment, run)
         run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
         return "done", (
             f"{'🗡️' if equipment.get('kind') == 'weapon' else '🛡️'} **{receiver.get('name')}**이 "
@@ -16661,7 +16800,7 @@ def resolve_party_event_outcome(party, choice):
         equipment = roll_party_equipment(run, low_tier=True)
         text = f"🔥 빈틈을 노려 공용 모라 **{amount:,}**을 약탈했다."
         if receiver and equipment:
-            give_party_equipment_to_player(receiver, equipment)
+            give_party_equipment_to_player(receiver, equipment, run)
             run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
             text += f" **{receiver.get('name')}**은 **{equipment.get('name')}**도 챙겼다."
         return "done", text
@@ -16707,7 +16846,7 @@ def resolve_party_event_outcome(party, choice):
             player["hp"] = max(1, int(player.get("hp", 1)) - damage)
         equipment = roll_party_equipment(run, special_only=True) or roll_party_equipment(run)
         if receiver and equipment:
-            give_party_equipment_to_player(receiver, equipment)
+            give_party_equipment_to_player(receiver, equipment, run)
             run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
             return "done", (
                 f"🩸 생존자 전원이 최대 체력의 18%를 대가로 치렀고, "
@@ -17299,7 +17438,7 @@ class PartyMerchantSelect(discord.ui.Select):
                 )
                 return
             run["coins"] = int(run.get("coins", 0)) - price
-            give_party_equipment_to_player(player, offer)
+            give_party_equipment_to_player(player, offer, run)
             run["merchant_offers"] = [item for item in run.get("merchant_offers", []) if item.get("id") != offer_id]
             save_party_data()
             await interaction.response.edit_message(embed=build_party_merchant_embed(party), view=PartyMerchantView(self.party_id))
@@ -17802,7 +17941,7 @@ class PartyStorageWithdrawSelect(discord.ui.Select):
                 await interaction.response.send_message("❌ 장비가 이미 이동됐어.", ephemeral=True)
                 return
             player = party_get_player(party, self.uid)
-            give_party_equipment_to_player(player, item)
+            give_party_equipment_to_player(player, item, run)
             save_party_data()
             await interaction.response.edit_message(
                 embed=build_party_storage_embed(party, self.uid),
@@ -17878,32 +18017,42 @@ class PartyRouteView(discord.ui.View):
 
 
 def migrate_party_battle_balance():
-    """이전 버전에서 생성된 과도하게 강한 진행 중 몬스터를 새 밸런스로 교체한다."""
+    """이전 파티 저장본을 새 전용 레벨·종료 투표·전투 밸런스로 마이그레이션한다."""
     changed = False
     for party in party_data.get("parties", {}).values():
         if party.get("status") != "playing":
             continue
         run = party.get("run") or {}
+        if "end_votes" not in run:
+            run["end_votes"] = []
+            changed = True
+
+        if int(run.get("level_system_version", 0)) < PARTY_LEVEL_SYSTEM_VERSION:
+            for player in run.get("players", {}).values():
+                player["level"] = 1
+                player["party_exp"] = 0
+                refresh_party_player_max_hp(player, run, keep_ratio=True)
+            run["level_system_version"] = PARTY_LEVEL_SYSTEM_VERSION
+            changed = True
+
         battle = run.get("battle") or {}
         old_monster = battle.get("monster") or {}
-        if not old_monster or int(old_monster.get("balance_version", 0)) >= PARTY_BALANCE_VERSION:
-            continue
-
-        old_max_hp = max(1, int(old_monster.get("max_hp", 1)))
-        hp_ratio = max(0.0, min(1.0, int(old_monster.get("hp", old_max_hp)) / old_max_hp))
-        refreshed = create_party_monster(
-            party,
-            elite=bool(old_monster.get("is_elite")),
-            boss=bool(old_monster.get("is_boss")),
-            forced_name=old_monster.get("name"),
-        )
-        refreshed["hp"] = max(1, int(round(refreshed["max_hp"] * hp_ratio)))
-        battle["monster"] = refreshed
-        changed = True
+        if old_monster and int(old_monster.get("balance_version", 0)) < PARTY_BALANCE_VERSION:
+            old_max_hp = max(1, int(old_monster.get("max_hp", 1)))
+            hp_ratio = max(0.0, min(1.0, int(old_monster.get("hp", old_max_hp)) / old_max_hp))
+            refreshed = create_party_monster(
+                party,
+                elite=bool(old_monster.get("is_elite")),
+                boss=bool(old_monster.get("is_boss")),
+                forced_name=old_monster.get("name"),
+            )
+            refreshed["hp"] = max(1, int(round(refreshed["max_hp"] * hp_ratio)))
+            battle["monster"] = refreshed
+            changed = True
 
     if changed:
         save_party_data()
-        print("파티 모험 밸런스 v2: 진행 중 몬스터 능력치를 새 기준으로 조정함")
+        print("파티 모험: 전용 레벨 및 최신 밸런스로 진행 중 파티를 조정함")
 
 
 def restore_party_persistent_views():
@@ -18063,6 +18212,7 @@ async def party_leave_command(interaction: discord.Interaction):
 
         if status == "playing":
             run = party.get("run") or {}
+            run["end_votes"] = [vote_uid for vote_uid in run.get("end_votes", []) if vote_uid != uid]
             player = run.get("players", {}).get(uid)
             if player:
                 player["is_bot"] = True
@@ -18092,6 +18242,64 @@ async def party_leave_command(interaction: discord.Interaction):
                 await thread.send("🔒 유저 파티원이 모두 나가 파티 모험이 종료됐어.")
             except discord.HTTPException:
                 pass
+
+
+@bot.tree.command(name="파티종료", description="진행 중인 파티 모험의 중도 종료에 투표한다", guild=GUILD)
+async def party_end_vote_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    party = find_user_party(uid)
+    if not party or party.get("status") != "playing":
+        await interaction.response.send_message("❌ 진행 중인 파티 모험에 참가하고 있지 않아.", ephemeral=True)
+        return
+
+    party_id = party.get("id")
+    async with get_party_lock(party_id):
+        party = get_party(party_id)
+        if not party or party.get("status") != "playing" or uid not in party_human_members(party):
+            await interaction.response.send_message("❌ 진행 중인 파티 모험에 참가하고 있지 않아.", ephemeral=True)
+            return
+
+        run = party.get("run") or {}
+        humans = party_human_members(party)
+        votes = [member_uid for member_uid in run.setdefault("end_votes", []) if member_uid in humans]
+        run["end_votes"] = votes
+        needed = party_end_vote_needed(party)
+
+        if uid in votes:
+            await interaction.response.send_message(
+                f"❌ 이미 종료에 투표했어. 현재 **{len(votes)}/{needed}표**야.",
+                ephemeral=True,
+            )
+            return
+
+        votes.append(uid)
+        save_party_data()
+        if len(votes) < needed:
+            await interaction.response.send_message(
+                f"🏳️ {interaction.user.mention}이 파티 모험 종료에 투표했어. "
+                f"현재 **{len(votes)}/{needed}표** · 실제 유저 과반수가 필요해.",
+            )
+            return
+
+        party["status"] = "abandoned"
+        party["closed_at"] = datetime.now(KST).isoformat()
+        run["phase"] = "ended"
+        run["ended_by_vote"] = True
+        save_party_data()
+        await update_party_recruit_message(party)
+
+        reason = (
+            f"실제 파티원 **{len(votes)}/{len(humans)}명**이 종료에 동의해 "
+            "파티 모험을 중도 종료했다. NPC 용병은 투표 수에 포함되지 않아."
+        )
+        summary = party_run_summary_embed(party, victory=False, reason=reason, voluntary=True)
+        thread = get_party_thread(party)
+        if thread and interaction.channel_id != thread.id:
+            try:
+                await thread.send(embed=summary)
+            except discord.HTTPException:
+                pass
+        await interaction.response.send_message(embed=summary)
 
 
 @bot.tree.command(name="파티상태", description="현재 참가 중인 파티 상태를 확인한다", guild=GUILD)
