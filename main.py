@@ -14720,9 +14720,3074 @@ async def warehouse_command(
         return
 
 
+# =========================================================
+# 파티 모험 시스템 (기존 개인 /모험과 완전히 분리된 로그라이크 모드)
+# =========================================================
+
+# 파티 모집 글을 올릴 채널 ID.
+# 0으로 두면 /파티생성을 사용한 채널에 모집 글이 올라간다.
+PARTY_RECRUIT_CHANNEL_ID = 0
+PARTY_DATA_FILE = "/data/party_adventures.json"
+PARTY_MAX_HUMANS = 4
+PARTY_TOTAL_SLOTS = 4
+PARTY_CAMP_INTERVAL = 5
+PARTY_REST_COOLDOWN_TURNS = 10
+PARTY_BOSS_INTERVAL = 10
+
+PARTY_JOB_INFO = {
+    "전사": {
+        "emoji": "⚔️",
+        "desc": "높은 공격력. 직업 스킬로 강력한 일격을 가한다.",
+        "attack_mul": 1.18,
+        "hp_mul": 1.05,
+    },
+    "수호자": {
+        "emoji": "🛡️",
+        "desc": "높은 체력과 방어력. 직업 스킬로 파티 전체를 보호한다.",
+        "attack_mul": 0.88,
+        "hp_mul": 1.35,
+    },
+    "궁수": {
+        "emoji": "🏹",
+        "desc": "치명타 특화. 직업 스킬은 높은 확률로 치명타가 발생한다.",
+        "attack_mul": 1.08,
+        "hp_mul": 0.95,
+    },
+    "도적": {
+        "emoji": "🗡️",
+        "desc": "회피와 연속 공격 특화. 직업 스킬로 모라를 훔칠 수 있다.",
+        "attack_mul": 1.02,
+        "hp_mul": 0.92,
+    },
+    "마법사": {
+        "emoji": "🔮",
+        "desc": "강한 마법 공격. 직업 스킬로 적의 공격력도 약화한다.",
+        "attack_mul": 1.14,
+        "hp_mul": 0.88,
+    },
+    "사제": {
+        "emoji": "✨",
+        "desc": "회복 특화. 직업 스킬로 가장 위급한 파티원을 치료한다.",
+        "attack_mul": 0.78,
+        "hp_mul": 1.02,
+    },
+}
+
+PARTY_BASIC_WEAPON = "무인검"
+PARTY_BASIC_ARMOR = "모험가 세트"
+PARTY_NORMAL_WEAPON_CAP = WEAPONS.get("용사의 성검", {}).get("bonus", 270)
+PARTY_NORMAL_ARMOR_CAP = ARMORS.get("용사의 갑옷", {}).get("bonus", 200)
+
+# 외곽 이후에만 상인/보상 풀에 들어가는 장비의 최소 지형 깊이.
+PARTY_SPECIAL_EQUIPMENT_DEPTH = {
+    "홍련의 신검": 7,
+    "폭풍의 신검": 7,
+    "심해신의 예복": 7,
+    "대지신의 갑주": 7,
+    "종말의 마검": 8,
+    "P90": 9,
+    "AK12": 9,
+    "MINIGUN": 9,
+}
+
+PARTY_MATERIALS = [
+    "짐승 고기", "버섯", "달콤달콤꽃", "새알", "생선", "밀",
+    "당근", "감자", "소금", "향신료", "사과", "양배추",
+]
+
+PARTY_RECIPES = {
+    "야채 수프": {
+        "ingredients": {"버섯": 1, "당근": 1, "감자": 1},
+        "desc": "모든 생존자의 체력을 최대 체력의 25% 회복한다.",
+        "effect": "heal",
+        "value": 0.25,
+    },
+    "고기 스튜": {
+        "ingredients": {"짐승 고기": 2, "감자": 1},
+        "desc": "모든 생존자의 체력을 최대 체력의 40% 회복한다.",
+        "effect": "heal",
+        "value": 0.40,
+    },
+    "생선 꼬치": {
+        "ingredients": {"생선": 2, "소금": 1},
+        "desc": "다음 2번의 전투 동안 파티 공격력이 15% 증가한다.",
+        "effect": "attack_battles",
+        "value": 2,
+    },
+    "매운 고기볶음": {
+        "ingredients": {"짐승 고기": 1, "향신료": 1, "양배추": 1},
+        "desc": "다음 전투 동안 파티 공격력이 30% 증가한다.",
+        "effect": "attack_strong",
+        "value": 1,
+    },
+    "수호자의 스튜": {
+        "ingredients": {"짐승 고기": 1, "버섯": 1, "감자": 1},
+        "desc": "다음 전투 동안 받는 피해가 20% 감소한다.",
+        "effect": "defense_battles",
+        "value": 1,
+    },
+    "새알 볶음밥": {
+        "ingredients": {"새알": 2, "밀": 1},
+        "desc": "요리한 사람의 체력을 전부 회복한다.",
+        "effect": "self_full_heal",
+        "value": 1,
+    },
+}
+
+# 지형마다 별도의 이벤트를 둔다. choice의 kind를 공통 처리 함수가 해석한다.
+PARTY_TERRAIN_EVENTS = {
+    "desert": [
+        {
+            "id": "desert_oasis",
+            "name": "신기루 속 오아시스",
+            "description": "뜨거운 모래바람 너머에서 맑은 물소리가 들린다.",
+            "choices": [
+                {"label": "물을 마신다", "emoji": "💧", "kind": "heal"},
+                {"label": "샘물을 담는다", "emoji": "🫙", "kind": "materials"},
+            ],
+        },
+        {
+            "id": "desert_ruins",
+            "name": "모래에 묻힌 고대 유적",
+            "description": "반쯤 무너진 문 아래에서 오래된 금속빛이 번뜩인다.",
+            "choices": [
+                {"label": "안쪽을 뒤진다", "emoji": "🏺", "kind": "risky_equipment"},
+                {"label": "안전한 잔해만 챙긴다", "emoji": "🪙", "kind": "coins"},
+            ],
+        },
+    ],
+    "grassland": [
+        {
+            "id": "grass_hilichurl",
+            "name": "츄츄족의 캠프",
+            "description": "작은 츄츄족 캠프에서 연기와 고기 냄새가 피어오른다.",
+            "choices": [
+                {"label": "캠프를 약탈한다", "emoji": "🔥", "kind": "raid"},
+                {"label": "조심스럽게 말을 건다", "emoji": "👋", "kind": "talk"},
+            ],
+        },
+        {
+            "id": "grass_fountain",
+            "name": "생명의 샘",
+            "description": "초원 한가운데 작은 샘이 푸른빛을 내며 솟아오른다.",
+            "choices": [
+                {"label": "샘에서 휴식한다", "emoji": "💚", "kind": "heal_big"},
+                {"label": "샘 주변을 조사한다", "emoji": "🔎", "kind": "equipment_low"},
+            ],
+        },
+    ],
+    "jungle": [
+        {
+            "id": "jungle_fruit",
+            "name": "빛나는 열매",
+            "description": "정글 깊은 곳에서 정체불명의 열매가 은은하게 빛난다.",
+            "choices": [
+                {"label": "먹어 본다", "emoji": "🍈", "kind": "risky_heal"},
+                {"label": "재료로 챙긴다", "emoji": "🎒", "kind": "materials"},
+            ],
+        },
+        {
+            "id": "jungle_shrine",
+            "name": "덩굴에 잠긴 사당",
+            "description": "오래된 사당의 제단 위에 봉인된 상자가 놓여 있다.",
+            "choices": [
+                {"label": "봉인을 푼다", "emoji": "🔓", "kind": "risky_equipment"},
+                {"label": "제단에 공물을 둔다", "emoji": "🙏", "kind": "blessing"},
+            ],
+        },
+    ],
+    "cave": [
+        {
+            "id": "cave_ore",
+            "name": "거대한 광맥",
+            "description": "벽면을 가득 채운 광석이 횃불 빛을 반사한다.",
+            "choices": [
+                {"label": "깊게 채굴한다", "emoji": "⛏️", "kind": "risky_coins"},
+                {"label": "표면만 채굴한다", "emoji": "🪨", "kind": "coins"},
+            ],
+        },
+        {
+            "id": "cave_adventurer",
+            "name": "길을 잃은 모험가",
+            "description": "부상당한 모험가가 바위에 기대어 도움을 요청한다.",
+            "choices": [
+                {"label": "치료해 준다", "emoji": "🩹", "kind": "help"},
+                {"label": "가진 정보를 산다", "emoji": "🗺️", "kind": "merchant_hint"},
+            ],
+        },
+    ],
+    "mountain": [
+        {
+            "id": "mountain_shrine",
+            "name": "바람의 제단",
+            "description": "절벽 끝 제단에서 강한 바람과 함께 오래된 목소리가 들린다.",
+            "choices": [
+                {"label": "시련을 받는다", "emoji": "🌪️", "kind": "risky_equipment"},
+                {"label": "기도한다", "emoji": "🕯️", "kind": "blessing"},
+            ],
+        },
+        {
+            "id": "mountain_nest",
+            "name": "거대 독수리의 둥지",
+            "description": "둥지 안쪽에 반짝이는 장비와 식재료가 쌓여 있다.",
+            "choices": [
+                {"label": "빠르게 훔친다", "emoji": "🪶", "kind": "raid"},
+                {"label": "주변의 재료만 줍는다", "emoji": "🥚", "kind": "materials"},
+            ],
+        },
+    ],
+    "ice": [
+        {
+            "id": "ice_lake",
+            "name": "얼어붙은 호수",
+            "description": "투명한 얼음 아래에서 보물상자 같은 형체가 보인다.",
+            "choices": [
+                {"label": "얼음을 깨고 꺼낸다", "emoji": "🧊", "kind": "risky_equipment"},
+                {"label": "낚시만 한다", "emoji": "🎣", "kind": "materials"},
+            ],
+        },
+        {
+            "id": "ice_camp",
+            "name": "버려진 우인단 보급소",
+            "description": "급히 철수한 흔적과 함께 보급 상자가 남아 있다.",
+            "choices": [
+                {"label": "보급품을 챙긴다", "emoji": "📦", "kind": "equipment_low"},
+                {"label": "문서를 조사한다", "emoji": "📜", "kind": "blessing"},
+            ],
+        },
+    ],
+    "demon": [
+        {
+            "id": "demon_altar",
+            "name": "피로 물든 제단",
+            "description": "제단은 힘을 약속하며 생명력을 요구한다.",
+            "choices": [
+                {"label": "대가를 치른다", "emoji": "🩸", "kind": "sacrifice"},
+                {"label": "제단을 부순다", "emoji": "💥", "kind": "battle"},
+            ],
+        },
+        {
+            "id": "demon_market",
+            "name": "마계의 암시장",
+            "description": "정체를 숨긴 상인들이 금지된 장비를 거래하고 있다.",
+            "choices": [
+                {"label": "거래한다", "emoji": "🕶️", "kind": "merchant"},
+                {"label": "상인을 협박한다", "emoji": "😈", "kind": "raid"},
+            ],
+        },
+    ],
+    "heaven": [
+        {
+            "id": "heaven_garden",
+            "name": "천상의 정원",
+            "description": "빛으로 이루어진 꽃이 파티의 상처를 어루만진다.",
+            "choices": [
+                {"label": "꽃밭에서 쉰다", "emoji": "🌼", "kind": "heal_big"},
+                {"label": "빛의 씨앗을 챙긴다", "emoji": "✨", "kind": "blessing"},
+            ],
+        },
+        {
+            "id": "heaven_trial",
+            "name": "천상의 무기고",
+            "description": "수호 조각상이 길을 막고 뒤편에는 강력한 장비가 보인다.",
+            "choices": [
+                {"label": "수호자에게 도전한다", "emoji": "⚔️", "kind": "battle_elite"},
+                {"label": "조용히 물러난다", "emoji": "🪽", "kind": "coins"},
+            ],
+        },
+    ],
+    "outskirts": [
+        {
+            "id": "outskirts_rift",
+            "name": "원소 균열",
+            "description": "세계 바깥의 힘이 균열 사이로 흘러나온다.",
+            "choices": [
+                {"label": "균열에 손을 뻗는다", "emoji": "🌌", "kind": "special_equipment"},
+                {"label": "균열을 봉인한다", "emoji": "🔒", "kind": "blessing"},
+            ],
+        },
+    ],
+    "glitch": [
+        {
+            "id": "glitch_cache",
+            "name": "깨진 데이터 저장소",
+            "description": "읽을 수 없는 글자 사이로 비정상적인 장비 데이터가 떠다닌다.",
+            "choices": [
+                {"label": "데이터를 복구한다", "emoji": "💾", "kind": "special_equipment"},
+                {"label": "삭제한다", "emoji": "🗑️", "kind": "coins_big"},
+            ],
+        },
+    ],
+    "lab17": [
+        {
+            "id": "lab_armory",
+            "name": "17번 연구소 무기고",
+            "description": "전자 잠금장치 뒤에 현대식 화기가 정렬되어 있다.",
+            "choices": [
+                {"label": "잠금장치를 해킹한다", "emoji": "⌨️", "kind": "special_equipment"},
+                {"label": "폭파하고 진입한다", "emoji": "💣", "kind": "battle_elite"},
+            ],
+        },
+    ],
+}
+
+party_data = {"parties": {}, "next_id": 1}
+party_locks = {}
+party_registered_view_keys = set()
+
+
+def load_party_data():
+    global party_data
+    os.makedirs(DATA_DIR, exist_ok=True)
+    if not os.path.exists(PARTY_DATA_FILE):
+        party_data = {"parties": {}, "next_id": 1}
+        return
+    try:
+        with open(PARTY_DATA_FILE, "r", encoding="utf-8") as file:
+            loaded = json.load(file)
+        if not isinstance(loaded, dict):
+            loaded = {}
+        loaded.setdefault("parties", {})
+        loaded.setdefault("next_id", 1)
+        party_data = loaded
+    except (OSError, json.JSONDecodeError) as error:
+        print(f"파티 데이터 로드 실패: {error}")
+        party_data = {"parties": {}, "next_id": 1}
+
+
+def save_party_data():
+    os.makedirs(DATA_DIR, exist_ok=True)
+    temp_path = PARTY_DATA_FILE + ".tmp"
+    try:
+        with open(temp_path, "w", encoding="utf-8") as file:
+            json.dump(party_data, file, ensure_ascii=False, indent=2)
+        os.replace(temp_path, PARTY_DATA_FILE)
+    except OSError as error:
+        print(f"파티 데이터 저장 실패: {error}")
+
+
+load_party_data()
+
+
+def get_party_lock(party_id):
+    party_id = str(party_id)
+    if party_id not in party_locks:
+        party_locks[party_id] = asyncio.Lock()
+    return party_locks[party_id]
+
+
+def next_party_id():
+    number = max(1, int(party_data.get("next_id", 1)))
+    party_data["next_id"] = number + 1
+    return f"P{number:04d}"
+
+
+def get_party(party_id):
+    return party_data.get("parties", {}).get(str(party_id))
+
+
+def find_user_party(user_id):
+    uid = str(user_id)
+    for party in party_data.get("parties", {}).values():
+        if party.get("status") not in {"lobby", "playing"}:
+            continue
+        if uid in party.get("members", []):
+            return party
+    return None
+
+
+def party_human_members(party):
+    return [str(uid) for uid in party.get("members", [])]
+
+
+def party_alive_human_ids(party):
+    run = party.get("run") or {}
+    result = []
+    for uid in party_human_members(party):
+        player = run.get("players", {}).get(uid)
+        if player and player.get("alive"):
+            result.append(uid)
+    return result
+
+
+def get_party_member_name(guild, uid):
+    uid = str(uid)
+    try:
+        member = guild.get_member(int(uid)) if guild else None
+    except ValueError:
+        member = None
+    if member:
+        return member.display_name
+    return f"유저 {uid[-4:]}"
+
+
+def get_party_member_level(uid):
+    try:
+        return max(1, int(get_level_data(int(uid)).get("level", 1)))
+    except (ValueError, TypeError):
+        return 1
+
+
+def get_party_thread(party):
+    guild = bot.get_guild(int(party.get("guild_id", 0)))
+    if not guild:
+        return None
+    return guild.get_thread(int(party.get("thread_id", 0)))
+
+
+def get_party_recruit_channel(party):
+    guild = bot.get_guild(int(party.get("guild_id", 0)))
+    if not guild:
+        return None
+    return guild.get_channel(int(party.get("recruit_channel_id", 0)))
+
+
+def get_terrain_display(terrain_key):
+    info = ADVENTURE_TERRAINS.get(terrain_key, {})
+    return f"{info.get('emoji', '🗺️')} {info.get('name', terrain_key)}"
+
+
+def party_job_text(job):
+    info = PARTY_JOB_INFO.get(job, {})
+    return f"{info.get('emoji', '🎭')} {job}"
+
+
+def build_party_recruit_embed(party):
+    guild = bot.get_guild(int(party.get("guild_id", 0)))
+    members = party_human_members(party)
+    member_lines = []
+    for index, uid in enumerate(members, start=1):
+        job = party.get("jobs", {}).get(uid, "미선택")
+        crown = "👑 " if uid == str(party.get("leader_id")) else ""
+        member_lines.append(
+            f"{index}. {crown}<@{uid}> · "
+            + (party_job_text(job) if job in PARTY_JOB_INFO else "🎭 직업 미선택")
+        )
+    while len(member_lines) < PARTY_MAX_HUMANS:
+        member_lines.append(f"{len(member_lines) + 1}. `빈자리`")
+
+    status = party.get("status", "lobby")
+    if status == "lobby":
+        status_text = "🟢 모집 중"
+    elif status == "playing":
+        status_text = "⚔️ 모험 진행 중"
+    elif status == "completed":
+        status_text = "🏆 모험 완료"
+    elif status == "failed":
+        status_text = "☠️ 전멸"
+    else:
+        status_text = "🔒 모집 종료"
+
+    thread_text = f"<#{party.get('thread_id')}>" if party.get("thread_id") else "생성 중"
+
+    embed = discord.Embed(
+        title=f"🧭 파티 모험 모집 · {party.get('name', party.get('id'))}",
+        description=(
+            f"상태: **{status_text}**\n"
+            f"모드: **{'🔥 하드' if party.get('hard_mode') else '일반'}**\n"
+            f"시작 지형: **{get_terrain_display(party.get('start_terrain', 'grassland'))}**\n"
+            f"파티 스레드: {thread_text}\n\n"
+            + "\n".join(member_lines)
+            + "\n\n빈자리가 남은 채 시작하면 NPC 용병이 자동으로 채워져."
+        ),
+        color=discord.Color.red() if party.get("hard_mode") else discord.Color.blurple(),
+    )
+    embed.set_footer(text=f"파티 ID {party.get('id')} · 최대 유저 4명")
+    return embed
+
+
+def build_party_lobby_embed(party):
+    guild = bot.get_guild(int(party.get("guild_id", 0)))
+    lines = []
+    for uid in party_human_members(party):
+        name = get_party_member_name(guild, uid)
+        job = party.get("jobs", {}).get(uid)
+        leader = "👑 " if uid == str(party.get("leader_id")) else ""
+        job_text = party_job_text(job) if job in PARTY_JOB_INFO else "🎭 미선택"
+        lines.append(f"{leader}**{name}** · Lv.{get_party_member_level(uid)} · {job_text}")
+
+    missing = PARTY_TOTAL_SLOTS - len(lines)
+    if missing > 0:
+        lines.append(f"\n🤖 시작 시 NPC 용병 **{missing}명** 자동 합류")
+
+    jobs_text = "\n".join(
+        f"{info['emoji']} **{name}** — {info['desc']}"
+        for name, info in PARTY_JOB_INFO.items()
+    )
+
+    embed = discord.Embed(
+        title=f"🏕️ {party.get('name')} 파티 대기실",
+        description=(
+            f"파티장: <@{party.get('leader_id')}>\n"
+            f"난이도: **{'🔥 하드 모드' if party.get('hard_mode') else '일반 모드'}**\n"
+            f"시작 지형: **{get_terrain_display(party.get('start_terrain', 'grassland'))}**\n\n"
+            "## 현재 파티원\n"
+            + "\n".join(lines)
+            + "\n\n## 직업 6종\n"
+            + jobs_text
+        ),
+        color=discord.Color.dark_teal(),
+    )
+    embed.set_footer(text="파티원은 직업을 선택하고, 파티장은 시작 지형과 난이도를 정한 뒤 시작할 수 있어.")
+    return embed
+
+
+def party_get_player(party, uid):
+    run = party.get("run") or {}
+    return run.get("players", {}).get(str(uid))
+
+
+def party_player_equipment_bonus(player):
+    weapon = player.get("weapon", PARTY_BASIC_WEAPON)
+    armor = player.get("armor", PARTY_BASIC_ARMOR)
+    weapon_bonus = int(WEAPONS.get(weapon, WEAPONS[PARTY_BASIC_WEAPON]).get("bonus", 0))
+    armor_bonus = int(ARMORS.get(armor, ARMORS[PARTY_BASIC_ARMOR]).get("bonus", 0))
+    return weapon_bonus, armor_bonus
+
+
+def party_player_stats(player, run=None):
+    level = max(1, int(player.get("level", 1)))
+    job = player.get("job", "전사")
+    job_info = PARTY_JOB_INFO.get(job, PARTY_JOB_INFO["전사"])
+    weapon_bonus, armor_bonus = party_player_equipment_bonus(player)
+
+    rookie_mul = 1.15 if level <= 20 else 1.0
+    attack = (16 + level * 2.4 + weapon_bonus * 0.38) * job_info["attack_mul"] * rookie_mul
+    max_hp = (95 + level * 5.2 + armor_bonus * 0.85) * job_info["hp_mul"] * rookie_mul
+    defense = min(72.0, 4.0 + armor_bonus * 0.18)
+    crit = 0.08
+    dodge = 0.03
+
+    if job == "수호자":
+        defense += 12
+    elif job == "궁수":
+        crit += 0.20
+    elif job == "도적":
+        dodge += 0.16
+    elif job == "마법사":
+        attack *= 1.06
+    elif job == "사제":
+        defense += 4
+
+    if run:
+        buffs = run.get("buffs", {})
+        if int(buffs.get("attack_battles", 0)) > 0:
+            attack *= 1.15
+        if int(buffs.get("attack_strong", 0)) > 0:
+            attack *= 1.30
+
+    return {
+        "attack": max(1, int(round(attack))),
+        "max_hp": max(1, int(round(max_hp))),
+        "defense": max(0.0, min(80.0, defense)),
+        "crit": max(0.0, min(0.75, crit)),
+        "dodge": max(0.0, min(0.70, dodge)),
+    }
+
+
+def refresh_party_player_max_hp(player, run=None, keep_ratio=True):
+    old_max = max(1, int(player.get("max_hp", 1)))
+    old_hp = max(0, int(player.get("hp", old_max)))
+    ratio = old_hp / old_max if keep_ratio else 1.0
+    stats = party_player_stats(player, run)
+    player["max_hp"] = stats["max_hp"]
+    player["hp"] = min(player["max_hp"], max(0, int(round(player["max_hp"] * ratio))))
+
+
+def build_party_status_lines(party):
+    run = party.get("run") or {}
+    lines = []
+    for key, player in run.get("players", {}).items():
+        alive = bool(player.get("alive"))
+        hp = max(0, int(player.get("hp", 0)))
+        max_hp = max(1, int(player.get("max_hp", 1)))
+        marker = "🤖" if player.get("is_bot") else "👤"
+        state = f"❤️ {hp}/{max_hp}" if alive else "💀 관전 중"
+        rookie = " · 🌱 초보자 강화 +15%" if int(player.get("level", 1)) <= 20 else ""
+        lines.append(
+            f"{marker} **{player.get('name')}** · {party_job_text(player.get('job', '전사'))} · "
+            f"{state}{rookie}\n"
+            f"└ 🗡️ {player.get('weapon')} / 🛡️ {player.get('armor')}"
+        )
+    return lines
+
+
+def build_party_explore_embed(party, result_text=None):
+    run = party.get("run") or {}
+    terrain = run.get("terrain", party.get("start_terrain", "grassland"))
+    info = ADVENTURE_TERRAINS.get(terrain, {})
+    description = (
+        f"현재 지형: **{get_terrain_display(terrain)}**\n"
+        f"완료 턴: **{run.get('turn', 0)}턴**\n"
+        f"공용 모라: **{int(run.get('coins', 0)):,}모라**\n"
+        f"난이도: **{'🔥 하드' if party.get('hard_mode') else '일반'}**\n\n"
+    )
+    if result_text:
+        description += f"{result_text}\n\n"
+    description += "## 파티 상태\n" + "\n".join(build_party_status_lines(party))
+    embed = discord.Embed(
+        title=f"🧭 파티 모험 · {party.get('name')}",
+        description=description,
+        color=int(info.get("color", 0x5865F2)),
+    )
+    embed.set_footer(text="파티장이 다음 턴을 진행하면 전투·상인·지형 이벤트 중 하나가 발생해.")
+    return embed
+
+
+def build_party_battle_embed(party):
+    run = party.get("run") or {}
+    battle = run.get("battle") or {}
+    monster = battle.get("monster") or {}
+    monster_hp = max(0, int(monster.get("hp", 0)))
+    monster_max_hp = max(1, int(monster.get("max_hp", 1)))
+
+    action_lines = []
+    actions = battle.get("actions", {})
+    for uid in party_alive_human_ids(party):
+        player = party_get_player(party, uid)
+        action = actions.get(uid)
+        action_lines.append(
+            f"{'✅' if action else '⏳'} **{player.get('name')}** — {action or '행동 대기'}"
+        )
+
+    logs = battle.get("log", [])[-10:]
+    log_text = "\n".join(logs) if logs else "전투가 시작됐다. 행동을 선택해!"
+    scale = float(monster.get("member_scale", 1.0))
+    embed = discord.Embed(
+        title=f"⚔️ {monster.get('name', '몬스터')} 전투 · 라운드 {battle.get('round', 1)}",
+        description=(
+            f"👹 **Lv.{monster.get('level', 1)} {monster.get('name', '몬스터')}**\n"
+            f"❤️ 체력: **{monster_hp:,}/{monster_max_hp:,}**\n"
+            f"💥 공격력: **{int(monster.get('attack', 1)):,}**\n"
+            f"📈 파티 인원 난이도 배율: **×{scale:.2f}**\n\n"
+            "## 행동 선택\n"
+            + ("\n".join(action_lines) if action_lines else "생존한 유저 파티원이 없어.")
+            + "\n\n## 전투 기록\n"
+            + log_text
+            + "\n\n## 파티 상태\n"
+            + "\n".join(build_party_status_lines(party))
+        ),
+        color=discord.Color.red(),
+    )
+    embed.set_footer(text="공격·방어·직업 스킬 중 하나를 선택해. 전원이 선택하면 라운드가 진행돼.")
+    return embed
+
+
+def build_party_event_embed(party):
+    run = party.get("run") or {}
+    event = get_party_event_by_id(run.get("event_id"))
+    votes = run.get("event_votes", {})
+    humans = party_human_members(party)
+    vote_lines = []
+    for uid in humans:
+        choice_index = votes.get(uid)
+        if choice_index is None:
+            vote_lines.append(f"⏳ <@{uid}> — 선택 대기")
+        else:
+            try:
+                label = event["choices"][int(choice_index)]["label"]
+            except (IndexError, KeyError, TypeError, ValueError):
+                label = "알 수 없음"
+            vote_lines.append(f"✅ <@{uid}> — **{label}**")
+
+    embed = discord.Embed(
+        title=f"🎭 지형 이벤트 · {event.get('name', '알 수 없는 사건')}",
+        description=(
+            f"현재 지형: **{get_terrain_display(run.get('terrain'))}**\n\n"
+            f"{event.get('description', '')}\n\n"
+            "## 파티 투표\n"
+            + "\n".join(vote_lines)
+            + "\n\n모든 유저 파티원이 투표하면 가장 많은 표를 받은 선택지가 실행돼. "
+            "동률이면 파티장의 선택이 우선돼."
+        ),
+        color=discord.Color.purple(),
+    )
+    return embed
+
+
+def build_party_merchant_embed(party):
+    run = party.get("run") or {}
+    offers = run.get("merchant_offers", [])
+    lines = []
+    for offer in offers:
+        kind_emoji = "🗡️" if offer.get("kind") == "weapon" else "🛡️"
+        catalog = WEAPONS if offer.get("kind") == "weapon" else ARMORS
+        bonus = int(catalog.get(offer.get("name"), {}).get("bonus", 0))
+        lines.append(
+            f"{kind_emoji} **{offer.get('name')}** · 보너스 +{bonus} · "
+            f"**{int(offer.get('price', 0)):,}모라**"
+        )
+
+    embed = discord.Embed(
+        title="🛒 떠돌이 상인",
+        description=(
+            f"상인은 모험의 **{run.get('turn', 0)}턴**과 "
+            f"**{get_terrain_display(run.get('terrain'))}**에 맞는 장비를 꺼냈다.\n"
+            f"공용 모라: **{int(run.get('coins', 0)):,}모라**\n\n"
+            + ("\n".join(lines) if lines else "팔 수 있는 장비가 없어 보인다.")
+            + "\n\n구매한 장비는 구매자의 가방에 들어가며, 캠프에서 착용할 수 있어."
+        ),
+        color=discord.Color.gold(),
+    )
+    return embed
+
+
+def build_party_camp_embed(party, notice=None):
+    run = party.get("run") or {}
+    humans = party_human_members(party)
+    votes = [uid for uid in run.get("rest_votes", []) if uid in humans]
+    needed = max(1, math.ceil(len(humans) / 2))
+    remaining = max(
+        0,
+        PARTY_REST_COOLDOWN_TURNS - (int(run.get("turn", 0)) - int(run.get("last_rest_turn", -999))),
+    )
+    storage = run.get("shared_storage", [])
+    storage_text = "\n".join(
+        f"• {'🗡️' if item.get('kind') == 'weapon' else '🛡️'} {item.get('name')}"
+        for item in storage[:12]
+    )
+    if not storage_text:
+        storage_text = "비어 있음"
+    if len(storage) > 12:
+        storage_text += f"\n외 {len(storage) - 12}개"
+
+    locked_lines = []
+    for uid in humans:
+        locked = bool(run.get("camp_locked", {}).get(uid))
+        locked_lines.append(f"{'🔒' if locked else '✅'} <@{uid}> — {'이번 캠프 휴식 불가' if locked else '휴식 가능'}")
+
+    description = (
+        f"**{run.get('turn', 0)}턴**을 마치고 캠프에 도착했다.\n"
+        "전투에서 쓰러진 파티원은 생명 1로 부활하고, 최대 체력의 50%를 회복했어.\n\n"
+    )
+    if notice:
+        description += f"{notice}\n\n"
+    description += (
+        f"## 휴식 투표\n"
+        f"현재 **{len(votes)}/{needed}표** · "
+        + ("지금 휴식 가능" if remaining == 0 else f"다음 휴식까지 {remaining}턴")
+        + "\n"
+        + "\n".join(locked_lines)
+        + "\n\n휴식이 성립하면 전원의 생명 1과 체력이 전부 회복돼. "
+        "요리하거나 장비를 공용 보관함에 올린 사람은 이번 캠프에서 휴식 투표를 할 수 없어.\n\n"
+        "## 공용 보관함\n"
+        + storage_text
+        + "\n\n## 파티 상태\n"
+        + "\n".join(build_party_status_lines(party))
+    )
+
+    embed = discord.Embed(title="🏕️ 파티 캠프", description=description, color=discord.Color.dark_green())
+    embed.set_footer(text="캠프에서는 요리·장비 변경·공용 보관함 이용이 가능해.")
+    return embed
+
+
+def build_party_route_embed(party):
+    run = party.get("run") or {}
+    current = run.get("terrain")
+    routes = ADVENTURE_TERRAIN_ROUTES.get(current, [])
+    lines = [f"• {get_terrain_display(key)}" for key in routes]
+    embed = discord.Embed(
+        title="🗺️ 다음 지형 선택",
+        description=(
+            f"**{get_terrain_display(current)}**의 보스를 쓰러뜨렸다.\n\n"
+            + ("\n".join(lines) if lines else "더 이어지는 길이 없다.")
+            + "\n\n파티장이 다음 지형을 선택해."
+        ),
+        color=discord.Color.blue(),
+    )
+    return embed
+
+
+def get_party_event_by_id(event_id):
+    for events in PARTY_TERRAIN_EVENTS.values():
+        for event in events:
+            if event.get("id") == event_id:
+                return event
+    return {
+        "id": "unknown",
+        "name": "알 수 없는 사건",
+        "description": "사건의 흔적이 사라졌다.",
+        "choices": [
+            {"label": "계속 간다", "emoji": "➡️", "kind": "coins"},
+        ],
+    }
+
+
+def get_party_equipment_depth_allowed(name, depth):
+    required = PARTY_SPECIAL_EQUIPMENT_DEPTH.get(name)
+    if required is None:
+        return True
+    return depth >= required
+
+
+def party_equipment_candidates(run, kind, low_tier=False, special_only=False):
+    terrain = run.get("terrain", "grassland")
+    depth = ADVENTURE_TERRAIN_DEPTH.get(terrain, 1)
+    turn = max(1, int(run.get("turn", 1)))
+    catalog = WEAPONS if kind == "weapon" else ARMORS
+    basic = PARTY_BASIC_WEAPON if kind == "weapon" else PARTY_BASIC_ARMOR
+    normal_cap = PARTY_NORMAL_WEAPON_CAP if kind == "weapon" else PARTY_NORMAL_ARMOR_CAP
+
+    # 턴과 지형이 깊어질수록 허용 보너스가 상승한다.
+    progress_cap = 8 + turn * 4.5 + depth * 13
+    if low_tier:
+        progress_cap = max(12, progress_cap * 0.58)
+    if depth < ADVENTURE_TERRAIN_DEPTH.get("outskirts", 7):
+        progress_cap = min(progress_cap, normal_cap)
+
+    result = []
+    for name, info in catalog.items():
+        if name == basic:
+            continue
+        bonus = int(info.get("bonus", 0))
+        is_special = bool(info.get("obtain_only")) or name in PARTY_SPECIAL_EQUIPMENT_DEPTH
+        if special_only and not is_special:
+            continue
+        if not special_only and is_special and depth < ADVENTURE_TERRAIN_DEPTH.get("outskirts", 7):
+            continue
+        if not get_party_equipment_depth_allowed(name, depth):
+            continue
+        if depth < ADVENTURE_TERRAIN_DEPTH.get("outskirts", 7) and bonus > normal_cap:
+            continue
+        if bonus <= progress_cap or special_only:
+            result.append(name)
+
+    if not result and not special_only:
+        fallback = []
+        for name, info in catalog.items():
+            if name == basic or info.get("obtain_only"):
+                continue
+            if depth < ADVENTURE_TERRAIN_DEPTH.get("outskirts", 7) and int(info.get("bonus", 0)) > normal_cap:
+                continue
+            fallback.append(name)
+        fallback.sort(key=lambda item_name: int(catalog[item_name].get("bonus", 0)))
+        result = fallback[:4]
+
+    result.sort(key=lambda item_name: int(catalog[item_name].get("bonus", 0)))
+    return result
+
+
+def roll_party_equipment(run, low_tier=False, special_only=False):
+    kinds = ["weapon", "armor"]
+    random.shuffle(kinds)
+    for kind in kinds:
+        candidates = party_equipment_candidates(run, kind, low_tier=low_tier, special_only=special_only)
+        if candidates:
+            # 가능한 장비 중 현재 진행도에 가까운 상위 절반에서 뽑는다.
+            start = max(0, len(candidates) // 2 - 1)
+            name = random.choice(candidates[start:])
+            return {"kind": kind, "name": name}
+    return None
+
+
+def give_party_equipment_to_player(player, equipment):
+    if not equipment:
+        return
+    if equipment.get("kind") == "weapon":
+        player.setdefault("bag_weapons", []).append(equipment.get("name"))
+    else:
+        player.setdefault("bag_armors", []).append(equipment.get("name"))
+
+
+def generate_party_merchant_offers(run):
+    offers = []
+    used = set()
+    depth = ADVENTURE_TERRAIN_DEPTH.get(run.get("terrain"), 1)
+    for _ in range(8):
+        if len(offers) >= 4:
+            break
+        equipment = roll_party_equipment(
+            run,
+            low_tier=False,
+            special_only=(depth >= 7 and random.random() < 0.25),
+        )
+        if not equipment:
+            continue
+        key = (equipment["kind"], equipment["name"])
+        if key in used:
+            continue
+        used.add(key)
+        catalog = WEAPONS if equipment["kind"] == "weapon" else ARMORS
+        bonus = int(catalog[equipment["name"]].get("bonus", 0))
+        price = max(120, int(120 + bonus * 16 + int(run.get("turn", 1)) * 28))
+        offers.append({
+            "id": f"offer_{len(offers)}",
+            "kind": equipment["kind"],
+            "name": equipment["name"],
+            "price": price,
+        })
+    return offers
+
+
+def add_party_materials(player, count=2):
+    gained = {}
+    materials = player.setdefault("materials", {})
+    for _ in range(max(1, int(count))):
+        name = random.choice(PARTY_MATERIALS)
+        amount = random.randint(1, 2)
+        materials[name] = int(materials.get(name, 0)) + amount
+        gained[name] = gained.get(name, 0) + amount
+    return gained
+
+
+def format_gained_materials(gained):
+    return ", ".join(f"{name} ×{amount}" for name, amount in gained.items())
+
+
+def create_party_player(uid, name, job, level, is_bot=False):
+    player = {
+        "id": str(uid),
+        "user_id": None if is_bot else str(uid),
+        "name": name,
+        "job": job,
+        "level": max(1, int(level)),
+        "is_bot": bool(is_bot),
+        "alive": True,
+        "lives": 1,
+        "hp": 1,
+        "max_hp": 1,
+        "weapon": PARTY_BASIC_WEAPON,
+        "armor": PARTY_BASIC_ARMOR,
+        "bag_weapons": [],
+        "bag_armors": [],
+        "materials": {},
+        "skill_cooldown": 0,
+        "defending": False,
+        "dodge_bonus": 0.0,
+    }
+    refresh_party_player_max_hp(player, None, keep_ratio=False)
+    player["hp"] = player["max_hp"]
+    return player
+
+
+def initialize_party_run(party):
+    guild = bot.get_guild(int(party.get("guild_id", 0)))
+    humans = party_human_members(party)
+    human_levels = [get_party_member_level(uid) for uid in humans]
+    average_level = max(1, int(round(sum(human_levels) / max(1, len(human_levels)))))
+    players = {}
+
+    for uid in humans:
+        job = party.get("jobs", {}).get(uid, "전사")
+        name = get_party_member_name(guild, uid)
+        players[uid] = create_party_player(uid, name, job, get_party_member_level(uid), is_bot=False)
+
+    bot_jobs = list(PARTY_JOB_INFO.keys())
+    random.shuffle(bot_jobs)
+    for index in range(PARTY_TOTAL_SLOTS - len(humans)):
+        bot_id = f"npc:{party.get('id')}:{index + 1}"
+        job = bot_jobs[index % len(bot_jobs)]
+        players[bot_id] = create_party_player(
+            bot_id,
+            f"용병 {index + 1}",
+            job,
+            average_level,
+            is_bot=True,
+        )
+
+    party["run"] = {
+        "turn": 0,
+        "terrain": party.get("start_terrain", "grassland"),
+        "phase": "explore",
+        "coins": 300,
+        "players": players,
+        "battle": None,
+        "event_id": None,
+        "event_votes": {},
+        "merchant_offers": [],
+        "shared_storage": [],
+        "rest_votes": [],
+        "last_rest_turn": -999,
+        "camp_locked": {},
+        "pending_route": False,
+        "buffs": {
+            "attack_battles": 0,
+            "attack_strong": 0,
+            "defense_battles": 0,
+        },
+        "kills": 0,
+        "boss_kills": 0,
+        "equipment_found": 0,
+        "started_at": datetime.now(KST).isoformat(),
+    }
+
+
+def party_average_level(run):
+    levels = [max(1, int(player.get("level", 1))) for player in run.get("players", {}).values()]
+    return max(1, int(round(sum(levels) / max(1, len(levels)))))
+
+
+def create_party_monster(party, elite=False, boss=False, forced_name=None):
+    run = party.get("run") or {}
+    terrain_key = run.get("terrain", "grassland")
+    terrain = ADVENTURE_TERRAINS.get(terrain_key, ADVENTURE_TERRAINS["grassland"])
+    depth = ADVENTURE_TERRAIN_DEPTH.get(terrain_key, 1)
+    turn = max(1, int(run.get("turn", 1)))
+    player_count = max(1, len(run.get("players", {})))
+
+    # 요청한 규칙: 전투에 참가하는 파티원 1명마다 몬스터 강함 +25%.
+    member_scale = 1.0 + 0.25 * player_count
+    hard_scale = 1.55 if party.get("hard_mode") else 1.0
+    elite_scale = 1.35 if elite else 1.0
+    boss_scale = 1.85 if boss else 1.0
+    terrain_scale = max(0.8, float(terrain.get("danger_mul", 1.0)))
+
+    average_level = party_average_level(run)
+    target_level = max(1, int(round(average_level + turn * 0.8 + depth * 2.5)))
+    if elite:
+        target_level += 4
+    if boss:
+        target_level += 8
+
+    if forced_name:
+        name = forced_name
+    elif boss:
+        if terrain_key == "outskirts":
+            name = random.choice(terrain.get("bosses", [terrain.get("boss", "보스")]))
+        else:
+            name = terrain.get("boss", "지형의 지배자")
+    else:
+        candidates = list(terrain.get("monsters", ["슬라임"]))
+        if terrain.get("boss") in candidates and len(candidates) > 1:
+            candidates = [name for name in candidates if name != terrain.get("boss")]
+        name = random.choice(candidates or [terrain.get("boss", "슬라임")])
+
+    base_hp = 90 + target_level * 20 + turn * 14
+    base_attack = 7 + target_level * 2.1 + turn * 1.15
+    scale = member_scale * hard_scale * elite_scale * boss_scale * terrain_scale
+    max_hp = max(60, int(round(base_hp * scale)))
+    attack = max(4, int(round(base_attack * scale)))
+
+    return {
+        "name": name,
+        "level": target_level,
+        "hp": max_hp,
+        "max_hp": max_hp,
+        "attack": attack,
+        "member_scale": member_scale,
+        "is_elite": bool(elite),
+        "is_boss": bool(boss),
+        "attack_debuff": 0.0,
+    }
+
+
+def start_party_battle(party, elite=False, boss=False, forced_name=None, opening_log=None):
+    run = party.get("run") or {}
+    monster = create_party_monster(party, elite=elite, boss=boss, forced_name=forced_name)
+    run["phase"] = "battle"
+    run["battle"] = {
+        "monster": monster,
+        "round": 1,
+        "actions": {},
+        "log": [opening_log] if opening_log else [],
+    }
+    for player in run.get("players", {}).values():
+        player["defending"] = False
+        player["dodge_bonus"] = 0.0
+
+
+def party_random_living_player(run):
+    living = [player for player in run.get("players", {}).values() if player.get("alive")]
+    return random.choice(living) if living else None
+
+
+def party_lose_equipped_item(player):
+    candidates = []
+    if player.get("weapon") != PARTY_BASIC_WEAPON:
+        candidates.append("weapon")
+    if player.get("armor") != PARTY_BASIC_ARMOR:
+        candidates.append("armor")
+    if not candidates:
+        return None
+    lost_kind = random.choice(candidates)
+    if lost_kind == "weapon":
+        lost_name = player.get("weapon")
+        player["weapon"] = PARTY_BASIC_WEAPON
+    else:
+        lost_name = player.get("armor")
+        player["armor"] = PARTY_BASIC_ARMOR
+    refresh_party_player_max_hp(player, None, keep_ratio=True)
+    return {"kind": lost_kind, "name": lost_name}
+
+
+def party_apply_damage(player, raw_damage, run, extra_reduction=0.0):
+    stats = party_player_stats(player, run)
+    if random.random() < min(0.80, stats["dodge"] + float(player.get("dodge_bonus", 0.0))):
+        return 0, True, None
+
+    reduction = stats["defense"] + extra_reduction
+    if player.get("defending"):
+        reduction += 60.0
+    if int(run.get("buffs", {}).get("defense_battles", 0)) > 0:
+        reduction += 20.0
+    reduction = max(0.0, min(85.0, reduction))
+    damage = max(1, int(round(float(raw_damage) * (1.0 - reduction / 100.0))))
+    player["hp"] = max(0, int(player.get("hp", 0)) - damage)
+
+    lost = None
+    if player["hp"] <= 0 and player.get("alive"):
+        player["alive"] = False
+        player["lives"] = 0
+        player["hp"] = 0
+        lost = party_lose_equipped_item(player)
+    return damage, False, lost
+
+
+def party_attack_damage(player, run, skill_multiplier=1.0, forced_crit_chance=None):
+    stats = party_player_stats(player, run)
+    crit_chance = stats["crit"] if forced_crit_chance is None else forced_crit_chance
+    critical = random.random() < crit_chance
+    variance = random.uniform(0.90, 1.10)
+    damage = stats["attack"] * skill_multiplier * variance
+    if critical:
+        damage *= 1.75
+    return max(1, int(round(damage))), critical
+
+
+def resolve_party_battle_round(party):
+    run = party.get("run") or {}
+    battle = run.get("battle") or {}
+    monster = battle.get("monster") or {}
+    actions = dict(battle.get("actions", {}))
+    logs = []
+
+    # NPC는 자동으로 행동한다.
+    for key, player in run.get("players", {}).items():
+        if not player.get("alive") or not player.get("is_bot"):
+            continue
+        if int(player.get("skill_cooldown", 0)) <= 0 and random.random() < 0.42:
+            actions[key] = "직업 스킬"
+        elif player.get("job") == "수호자" and random.random() < 0.28:
+            actions[key] = "방어"
+        else:
+            actions[key] = "공격"
+
+    for player in run.get("players", {}).values():
+        player["defending"] = False
+        player["dodge_bonus"] = 0.0
+        if int(player.get("skill_cooldown", 0)) > 0:
+            player["skill_cooldown"] = int(player.get("skill_cooldown", 0)) - 1
+
+    party_guard = 0.0
+    monster_attack_reduction = 0.0
+
+    # 민첩한 직업부터 행동하도록 대략적인 우선순위를 둔다.
+    job_order = {"도적": 0, "궁수": 1, "마법사": 2, "전사": 3, "사제": 4, "수호자": 5}
+    acting_players = [
+        (key, player) for key, player in run.get("players", {}).items()
+        if player.get("alive")
+    ]
+    acting_players.sort(key=lambda item: job_order.get(item[1].get("job"), 9))
+
+    for key, player in acting_players:
+        if int(monster.get("hp", 0)) <= 0:
+            break
+        action = actions.get(key, "공격")
+        job = player.get("job", "전사")
+
+        if action == "방어":
+            player["defending"] = True
+            logs.append(f"🛡️ **{player.get('name')}**이 방어 태세를 취했다.")
+            continue
+
+        if action != "직업 스킬" or int(player.get("skill_cooldown", 0)) > 0:
+            damage, critical = party_attack_damage(player, run)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            logs.append(
+                f"{'💥' if critical else '⚔️'} **{player.get('name')}**의 공격! "
+                f"**{damage:,}** 피해{' (치명타)' if critical else ''}."
+            )
+            continue
+
+        player["skill_cooldown"] = 3
+        if job == "전사":
+            damage, critical = party_attack_damage(player, run, skill_multiplier=1.90, forced_crit_chance=0.18)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            logs.append(f"⚔️ **{player.get('name')}**의 `분쇄의 일격`! **{damage:,}** 피해.")
+
+        elif job == "수호자":
+            damage, _ = party_attack_damage(player, run, skill_multiplier=0.72)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            party_guard = max(party_guard, 38.0)
+            player["defending"] = True
+            logs.append(
+                f"🛡️ **{player.get('name')}**의 `철벽 수호`! **{damage:,}** 피해를 주고 이번 라운드 파티 피해를 감소시킨다."
+            )
+
+        elif job == "궁수":
+            damage, critical = party_attack_damage(player, run, skill_multiplier=1.48, forced_crit_chance=0.58)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            logs.append(
+                f"🏹 **{player.get('name')}**의 `약점 관통`! **{damage:,}** 피해"
+                f"{' (치명타)' if critical else ''}."
+            )
+
+        elif job == "도적":
+            total = 0
+            crits = 0
+            for _ in range(2):
+                damage, critical = party_attack_damage(player, run, skill_multiplier=0.78)
+                total += damage
+                crits += 1 if critical else 0
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - total)
+            stolen = random.randint(25, 70) + int(run.get("turn", 1)) * 4
+            run["coins"] = int(run.get("coins", 0)) + stolen
+            player["dodge_bonus"] = 0.25
+            logs.append(
+                f"🗡️ **{player.get('name')}**의 `그림자 연격`! **{total:,}** 피해, "
+                f"모라 **{stolen:,}** 탈취{f', 치명타 {crits}회' if crits else ''}."
+            )
+
+        elif job == "마법사":
+            damage, critical = party_attack_damage(player, run, skill_multiplier=1.72, forced_crit_chance=0.14)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            monster_attack_reduction = max(monster_attack_reduction, 0.27)
+            logs.append(
+                f"🔮 **{player.get('name')}**의 `원소 붕괴`! **{damage:,}** 피해를 주고 적 공격력을 27% 약화한다."
+            )
+
+        elif job == "사제":
+            living = [p for p in run.get("players", {}).values() if p.get("alive")]
+            target = min(living, key=lambda p: p.get("hp", 0) / max(1, p.get("max_hp", 1))) if living else player
+            heal = max(1, int(round(target.get("max_hp", 1) * 0.38)))
+            old_hp = int(target.get("hp", 0))
+            target["hp"] = min(int(target.get("max_hp", 1)), old_hp + heal)
+            actual = target["hp"] - old_hp
+            damage, _ = party_attack_damage(player, run, skill_multiplier=0.55)
+            monster["hp"] = max(0, int(monster.get("hp", 0)) - damage)
+            logs.append(
+                f"✨ **{player.get('name')}**의 `치유의 빛`! **{target.get('name')}** 체력 **{actual:,}** 회복, "
+                f"적에게 **{damage:,}** 피해."
+            )
+
+    if int(monster.get("hp", 0)) <= 0:
+        battle["actions"] = {}
+        battle["log"] = (battle.get("log", []) + logs)[-12:]
+        return "victory", logs
+
+    living = [player for player in run.get("players", {}).values() if player.get("alive")]
+    if not living:
+        return "defeat", logs
+
+    attack_count = 1
+    if len(living) >= 3:
+        attack_count = 2
+    if monster.get("is_boss") and len(living) >= 2:
+        attack_count += 1
+
+    for _ in range(attack_count):
+        target = party_random_living_player(run)
+        if not target:
+            break
+        raw_attack = int(monster.get("attack", 1))
+        debuff = max(float(monster.get("attack_debuff", 0.0)), monster_attack_reduction)
+        raw_attack = max(1, int(round(raw_attack * (1.0 - debuff))))
+        damage, dodged, lost = party_apply_damage(target, raw_attack, run, extra_reduction=party_guard)
+        if dodged:
+            logs.append(f"💨 **{target.get('name')}**이 {monster.get('name')}의 공격을 회피했다!")
+        else:
+            logs.append(f"👹 **{monster.get('name')}**의 공격! **{target.get('name')}**에게 **{damage:,}** 피해.")
+        if not target.get("alive"):
+            if lost:
+                logs.append(
+                    f"💀 **{target.get('name')}** 전투 불능! 착용 중이던 **{lost.get('name')}**을 잃었다. "
+                    "다음 캠프까지 관전한다."
+                )
+            else:
+                logs.append(
+                    f"💀 **{target.get('name')}** 전투 불능! 다음 캠프까지 관전한다."
+                )
+
+    for player in run.get("players", {}).values():
+        player["defending"] = False
+        player["dodge_bonus"] = 0.0
+
+    battle["round"] = int(battle.get("round", 1)) + 1
+    battle["actions"] = {}
+    battle["log"] = (battle.get("log", []) + logs)[-12:]
+
+    if not any(player.get("alive") for player in run.get("players", {}).values()):
+        return "defeat", logs
+    return "continue", logs
+
+
+def reward_party_battle(party):
+    run = party.get("run") or {}
+    battle = run.get("battle") or {}
+    monster = battle.get("monster") or {}
+    turn = max(1, int(run.get("turn", 1)))
+    depth = ADVENTURE_TERRAIN_DEPTH.get(run.get("terrain"), 1)
+    reward = int((80 + turn * 22 + depth * 65) * (1.7 if monster.get("is_boss") else 1.0))
+    if monster.get("is_elite"):
+        reward = int(reward * 1.45)
+    if party.get("hard_mode"):
+        reward = int(reward * 1.4)
+    run["coins"] = int(run.get("coins", 0)) + reward
+    run["kills"] = int(run.get("kills", 0)) + 1
+    if monster.get("is_boss"):
+        run["boss_kills"] = int(run.get("boss_kills", 0)) + 1
+
+    living = [player for player in run.get("players", {}).values() if player.get("alive")]
+    material_text = ""
+    if living:
+        receiver = random.choice(living)
+        gained = add_party_materials(receiver, count=2 if monster.get("is_elite") else 1)
+        material_text = f"\n🎒 **{receiver.get('name')}** 재료 획득: {format_gained_materials(gained)}"
+
+    equipment_text = ""
+    rate = 0.18
+    if monster.get("is_elite"):
+        rate = 0.45
+    if monster.get("is_boss"):
+        rate = 1.0
+    if party.get("hard_mode"):
+        rate *= 1.25
+    if living and random.random() < min(1.0, rate):
+        equipment = roll_party_equipment(
+            run,
+            low_tier=False,
+            special_only=(depth >= 7 and monster.get("is_boss") and random.random() < 0.55),
+        )
+        if equipment:
+            receiver = random.choice(living)
+            give_party_equipment_to_player(receiver, equipment)
+            run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
+            equipment_text = (
+                f"\n{'🗡️' if equipment.get('kind') == 'weapon' else '🛡️'} "
+                f"**{receiver.get('name')}** 장비 획득: **{equipment.get('name')}**"
+            )
+
+    # 사제 생존 시 전투 종료 후 소량 회복.
+    priests = [player for player in living if player.get("job") == "사제"]
+    priest_text = ""
+    if priests:
+        for player in living:
+            heal = max(1, int(player.get("max_hp", 1) * 0.06))
+            player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+        priest_text = "\n✨ 사제의 전투 후 기도로 생존자들이 최대 체력의 6%를 회복했다."
+
+    return (
+        f"🏆 **{monster.get('name')}** 격파! 공용 모라 **+{reward:,}**"
+        + material_text
+        + equipment_text
+        + priest_text
+    )
+
+
+def decrement_party_battle_buffs(run):
+    buffs = run.get("buffs", {})
+    for key in ("attack_battles", "attack_strong", "defense_battles"):
+        if int(buffs.get(key, 0)) > 0:
+            buffs[key] = int(buffs.get(key, 0)) - 1
+
+
+def revive_party_at_camp(run):
+    revived = []
+    for player in run.get("players", {}).values():
+        if player.get("alive"):
+            continue
+        player["alive"] = True
+        player["lives"] = 1
+        refresh_party_player_max_hp(player, run, keep_ratio=False)
+        player["hp"] = max(1, int(player.get("max_hp", 1) * 0.50))
+        revived.append(player.get("name"))
+    return revived
+
+
+def party_run_summary_embed(party, victory=False, reason=None):
+    run = party.get("run") or {}
+    title = "🏆 파티 모험 종료" if victory else "☠️ 파티 모험 실패"
+    color = discord.Color.gold() if victory else discord.Color.dark_red()
+    description = (
+        f"파티: **{party.get('name')}**\n"
+        f"도달 지형: **{get_terrain_display(run.get('terrain'))}**\n"
+        f"완료 턴: **{int(run.get('turn', 0))}턴**\n"
+        f"처치 수: **{int(run.get('kills', 0))}마리**\n"
+        f"보스 처치: **{int(run.get('boss_kills', 0))}마리**\n"
+        f"발견 장비: **{int(run.get('equipment_found', 0))}개**\n"
+        f"남은 공용 모라: **{int(run.get('coins', 0)):,}모라**"
+    )
+    if reason:
+        description += f"\n\n{reason}"
+    return discord.Embed(title=title, description=description, color=color)
+
+
+async def update_party_recruit_message(party):
+    channel = get_party_recruit_channel(party)
+    if not channel or not party.get("recruit_message_id"):
+        return
+    try:
+        message = await channel.fetch_message(int(party.get("recruit_message_id")))
+        await message.edit(
+            embed=build_party_recruit_embed(party),
+            view=PartyRecruitView(party.get("id")),
+        )
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
+
+async def update_party_lobby_message(party):
+    thread = get_party_thread(party)
+    if not thread or not party.get("lobby_message_id"):
+        return
+    try:
+        message = await thread.fetch_message(int(party.get("lobby_message_id")))
+        await message.edit(
+            embed=build_party_lobby_embed(party),
+            view=PartyLobbyView(party.get("id")),
+        )
+    except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+        pass
+
+
+async def close_party(party, status="closed", reason=None):
+    party["status"] = status
+    party["closed_at"] = datetime.now(KST).isoformat()
+    save_party_data()
+    await update_party_recruit_message(party)
+    thread = get_party_thread(party)
+    if thread:
+        try:
+            text = reason or "파티 모집이 종료됐어."
+            await thread.send(f"🔒 {text}")
+        except discord.HTTPException:
+            pass
+
+
+async def party_edit_interaction(interaction, embed, view=None, content=None):
+    if interaction.response.is_done():
+        try:
+            await interaction.edit_original_response(content=content, embed=embed, view=view)
+        except (discord.NotFound, discord.HTTPException):
+            await interaction.followup.send(content=content, embed=embed, view=view)
+    else:
+        await interaction.response.edit_message(content=content, embed=embed, view=view)
+
+
+async def party_complete_turn(interaction, party, result_text=None):
+    run = party.get("run") or {}
+    run["battle"] = None
+    run["event_id"] = None
+    run["event_votes"] = {}
+    run["merchant_offers"] = []
+
+    if not any(player.get("alive") for player in run.get("players", {}).values()):
+        party["status"] = "failed"
+        run["phase"] = "ended"
+        save_party_data()
+        await update_party_recruit_message(party)
+        await party_edit_interaction(
+            interaction,
+            party_run_summary_embed(party, victory=False, reason="파티 전원이 쓰러져 다음 캠프에 도달하지 못했다."),
+            view=None,
+        )
+        return
+
+    if int(run.get("turn", 0)) % PARTY_CAMP_INTERVAL == 0:
+        revived = revive_party_at_camp(run)
+        run["phase"] = "camp"
+        run["rest_votes"] = []
+        run["camp_locked"] = {uid: False for uid in party_human_members(party)}
+        notice_parts = []
+        if result_text:
+            notice_parts.append(result_text)
+        if revived:
+            notice_parts.append("💫 캠프 도착으로 부활: " + ", ".join(revived))
+        save_party_data()
+        await party_edit_interaction(
+            interaction,
+            build_party_camp_embed(party, "\n".join(notice_parts) if notice_parts else None),
+            view=PartyCampView(party.get("id")),
+        )
+        return
+
+    if run.get("pending_route"):
+        routes = ADVENTURE_TERRAIN_ROUTES.get(run.get("terrain"), [])
+        if not routes:
+            party["status"] = "completed"
+            run["phase"] = "ended"
+            save_party_data()
+            await update_party_recruit_message(party)
+            await party_edit_interaction(
+                interaction,
+                party_run_summary_embed(party, victory=True, reason="마지막 지형의 보스를 쓰러뜨리고 파티 모험을 완주했다!"),
+                view=None,
+            )
+            return
+        run["phase"] = "route"
+        save_party_data()
+        await party_edit_interaction(interaction, build_party_route_embed(party), view=PartyRouteView(party.get("id")))
+        return
+
+    run["phase"] = "explore"
+    save_party_data()
+    await party_edit_interaction(
+        interaction,
+        build_party_explore_embed(party, result_text=result_text),
+        view=PartyExploreView(party.get("id")),
+    )
+
+
+async def start_party_encounter(interaction, party):
+    run = party.get("run") or {}
+    run["turn"] = int(run.get("turn", 0)) + 1
+    turn = int(run.get("turn", 1))
+
+    # 10턴마다 현재 지형 보스가 등장한다.
+    if turn % PARTY_BOSS_INTERVAL == 0:
+        run["pending_route"] = True
+        start_party_battle(party, boss=True, opening_log="👑 지형의 보스가 길을 막아섰다!")
+        save_party_data()
+        await party_edit_interaction(interaction, build_party_battle_embed(party), view=PartyBattleView(party.get("id")))
+        return
+
+    roll = random.random()
+    battle_rate = 0.62 if party.get("hard_mode") else 0.54
+    event_rate = 0.24
+    merchant_rate = 0.16
+
+    if roll < battle_rate:
+        elite = random.random() < (0.25 if party.get("hard_mode") else 0.14)
+        start_party_battle(party, elite=elite)
+        save_party_data()
+        await party_edit_interaction(interaction, build_party_battle_embed(party), view=PartyBattleView(party.get("id")))
+        return
+
+    if roll < battle_rate + event_rate:
+        events = PARTY_TERRAIN_EVENTS.get(run.get("terrain"), PARTY_TERRAIN_EVENTS["grassland"])
+        event = random.choice(events)
+        run["phase"] = "event"
+        run["event_id"] = event.get("id")
+        run["event_votes"] = {}
+        save_party_data()
+        await party_edit_interaction(interaction, build_party_event_embed(party), view=PartyEventView(party.get("id")))
+        return
+
+    if roll < battle_rate + event_rate + merchant_rate:
+        run["phase"] = "merchant"
+        run["merchant_offers"] = generate_party_merchant_offers(run)
+        save_party_data()
+        await party_edit_interaction(interaction, build_party_merchant_embed(party), view=PartyMerchantView(party.get("id")))
+        return
+
+    receiver = party_random_living_player(run)
+    gained_text = ""
+    if receiver:
+        gained = add_party_materials(receiver, count=1)
+        gained_text = f"\n🎒 **{receiver.get('name')}**이 {format_gained_materials(gained)}을 주웠다."
+    await party_complete_turn(interaction, party, "🌤️ 별다른 위협 없이 길을 통과했다." + gained_text)
+
+
+def resolve_party_event_outcome(party, choice):
+    run = party.get("run") or {}
+    kind = choice.get("kind")
+    living = [player for player in run.get("players", {}).values() if player.get("alive")]
+    receiver = random.choice(living) if living else None
+
+    if kind == "heal":
+        for player in living:
+            heal = max(1, int(player.get("max_hp", 1) * 0.22))
+            player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+        return "done", "💧 맑은 물을 마셔 생존자 전원이 최대 체력의 22%를 회복했다."
+
+    if kind == "heal_big":
+        for player in living:
+            heal = max(1, int(player.get("max_hp", 1) * 0.40))
+            player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+        return "done", "💚 생명의 기운이 퍼져 생존자 전원이 최대 체력의 40%를 회복했다."
+
+    if kind == "risky_heal":
+        if random.random() < 0.65:
+            for player in living:
+                heal = max(1, int(player.get("max_hp", 1) * 0.32))
+                player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+            return "done", "🍈 달콤한 열매였다! 생존자 전원이 최대 체력의 32%를 회복했다."
+        for player in living:
+            damage = max(1, int(player.get("max_hp", 1) * 0.12))
+            player["hp"] = max(1, int(player.get("hp", 1)) - damage)
+        return "done", "☠️ 열매에 약한 독이 있었다. 생존자 전원이 최대 체력의 12% 피해를 입었다."
+
+    if kind == "materials":
+        if not receiver:
+            return "done", "주울 수 있는 파티원이 없었다."
+        gained = add_party_materials(receiver, count=3)
+        return "done", f"🎒 **{receiver.get('name')}**이 {format_gained_materials(gained)}을 챙겼다."
+
+    if kind in {"coins", "coins_big"}:
+        amount = random.randint(120, 260) + int(run.get("turn", 1)) * (18 if kind == "coins" else 35)
+        if kind == "coins_big":
+            amount *= 2
+        run["coins"] = int(run.get("coins", 0)) + amount
+        return "done", f"🪙 공용 모라 **{amount:,}**을 획득했다."
+
+    if kind == "risky_coins":
+        if random.random() < 0.72:
+            amount = random.randint(320, 600) + int(run.get("turn", 1)) * 30
+            run["coins"] = int(run.get("coins", 0)) + amount
+            return "done", f"⛏️ 광맥 채굴에 성공해 공용 모라 **{amount:,}**을 얻었다."
+        start_party_battle(party, elite=True, opening_log="💢 채굴 소리에 잠들어 있던 강적이 깨어났다!")
+        return "battle", "광맥의 수호자가 나타났다."
+
+    if kind in {"equipment_low", "risky_equipment", "special_equipment"}:
+        if not receiver:
+            return "done", "장비를 받을 파티원이 없었다."
+        if kind == "risky_equipment" and random.random() < 0.32:
+            start_party_battle(party, elite=True, opening_log="⚠️ 장비에 손을 대자 수호자가 나타났다!")
+            return "battle", "수호자와의 전투가 시작됐다."
+        equipment = roll_party_equipment(
+            run,
+            low_tier=(kind == "equipment_low"),
+            special_only=(kind == "special_equipment"),
+        )
+        if not equipment:
+            amount = 180 + int(run.get("turn", 1)) * 20
+            run["coins"] = int(run.get("coins", 0)) + amount
+            return "done", f"쓸 만한 장비는 없었지만 모라 **{amount:,}**을 발견했다."
+        give_party_equipment_to_player(receiver, equipment)
+        run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
+        return "done", (
+            f"{'🗡️' if equipment.get('kind') == 'weapon' else '🛡️'} **{receiver.get('name')}**이 "
+            f"**{equipment.get('name')}**을 획득했다."
+        )
+
+    if kind == "raid":
+        if random.random() < 0.45:
+            start_party_battle(party, elite=random.random() < 0.35, opening_log="🔥 약탈을 시작하자 캠프의 주인들이 몰려왔다!")
+            return "battle", "약탈 전투가 시작됐다."
+        amount = random.randint(180, 420) + int(run.get("turn", 1)) * 20
+        run["coins"] = int(run.get("coins", 0)) + amount
+        equipment = roll_party_equipment(run, low_tier=True)
+        text = f"🔥 빈틈을 노려 공용 모라 **{amount:,}**을 약탈했다."
+        if receiver and equipment:
+            give_party_equipment_to_player(receiver, equipment)
+            run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
+            text += f" **{receiver.get('name')}**은 **{equipment.get('name')}**도 챙겼다."
+        return "done", text
+
+    if kind == "talk":
+        if random.random() < 0.72:
+            amount = random.randint(80, 180)
+            run["coins"] = int(run.get("coins", 0)) + amount
+            if receiver:
+                gained = add_party_materials(receiver, count=2)
+                return "done", f"👋 대화가 통했다! 모라 **{amount:,}**과 {format_gained_materials(gained)}을 받았다."
+            return "done", f"👋 대화가 통했다! 모라 **{amount:,}**을 받았다."
+        start_party_battle(party, opening_log="💢 말이 통하지 않았다. 상대가 무기를 들었다!")
+        return "battle", "협상이 결렬됐다."
+
+    if kind == "blessing":
+        run.setdefault("buffs", {})["attack_battles"] = max(
+            int(run.get("buffs", {}).get("attack_battles", 0)), 2
+        )
+        return "done", "✨ 축복을 받아 다음 2번의 전투 동안 파티 공격력이 15% 증가한다."
+
+    if kind == "help":
+        amount = random.randint(150, 350)
+        run["coins"] = int(run.get("coins", 0)) + amount
+        run.setdefault("buffs", {})["defense_battles"] = max(
+            int(run.get("buffs", {}).get("defense_battles", 0)), 1
+        )
+        return "done", f"🩹 모험가가 감사의 뜻으로 모라 **{amount:,}**과 방어 축복을 건넸다."
+
+    if kind == "merchant_hint":
+        run["phase"] = "merchant"
+        run["merchant_offers"] = generate_party_merchant_offers(run)
+        return "merchant", "모험가가 숨겨진 상인의 위치를 알려줬다."
+
+    if kind == "merchant":
+        run["phase"] = "merchant"
+        run["merchant_offers"] = generate_party_merchant_offers(run)
+        return "merchant", "암시장 상인이 장비를 펼쳐 보였다."
+
+    if kind == "sacrifice":
+        for player in living:
+            damage = max(1, int(player.get("max_hp", 1) * 0.18))
+            player["hp"] = max(1, int(player.get("hp", 1)) - damage)
+        equipment = roll_party_equipment(run, special_only=True) or roll_party_equipment(run)
+        if receiver and equipment:
+            give_party_equipment_to_player(receiver, equipment)
+            run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
+            return "done", (
+                f"🩸 생존자 전원이 최대 체력의 18%를 대가로 치렀고, "
+                f"**{receiver.get('name')}**이 **{equipment.get('name')}**을 받았다."
+            )
+        return "done", "🩸 생명력을 바쳤지만 제단은 아무것도 내놓지 않았다."
+
+    if kind == "battle":
+        start_party_battle(party, elite=True, opening_log="⚔️ 선택의 결과로 강적과 전투가 시작됐다!")
+        return "battle", "전투가 시작됐다."
+
+    if kind == "battle_elite":
+        start_party_battle(party, elite=True, opening_log="🔥 강력한 수호자가 파티를 시험한다!")
+        return "battle", "강적과의 전투가 시작됐다."
+
+    return "done", "사건은 별다른 일 없이 끝났다."
+
+
+class PartyRecruitView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        disabled = party.get("status") != "lobby" or len(party_human_members(party)) >= PARTY_MAX_HUMANS
+        join_button = discord.ui.Button(
+            label="파티 참가하기",
+            emoji="➕",
+            style=discord.ButtonStyle.success,
+            custom_id=f"party_join:{self.party_id}",
+            disabled=disabled,
+        )
+        join_button.callback = self.join_callback
+        self.add_item(join_button)
+
+    async def join_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 이미 모집이 끝난 파티야.", ephemeral=True)
+                return
+            uid = str(interaction.user.id)
+            existing = find_user_party(uid)
+            if existing:
+                await interaction.response.send_message(
+                    f"❌ 이미 **{existing.get('name')}** 파티에 들어가 있어. 먼저 `/나가기`를 사용해줘.",
+                    ephemeral=True,
+                )
+                return
+            if len(party_human_members(party)) >= PARTY_MAX_HUMANS:
+                await interaction.response.send_message("❌ 파티가 이미 가득 찼어.", ephemeral=True)
+                return
+
+            party.setdefault("members", []).append(uid)
+            party.setdefault("jobs", {})[uid] = None
+            save_party_data()
+
+            thread = get_party_thread(party)
+            if thread:
+                try:
+                    await thread.add_user(interaction.user)
+                except (discord.Forbidden, discord.HTTPException):
+                    pass
+
+            await interaction.response.send_message(
+                f"✅ **{party.get('name')}** 파티에 참가했어! {thread.mention if thread else ''}\n"
+                "스레드에서 직업을 골라줘.",
+                ephemeral=True,
+            )
+            await update_party_recruit_message(party)
+            await update_party_lobby_message(party)
+
+
+class PartyJobSelect(discord.ui.Select):
+    def __init__(self, party_id):
+        self.party_id = str(party_id)
+        options = [
+            discord.SelectOption(
+                label=name,
+                value=name,
+                emoji=info["emoji"],
+                description=info["desc"][:100],
+            )
+            for name, info in PARTY_JOB_INFO.items()
+        ]
+        super().__init__(
+            placeholder="직업 1개 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"party_job:{self.party_id}",
+        )
+
+    async def callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            uid = str(interaction.user.id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 대기 중인 파티가 아니야.", ephemeral=True)
+                return
+            if uid not in party_human_members(party):
+                await interaction.response.send_message("❌ 이 파티의 파티원이 아니야.", ephemeral=True)
+                return
+            job = self.values[0]
+            party.setdefault("jobs", {})[uid] = job
+            save_party_data()
+            await interaction.response.send_message(f"✅ 직업을 **{party_job_text(job)}**(으)로 선택했어.", ephemeral=True)
+            await update_party_lobby_message(party)
+            await update_party_recruit_message(party)
+
+
+class PartyStartTerrainSelect(discord.ui.Select):
+    def __init__(self, party_id):
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        options = []
+        for key in ADVENTURE_START_TERRAINS:
+            info = ADVENTURE_TERRAINS[key]
+            options.append(
+                discord.SelectOption(
+                    label=info["name"],
+                    value=key,
+                    emoji=info["emoji"],
+                    description=info["description"][:100],
+                    default=(party.get("start_terrain") == key),
+                )
+            )
+        super().__init__(
+            placeholder="파티 시작 지형 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"party_start_terrain:{self.party_id}",
+        )
+
+    async def callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 대기 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 시작 지형은 파티장만 정할 수 있어.", ephemeral=True)
+                return
+            party["start_terrain"] = self.values[0]
+            save_party_data()
+            await interaction.response.send_message(
+                f"✅ 시작 지형을 **{get_terrain_display(self.values[0])}**(으)로 변경했어.",
+                ephemeral=True,
+            )
+            await update_party_lobby_message(party)
+            await update_party_recruit_message(party)
+
+
+class PartyLobbyView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        disabled = party.get("status") != "lobby"
+        self.add_item(PartyJobSelect(self.party_id))
+        self.add_item(PartyStartTerrainSelect(self.party_id))
+
+        hard_button = discord.ui.Button(
+            label="하드 모드 전환",
+            emoji="🔥",
+            style=discord.ButtonStyle.danger,
+            custom_id=f"party_toggle_hard:{self.party_id}",
+            disabled=disabled,
+        )
+        hard_button.callback = self.hard_callback
+        self.add_item(hard_button)
+
+        start_button = discord.ui.Button(
+            label="파티 모험 시작",
+            emoji="⚔️",
+            style=discord.ButtonStyle.success,
+            custom_id=f"party_start:{self.party_id}",
+            disabled=disabled,
+        )
+        start_button.callback = self.start_callback
+        self.add_item(start_button)
+
+        close_button = discord.ui.Button(
+            label="파티 해산",
+            emoji="🔒",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"party_close:{self.party_id}",
+            disabled=disabled,
+        )
+        close_button.callback = self.close_callback
+        self.add_item(close_button)
+
+    async def hard_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 대기 중인 파티가 아니야.", ephemeral=True)
+                return
+            uid = str(interaction.user.id)
+            if uid != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 난이도를 바꿀 수 있어.", ephemeral=True)
+                return
+            if not is_adventure_hard_mode_unlocked(get_adventure(uid)):
+                await interaction.response.send_message("❌ 파티장이 개인 모험에서 하드 모드를 먼저 해금해야 해.", ephemeral=True)
+                return
+            party["hard_mode"] = not bool(party.get("hard_mode"))
+            save_party_data()
+            await interaction.response.send_message(
+                f"✅ 난이도를 **{'🔥 하드 모드' if party.get('hard_mode') else '일반 모드'}**로 바꿨어.",
+                ephemeral=True,
+            )
+            await update_party_lobby_message(party)
+            await update_party_recruit_message(party)
+
+    async def start_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 이미 시작했거나 종료된 파티야.", ephemeral=True)
+                return
+            uid = str(interaction.user.id)
+            if uid != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 시작할 수 있어.", ephemeral=True)
+                return
+            missing_jobs = [member_uid for member_uid in party_human_members(party) if party.get("jobs", {}).get(member_uid) not in PARTY_JOB_INFO]
+            if missing_jobs:
+                mentions = " ".join(f"<@{member_uid}>" for member_uid in missing_jobs)
+                await interaction.response.send_message(
+                    f"❌ 아직 직업을 고르지 않은 파티원이 있어: {mentions}",
+                    ephemeral=True,
+                )
+                return
+            if party.get("hard_mode") and not is_adventure_hard_mode_unlocked(get_adventure(uid)):
+                party["hard_mode"] = False
+
+            initialize_party_run(party)
+            party["status"] = "playing"
+            party["started_at"] = datetime.now(KST).isoformat()
+            save_party_data()
+            await update_party_recruit_message(party)
+            await interaction.response.edit_message(
+                embed=build_party_explore_embed(
+                    party,
+                    result_text=(
+                        "⚔️ 파티 모험이 시작됐다! "
+                        f"빈자리 **{PARTY_TOTAL_SLOTS - len(party_human_members(party))}개**는 NPC 용병이 채웠어."
+                    ),
+                ),
+                view=PartyExploreView(self.party_id),
+            )
+
+    async def close_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "lobby":
+                await interaction.response.send_message("❌ 해산할 수 있는 대기 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 해산할 수 있어.", ephemeral=True)
+                return
+            party["status"] = "closed"
+            save_party_data()
+            await update_party_recruit_message(party)
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="🔒 파티 해산",
+                    description="파티장이 모집을 종료했어.",
+                    color=discord.Color.dark_grey(),
+                ),
+                view=None,
+            )
+
+
+class PartyExploreView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        button = discord.ui.Button(
+            label="다음 턴 진행",
+            emoji="➡️",
+            style=discord.ButtonStyle.primary,
+            custom_id=f"party_next_turn:{self.party_id}",
+        )
+        button.callback = self.next_callback
+        self.add_item(button)
+
+    async def next_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 다음 턴은 파티장만 진행할 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "explore":
+                await interaction.response.send_message("❌ 지금은 다음 턴을 진행할 수 없는 상태야.", ephemeral=True)
+                return
+            await start_party_encounter(interaction, party)
+
+
+class PartyBattleView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        for label, emoji, style, action in [
+            ("공격", "⚔️", discord.ButtonStyle.danger, "공격"),
+            ("방어", "🛡️", discord.ButtonStyle.secondary, "방어"),
+            ("직업 스킬", "✨", discord.ButtonStyle.primary, "직업 스킬"),
+        ]:
+            button = discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=style,
+                custom_id=f"party_battle_{action}:{self.party_id}",
+            )
+            button.callback = self.make_action_callback(action)
+            self.add_item(button)
+
+        force_button = discord.ui.Button(
+            label="미선택 인원 공격 처리",
+            emoji="⏩",
+            style=discord.ButtonStyle.secondary,
+            custom_id=f"party_battle_force:{self.party_id}",
+        )
+        force_button.callback = self.force_callback
+        self.add_item(force_button)
+
+    def make_action_callback(self, action):
+        async def callback(interaction):
+            await self.record_action(interaction, action)
+        return callback
+
+    async def record_action(self, interaction, action):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            uid = str(interaction.user.id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            battle = run.get("battle") or {}
+            if run.get("phase") != "battle" or not battle:
+                await interaction.response.send_message("❌ 지금은 전투 중이 아니야.", ephemeral=True)
+                return
+            player = party_get_player(party, uid)
+            if not player or uid not in party_human_members(party):
+                await interaction.response.send_message("❌ 이 파티의 유저 파티원이 아니야.", ephemeral=True)
+                return
+            if not player.get("alive"):
+                await interaction.response.send_message("💀 전투 불능 상태라 다음 캠프까지 관전해야 해.", ephemeral=True)
+                return
+            if uid in battle.get("actions", {}):
+                await interaction.response.send_message("❌ 이번 라운드 행동은 이미 골랐어.", ephemeral=True)
+                return
+            if action == "직업 스킬" and int(player.get("skill_cooldown", 0)) > 0:
+                await interaction.response.send_message(
+                    f"❌ 직업 스킬 재사용까지 **{int(player.get('skill_cooldown', 0))}라운드** 남았어.",
+                    ephemeral=True,
+                )
+                return
+
+            battle.setdefault("actions", {})[uid] = action
+            alive_humans = party_alive_human_ids(party)
+            ready = all(member_uid in battle.get("actions", {}) for member_uid in alive_humans)
+            if not ready:
+                save_party_data()
+                await interaction.response.edit_message(embed=build_party_battle_embed(party), view=PartyBattleView(self.party_id))
+                return
+
+            result, _ = resolve_party_battle_round(party)
+            if result == "victory":
+                reward_text = reward_party_battle(party)
+                decrement_party_battle_buffs(run)
+                save_party_data()
+                await party_complete_turn(interaction, party, reward_text)
+                return
+            if result == "defeat":
+                party["status"] = "failed"
+                run["phase"] = "ended"
+                save_party_data()
+                await update_party_recruit_message(party)
+                await interaction.response.edit_message(
+                    embed=party_run_summary_embed(
+                        party,
+                        victory=False,
+                        reason="파티 전원이 전투에서 쓰러져 다음 캠프에 도달하지 못했다.",
+                    ),
+                    view=None,
+                )
+                return
+            save_party_data()
+            await interaction.response.edit_message(embed=build_party_battle_embed(party), view=PartyBattleView(self.party_id))
+
+    async def force_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 강제 진행할 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            battle = run.get("battle") or {}
+            if run.get("phase") != "battle" or not battle:
+                await interaction.response.send_message("❌ 전투 중이 아니야.", ephemeral=True)
+                return
+            for uid in party_alive_human_ids(party):
+                battle.setdefault("actions", {}).setdefault(uid, "공격")
+            result, _ = resolve_party_battle_round(party)
+            if result == "victory":
+                reward_text = reward_party_battle(party)
+                decrement_party_battle_buffs(run)
+                save_party_data()
+                await party_complete_turn(interaction, party, reward_text)
+                return
+            if result == "defeat":
+                party["status"] = "failed"
+                run["phase"] = "ended"
+                save_party_data()
+                await update_party_recruit_message(party)
+                await interaction.response.edit_message(
+                    embed=party_run_summary_embed(party, victory=False, reason="파티 전원이 쓰러졌다."),
+                    view=None,
+                )
+                return
+            save_party_data()
+            await interaction.response.edit_message(embed=build_party_battle_embed(party), view=PartyBattleView(self.party_id))
+
+
+class PartyEventView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        run = party.get("run") or {}
+        event = get_party_event_by_id(run.get("event_id"))
+        for index, choice in enumerate(event.get("choices", [])[:4]):
+            button = discord.ui.Button(
+                label=choice.get("label", f"선택 {index + 1}"),
+                emoji=choice.get("emoji"),
+                style=discord.ButtonStyle.primary if index == 0 else discord.ButtonStyle.secondary,
+                custom_id=f"party_event_{index}:{self.party_id}",
+            )
+            button.callback = self.make_vote_callback(index)
+            self.add_item(button)
+
+        force = discord.ui.Button(
+            label="현재 투표로 결정",
+            emoji="🗳️",
+            style=discord.ButtonStyle.success,
+            custom_id=f"party_event_force:{self.party_id}",
+        )
+        force.callback = self.force_callback
+        self.add_item(force)
+
+    def make_vote_callback(self, index):
+        async def callback(interaction):
+            await self.vote(interaction, index)
+        return callback
+
+    async def vote(self, interaction, index):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            uid = str(interaction.user.id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "event" or uid not in party_human_members(party):
+                await interaction.response.send_message("❌ 이 이벤트에 투표할 수 없어.", ephemeral=True)
+                return
+            event = get_party_event_by_id(run.get("event_id"))
+            if index < 0 or index >= len(event.get("choices", [])):
+                await interaction.response.send_message("❌ 존재하지 않는 선택지야.", ephemeral=True)
+                return
+            run.setdefault("event_votes", {})[uid] = index
+            if len(run.get("event_votes", {})) < len(party_human_members(party)):
+                save_party_data()
+                await interaction.response.edit_message(embed=build_party_event_embed(party), view=PartyEventView(self.party_id))
+                return
+            await self.resolve_votes(interaction, party)
+
+    async def force_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 현재 투표로 결정할 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "event":
+                await interaction.response.send_message("❌ 이벤트 진행 중이 아니야.", ephemeral=True)
+                return
+            if not run.get("event_votes"):
+                await interaction.response.send_message("❌ 아직 아무도 투표하지 않았어.", ephemeral=True)
+                return
+            await self.resolve_votes(interaction, party)
+
+    async def resolve_votes(self, interaction, party):
+        run = party.get("run") or {}
+        event = get_party_event_by_id(run.get("event_id"))
+        votes = run.get("event_votes", {})
+        counts = {}
+        for index in votes.values():
+            counts[int(index)] = counts.get(int(index), 0) + 1
+        best_count = max(counts.values())
+        candidates = [index for index, count in counts.items() if count == best_count]
+        leader_vote = votes.get(str(party.get("leader_id")))
+        if leader_vote in candidates:
+            selected_index = int(leader_vote)
+        else:
+            selected_index = min(candidates)
+        choice = event.get("choices", [])[selected_index]
+        outcome, text = resolve_party_event_outcome(party, choice)
+        save_party_data()
+        if outcome == "battle":
+            await interaction.response.edit_message(embed=build_party_battle_embed(party), view=PartyBattleView(self.party_id))
+        elif outcome == "merchant":
+            await interaction.response.edit_message(embed=build_party_merchant_embed(party), view=PartyMerchantView(self.party_id))
+        else:
+            await party_complete_turn(interaction, party, f"🎭 **{choice.get('label')}** 선택 결과\n{text}")
+
+
+class PartyMerchantSelect(discord.ui.Select):
+    def __init__(self, party_id):
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        offers = (party.get("run") or {}).get("merchant_offers", [])
+        options = []
+        for offer in offers[:25]:
+            catalog = WEAPONS if offer.get("kind") == "weapon" else ARMORS
+            bonus = int(catalog.get(offer.get("name"), {}).get("bonus", 0))
+            options.append(
+                discord.SelectOption(
+                    label=offer.get("name")[:100],
+                    value=offer.get("id"),
+                    emoji="🗡️" if offer.get("kind") == "weapon" else "🛡️",
+                    description=f"보너스 +{bonus} · {int(offer.get('price', 0)):,}모라"[:100],
+                )
+            )
+        if not options:
+            options = [discord.SelectOption(label="판매 장비 없음", value="none")]
+        super().__init__(
+            placeholder="구매할 장비 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+            custom_id=f"party_merchant_select:{self.party_id}",
+            disabled=(offers == []),
+        )
+
+    async def callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            uid = str(interaction.user.id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "merchant" or uid not in party_human_members(party):
+                await interaction.response.send_message("❌ 지금 상점을 이용할 수 없어.", ephemeral=True)
+                return
+            player = party_get_player(party, uid)
+            if not player or not player.get("alive"):
+                await interaction.response.send_message("💀 관전 중에는 장비를 살 수 없어.", ephemeral=True)
+                return
+            offer_id = self.values[0]
+            offer = next((item for item in run.get("merchant_offers", []) if item.get("id") == offer_id), None)
+            if not offer:
+                await interaction.response.send_message("❌ 이미 팔렸거나 존재하지 않는 장비야.", ephemeral=True)
+                return
+            price = int(offer.get("price", 0))
+            if int(run.get("coins", 0)) < price:
+                await interaction.response.send_message(
+                    f"❌ 공용 모라가 부족해. 필요 **{price:,}**, 보유 **{int(run.get('coins', 0)):,}**",
+                    ephemeral=True,
+                )
+                return
+            run["coins"] = int(run.get("coins", 0)) - price
+            give_party_equipment_to_player(player, offer)
+            run["merchant_offers"] = [item for item in run.get("merchant_offers", []) if item.get("id") != offer_id]
+            save_party_data()
+            await interaction.response.edit_message(embed=build_party_merchant_embed(party), view=PartyMerchantView(self.party_id))
+
+
+class PartyMerchantView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        self.add_item(PartyMerchantSelect(self.party_id))
+        continue_button = discord.ui.Button(
+            label="상인을 떠난다",
+            emoji="➡️",
+            style=discord.ButtonStyle.success,
+            custom_id=f"party_merchant_continue:{self.party_id}",
+        )
+        continue_button.callback = self.continue_callback
+        self.add_item(continue_button)
+
+    async def continue_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 상인을 떠날 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "merchant":
+                await interaction.response.send_message("❌ 지금은 상인과 거래 중이 아니야.", ephemeral=True)
+                return
+            await party_complete_turn(interaction, party, "🛒 상인과의 거래를 마쳤다.")
+
+
+class PartyCampView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.party_id = str(party_id)
+        buttons = [
+            ("휴식 투표", "😴", discord.ButtonStyle.success, self.rest_callback, "rest"),
+            ("요리하기", "🍳", discord.ButtonStyle.primary, self.cook_callback, "cook"),
+            ("장비 변경", "🎒", discord.ButtonStyle.secondary, self.equipment_callback, "equipment"),
+            ("공용 보관함", "📦", discord.ButtonStyle.secondary, self.storage_callback, "storage"),
+            ("캠프 떠나기", "➡️", discord.ButtonStyle.danger, self.continue_callback, "continue"),
+        ]
+        for label, emoji, style, callback, key in buttons:
+            button = discord.ui.Button(
+                label=label,
+                emoji=emoji,
+                style=style,
+                custom_id=f"party_camp_{key}:{self.party_id}",
+            )
+            button.callback = callback
+            self.add_item(button)
+
+    async def rest_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            uid = str(interaction.user.id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "camp" or uid not in party_human_members(party):
+                await interaction.response.send_message("❌ 지금 휴식 투표를 할 수 없어.", ephemeral=True)
+                return
+            if run.get("camp_locked", {}).get(uid):
+                await interaction.response.send_message(
+                    "❌ 이번 캠프에서 요리하거나 장비를 보관함에 올려서 바로 휴식할 수 없어.",
+                    ephemeral=True,
+                )
+                return
+            remaining = PARTY_REST_COOLDOWN_TURNS - (int(run.get("turn", 0)) - int(run.get("last_rest_turn", -999)))
+            if remaining > 0:
+                await interaction.response.send_message(f"❌ 휴식 쿨타임이 **{remaining}턴** 남았어.", ephemeral=True)
+                return
+            votes = run.setdefault("rest_votes", [])
+            if uid in votes:
+                await interaction.response.send_message("❌ 이미 휴식에 투표했어.", ephemeral=True)
+                return
+            votes.append(uid)
+            needed = max(1, math.ceil(len(party_human_members(party)) / 2))
+            notice = f"😴 <@{uid}> 휴식 투표 · {len(votes)}/{needed}"
+            if len(votes) >= needed:
+                for player in run.get("players", {}).values():
+                    player["alive"] = True
+                    player["lives"] = 1
+                    refresh_party_player_max_hp(player, run, keep_ratio=False)
+                    player["hp"] = player["max_hp"]
+                run["last_rest_turn"] = int(run.get("turn", 0))
+                run["rest_votes"] = []
+                notice = "💤 파티 절반 이상이 휴식에 동의했다! 전원의 생명 1과 체력이 모두 회복됐다."
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_camp_embed(party, notice),
+                view=PartyCampView(self.party_id),
+            )
+
+    async def cook_callback(self, interaction):
+        party = get_party(self.party_id)
+        uid = str(interaction.user.id)
+        if not party or party.get("status") != "playing" or uid not in party_human_members(party):
+            await interaction.response.send_message("❌ 이 캠프에서 요리할 수 없어.", ephemeral=True)
+            return
+        run = party.get("run") or {}
+        if run.get("phase") != "camp":
+            await interaction.response.send_message("❌ 요리는 캠프에서만 할 수 있어.", ephemeral=True)
+            return
+        player = party_get_player(party, uid)
+        await interaction.response.send_message(
+            embed=build_party_cooking_embed(player),
+            view=PartyCookingView(self.party_id, uid),
+            ephemeral=True,
+        )
+
+    async def equipment_callback(self, interaction):
+        party = get_party(self.party_id)
+        uid = str(interaction.user.id)
+        if not party or party.get("status") != "playing" or uid not in party_human_members(party):
+            await interaction.response.send_message("❌ 이 캠프의 파티원이 아니야.", ephemeral=True)
+            return
+        if (party.get("run") or {}).get("phase") != "camp":
+            await interaction.response.send_message("❌ 장비 변경은 캠프에서만 가능해.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            embed=build_party_equipment_manage_embed(party_get_player(party, uid)),
+            view=PartyEquipmentView(self.party_id, uid),
+            ephemeral=True,
+        )
+
+    async def storage_callback(self, interaction):
+        party = get_party(self.party_id)
+        uid = str(interaction.user.id)
+        if not party or party.get("status") != "playing" or uid not in party_human_members(party):
+            await interaction.response.send_message("❌ 이 캠프의 파티원이 아니야.", ephemeral=True)
+            return
+        if (party.get("run") or {}).get("phase") != "camp":
+            await interaction.response.send_message("❌ 공용 보관함은 캠프에서만 이용할 수 있어.", ephemeral=True)
+            return
+        await interaction.response.send_message(
+            embed=build_party_storage_embed(party, uid),
+            view=PartyStorageView(self.party_id, uid),
+            ephemeral=True,
+        )
+
+    async def continue_callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 캠프를 떠날 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            if run.get("phase") != "camp":
+                await interaction.response.send_message("❌ 지금은 캠프가 아니야.", ephemeral=True)
+                return
+            if run.get("pending_route"):
+                routes = ADVENTURE_TERRAIN_ROUTES.get(run.get("terrain"), [])
+                if not routes:
+                    party["status"] = "completed"
+                    run["phase"] = "ended"
+                    save_party_data()
+                    await update_party_recruit_message(party)
+                    await interaction.response.edit_message(
+                        embed=party_run_summary_embed(party, victory=True, reason="마지막 보스를 격파하고 모험을 완주했다!"),
+                        view=None,
+                    )
+                    return
+                run["phase"] = "route"
+                save_party_data()
+                await interaction.response.edit_message(embed=build_party_route_embed(party), view=PartyRouteView(self.party_id))
+                return
+            run["phase"] = "explore"
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_explore_embed(party, result_text="🏕️ 캠프 정비를 마치고 다시 길을 나섰다."),
+                view=PartyExploreView(self.party_id),
+            )
+
+
+def build_party_cooking_embed(player):
+    materials = player.get("materials", {}) if player else {}
+    material_text = ", ".join(
+        f"{name} ×{amount}" for name, amount in materials.items() if int(amount) > 0
+    ) or "보유 재료 없음"
+    recipe_lines = []
+    for name, recipe in PARTY_RECIPES.items():
+        ingredient_text = ", ".join(f"{item} ×{amount}" for item, amount in recipe["ingredients"].items())
+        recipe_lines.append(f"**{name}** — {ingredient_text}\n└ {recipe['desc']}")
+    return discord.Embed(
+        title="🍳 캠프 요리",
+        description=(
+            f"보유 재료: {material_text}\n\n"
+            + "\n\n".join(recipe_lines)
+            + "\n\n요리에 성공하면 이번 캠프에서는 휴식 투표를 할 수 없어."
+        ),
+        color=discord.Color.orange(),
+    )
+
+
+class PartyCookingSelect(discord.ui.Select):
+    def __init__(self, party_id, uid):
+        self.party_id = str(party_id)
+        self.uid = str(uid)
+        options = [
+            discord.SelectOption(
+                label=name,
+                value=name,
+                emoji="🍲",
+                description=recipe["desc"][:100],
+            )
+            for name, recipe in PARTY_RECIPES.items()
+        ]
+        super().__init__(placeholder="만들 요리 선택", options=options, min_values=1, max_values=1)
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != self.uid:
+            await interaction.response.send_message("❌ 이 요리 창의 주인이 아니야.", ephemeral=True)
+            return
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            run = (party or {}).get("run") or {}
+            if not party or party.get("status") != "playing" or run.get("phase") != "camp":
+                await interaction.response.send_message("❌ 지금은 요리할 수 없어.", ephemeral=True)
+                return
+            player = party_get_player(party, self.uid)
+            recipe_name = self.values[0]
+            recipe = PARTY_RECIPES.get(recipe_name)
+            materials = player.setdefault("materials", {})
+            missing = [
+                f"{name} {amount - int(materials.get(name, 0))}개"
+                for name, amount in recipe["ingredients"].items()
+                if int(materials.get(name, 0)) < amount
+            ]
+            if missing:
+                await interaction.response.send_message("❌ 재료 부족: " + ", ".join(missing), ephemeral=True)
+                return
+            for name, amount in recipe["ingredients"].items():
+                materials[name] = int(materials.get(name, 0)) - amount
+                if materials[name] <= 0:
+                    materials.pop(name, None)
+
+            effect = recipe["effect"]
+            if effect == "heal":
+                for target in run.get("players", {}).values():
+                    if target.get("alive"):
+                        heal = max(1, int(target.get("max_hp", 1) * float(recipe["value"])))
+                        target["hp"] = min(int(target.get("max_hp", 1)), int(target.get("hp", 0)) + heal)
+            elif effect == "attack_battles":
+                run.setdefault("buffs", {})["attack_battles"] = max(
+                    int(run.get("buffs", {}).get("attack_battles", 0)), int(recipe["value"])
+                )
+            elif effect == "attack_strong":
+                run.setdefault("buffs", {})["attack_strong"] = max(
+                    int(run.get("buffs", {}).get("attack_strong", 0)), int(recipe["value"])
+                )
+            elif effect == "defense_battles":
+                run.setdefault("buffs", {})["defense_battles"] = max(
+                    int(run.get("buffs", {}).get("defense_battles", 0)), int(recipe["value"])
+                )
+            elif effect == "self_full_heal":
+                player["hp"] = int(player.get("max_hp", 1))
+
+            run.setdefault("camp_locked", {})[self.uid] = True
+            run["rest_votes"] = [uid for uid in run.get("rest_votes", []) if uid != self.uid]
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=discord.Embed(
+                    title="🍳 요리 완료",
+                    description=f"**{recipe_name}**을 만들었어.\n{recipe['desc']}\n\n이번 캠프에서는 휴식 투표를 할 수 없어.",
+                    color=discord.Color.orange(),
+                ),
+                view=None,
+            )
+
+
+class PartyCookingView(discord.ui.View):
+    def __init__(self, party_id, uid):
+        super().__init__(timeout=180)
+        self.add_item(PartyCookingSelect(party_id, uid))
+
+
+def build_party_equipment_manage_embed(player):
+    if not player:
+        return discord.Embed(title="장비 정보 없음")
+    weapons = ", ".join(player.get("bag_weapons", [])) or "없음"
+    armors = ", ".join(player.get("bag_armors", [])) or "없음"
+    return discord.Embed(
+        title=f"🎒 {player.get('name')} 장비 관리",
+        description=(
+            f"현재 무기: **{player.get('weapon')}**\n"
+            f"현재 방어구: **{player.get('armor')}**\n\n"
+            f"가방 무기: {weapons}\n"
+            f"가방 방어구: {armors}\n\n"
+            "장비를 바꾸면 기존 착용 장비는 가방으로 들어가."
+        ),
+        color=discord.Color.blue(),
+    )
+
+
+class PartyEquipSelect(discord.ui.Select):
+    def __init__(self, party_id, uid, kind):
+        self.party_id = str(party_id)
+        self.uid = str(uid)
+        self.kind = kind
+        party = get_party(self.party_id) or {}
+        player = party_get_player(party, self.uid) or {}
+        names = player.get("bag_weapons" if kind == "weapon" else "bag_armors", [])
+        catalog = WEAPONS if kind == "weapon" else ARMORS
+        options = []
+        for index, name in enumerate(names[:25]):
+            options.append(
+                discord.SelectOption(
+                    label=name[:100],
+                    value=str(index),
+                    emoji="🗡️" if kind == "weapon" else "🛡️",
+                    description=f"보너스 +{int(catalog.get(name, {}).get('bonus', 0))}"[:100],
+                )
+            )
+        if not options:
+            options = [discord.SelectOption(label="교체할 장비 없음", value="none")]
+        super().__init__(
+            placeholder="무기 변경" if kind == "weapon" else "방어구 변경",
+            options=options,
+            min_values=1,
+            max_values=1,
+            disabled=(names == []),
+        )
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != self.uid:
+            await interaction.response.send_message("❌ 이 장비 창의 주인이 아니야.", ephemeral=True)
+            return
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            run = (party or {}).get("run") or {}
+            if not party or run.get("phase") != "camp":
+                await interaction.response.send_message("❌ 캠프에서만 장비를 바꿀 수 있어.", ephemeral=True)
+                return
+            player = party_get_player(party, self.uid)
+            bag_key = "bag_weapons" if self.kind == "weapon" else "bag_armors"
+            equip_key = "weapon" if self.kind == "weapon" else "armor"
+            bag = player.setdefault(bag_key, [])
+            try:
+                index = int(self.values[0])
+                new_name = bag.pop(index)
+            except (ValueError, IndexError):
+                await interaction.response.send_message("❌ 장비가 없어.", ephemeral=True)
+                return
+            old_name = player.get(equip_key)
+            basic = PARTY_BASIC_WEAPON if self.kind == "weapon" else PARTY_BASIC_ARMOR
+            if old_name and old_name != basic:
+                bag.append(old_name)
+            player[equip_key] = new_name
+            refresh_party_player_max_hp(player, run, keep_ratio=True)
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_equipment_manage_embed(player),
+                view=PartyEquipmentView(self.party_id, self.uid),
+            )
+
+
+class PartyEquipmentView(discord.ui.View):
+    def __init__(self, party_id, uid):
+        super().__init__(timeout=180)
+        self.add_item(PartyEquipSelect(party_id, uid, "weapon"))
+        self.add_item(PartyEquipSelect(party_id, uid, "armor"))
+
+
+def build_party_storage_embed(party, uid):
+    run = party.get("run") or {}
+    player = party_get_player(party, uid) or {}
+    bag_items = [f"🗡️ {name}" for name in player.get("bag_weapons", [])] + [
+        f"🛡️ {name}" for name in player.get("bag_armors", [])
+    ]
+    storage_items = [
+        f"{'🗡️' if item.get('kind') == 'weapon' else '🛡️'} {item.get('name')}"
+        for item in run.get("shared_storage", [])
+    ]
+    return discord.Embed(
+        title="📦 캠프 공용 보관함",
+        description=(
+            "### 내 가방의 미착용 장비\n"
+            + ("\n".join(bag_items) if bag_items else "없음")
+            + "\n\n### 공용 보관함\n"
+            + ("\n".join(storage_items) if storage_items else "비어 있음")
+            + "\n\n착용 중인 장비는 올릴 수 없어. 장비를 올리면 이번 캠프에서 휴식할 수 없어."
+        ),
+        color=discord.Color.dark_gold(),
+    )
+
+
+class PartyStorageDepositSelect(discord.ui.Select):
+    def __init__(self, party_id, uid):
+        self.party_id = str(party_id)
+        self.uid = str(uid)
+        party = get_party(self.party_id) or {}
+        player = party_get_player(party, self.uid) or {}
+        items = []
+        for index, name in enumerate(player.get("bag_weapons", [])):
+            items.append((f"w:{index}", "weapon", name))
+        for index, name in enumerate(player.get("bag_armors", [])):
+            items.append((f"a:{index}", "armor", name))
+        options = [
+            discord.SelectOption(
+                label=name[:100],
+                value=value,
+                emoji="🗡️" if kind == "weapon" else "🛡️",
+            )
+            for value, kind, name in items[:25]
+        ]
+        if not options:
+            options = [discord.SelectOption(label="올릴 장비 없음", value="none")]
+        super().__init__(
+            placeholder="공용 보관함에 올릴 장비",
+            options=options,
+            min_values=1,
+            max_values=1,
+            disabled=(items == []),
+        )
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != self.uid:
+            await interaction.response.send_message("❌ 이 보관함 창의 주인이 아니야.", ephemeral=True)
+            return
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            run = (party or {}).get("run") or {}
+            if not party or run.get("phase") != "camp":
+                await interaction.response.send_message("❌ 캠프에서만 보관함을 이용할 수 있어.", ephemeral=True)
+                return
+            player = party_get_player(party, self.uid)
+            try:
+                prefix, index_text = self.values[0].split(":", 1)
+                index = int(index_text)
+            except (ValueError, AttributeError):
+                await interaction.response.send_message("❌ 올릴 장비가 없어.", ephemeral=True)
+                return
+            if prefix == "w":
+                bag = player.setdefault("bag_weapons", [])
+                kind = "weapon"
+            else:
+                bag = player.setdefault("bag_armors", [])
+                kind = "armor"
+            if index < 0 or index >= len(bag):
+                await interaction.response.send_message("❌ 장비가 이미 이동됐어.", ephemeral=True)
+                return
+            name = bag.pop(index)
+            run.setdefault("shared_storage", []).append({"kind": kind, "name": name, "from": self.uid})
+            run.setdefault("camp_locked", {})[self.uid] = True
+            run["rest_votes"] = [uid for uid in run.get("rest_votes", []) if uid != self.uid]
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_storage_embed(party, self.uid),
+                view=PartyStorageView(self.party_id, self.uid),
+            )
+
+
+class PartyStorageWithdrawSelect(discord.ui.Select):
+    def __init__(self, party_id, uid):
+        self.party_id = str(party_id)
+        self.uid = str(uid)
+        party = get_party(self.party_id) or {}
+        storage = (party.get("run") or {}).get("shared_storage", [])
+        options = [
+            discord.SelectOption(
+                label=item.get("name", "장비")[:100],
+                value=str(index),
+                emoji="🗡️" if item.get("kind") == "weapon" else "🛡️",
+            )
+            for index, item in enumerate(storage[:25])
+        ]
+        if not options:
+            options = [discord.SelectOption(label="가져올 장비 없음", value="none")]
+        super().__init__(
+            placeholder="공용 보관함에서 가져올 장비",
+            options=options,
+            min_values=1,
+            max_values=1,
+            disabled=(storage == []),
+        )
+
+    async def callback(self, interaction):
+        if str(interaction.user.id) != self.uid:
+            await interaction.response.send_message("❌ 이 보관함 창의 주인이 아니야.", ephemeral=True)
+            return
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            run = (party or {}).get("run") or {}
+            if not party or run.get("phase") != "camp":
+                await interaction.response.send_message("❌ 캠프에서만 보관함을 이용할 수 있어.", ephemeral=True)
+                return
+            try:
+                index = int(self.values[0])
+                item = run.setdefault("shared_storage", []).pop(index)
+            except (ValueError, IndexError):
+                await interaction.response.send_message("❌ 장비가 이미 이동됐어.", ephemeral=True)
+                return
+            player = party_get_player(party, self.uid)
+            give_party_equipment_to_player(player, item)
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_storage_embed(party, self.uid),
+                view=PartyStorageView(self.party_id, self.uid),
+            )
+
+
+class PartyStorageView(discord.ui.View):
+    def __init__(self, party_id, uid):
+        super().__init__(timeout=180)
+        self.add_item(PartyStorageDepositSelect(party_id, uid))
+        self.add_item(PartyStorageWithdrawSelect(party_id, uid))
+
+
+class PartyRouteSelect(discord.ui.Select):
+    def __init__(self, party_id):
+        self.party_id = str(party_id)
+        party = get_party(self.party_id) or {}
+        run = party.get("run") or {}
+        routes = ADVENTURE_TERRAIN_ROUTES.get(run.get("terrain"), [])
+        options = [
+            discord.SelectOption(
+                label=ADVENTURE_TERRAINS[key]["name"],
+                value=key,
+                emoji=ADVENTURE_TERRAINS[key]["emoji"],
+                description=ADVENTURE_TERRAINS[key]["description"][:100],
+            )
+            for key in routes[:25]
+            if key in ADVENTURE_TERRAINS
+        ]
+        if not options:
+            options = [discord.SelectOption(label="이어지는 지형 없음", value="none")]
+        super().__init__(
+            placeholder="다음 지형 선택",
+            options=options,
+            min_values=1,
+            max_values=1,
+            custom_id=f"party_route_select:{self.party_id}",
+            disabled=(routes == []),
+        )
+
+    async def callback(self, interaction):
+        async with get_party_lock(self.party_id):
+            party = get_party(self.party_id)
+            if not party or party.get("status") != "playing":
+                await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
+                return
+            if str(interaction.user.id) != str(party.get("leader_id")):
+                await interaction.response.send_message("❌ 파티장만 다음 지형을 선택할 수 있어.", ephemeral=True)
+                return
+            run = party.get("run") or {}
+            destination = self.values[0]
+            if destination not in ADVENTURE_TERRAIN_ROUTES.get(run.get("terrain"), []):
+                await interaction.response.send_message("❌ 이동할 수 없는 지형이야.", ephemeral=True)
+                return
+            run["terrain"] = destination
+            run["pending_route"] = False
+            run["phase"] = "explore"
+            save_party_data()
+            await interaction.response.edit_message(
+                embed=build_party_explore_embed(
+                    party,
+                    result_text=f"🗺️ 파티가 **{get_terrain_display(destination)}**에 진입했다.",
+                ),
+                view=PartyExploreView(self.party_id),
+            )
+
+
+class PartyRouteView(discord.ui.View):
+    def __init__(self, party_id):
+        super().__init__(timeout=None)
+        self.add_item(PartyRouteSelect(party_id))
+
+
+def restore_party_persistent_views():
+    for party_id, party in party_data.get("parties", {}).items():
+        if party.get("status") not in {"lobby", "playing"}:
+            continue
+        view_factories = [PartyRecruitView]
+        if party.get("status") == "lobby":
+            view_factories.append(PartyLobbyView)
+        else:
+            view_factories.extend([
+                PartyExploreView,
+                PartyBattleView,
+                PartyEventView,
+                PartyMerchantView,
+                PartyCampView,
+                PartyRouteView,
+            ])
+        for factory in view_factories:
+            key = (party_id, factory.__name__)
+            if key in party_registered_view_keys:
+                continue
+            try:
+                bot.add_view(factory(party_id))
+                party_registered_view_keys.add(key)
+            except Exception as error:
+                print(f"파티 persistent view 등록 실패 {party_id}/{factory.__name__}: {error}")
+
+
+@bot.tree.command(name="파티생성", description="최대 4명의 파티 모험을 만들고 모집 스레드를 생성한다", guild=GUILD)
+@app_commands.describe(
+    파티이름="모집 글에 표시할 파티 이름",
+    하드모드="파티장이 하드 모드를 해금했다면 모든 파티원에게 적용",
+)
+async def party_create_command(
+    interaction: discord.Interaction,
+    파티이름: str = None,
+    하드모드: bool = False,
+):
+    uid = str(interaction.user.id)
+    existing = find_user_party(uid)
+    if existing:
+        await interaction.response.send_message(
+            f"❌ 이미 **{existing.get('name')}** 파티에 들어가 있어. 먼저 `/나가기`를 사용해줘.",
+            ephemeral=True,
+        )
+        return
+    if 하드모드 and not is_adventure_hard_mode_unlocked(get_adventure(uid)):
+        await interaction.response.send_message(
+            "❌ 개인 모험에서 하드 모드를 해금한 파티장만 하드 파티를 만들 수 있어.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(ephemeral=True)
+    guild = interaction.guild
+    if not guild:
+        await interaction.followup.send("❌ 서버에서만 사용할 수 있어.", ephemeral=True)
+        return
+
+    recruit_channel = None
+    if PARTY_RECRUIT_CHANNEL_ID:
+        recruit_channel = guild.get_channel(PARTY_RECRUIT_CHANNEL_ID)
+    if recruit_channel is None:
+        if isinstance(interaction.channel, discord.Thread):
+            recruit_channel = interaction.channel.parent
+        else:
+            recruit_channel = interaction.channel
+    if not isinstance(recruit_channel, discord.TextChannel):
+        await interaction.followup.send(
+            "❌ 파티 모집 채널을 찾지 못했어. `PARTY_RECRUIT_CHANNEL_ID`에 일반 텍스트 채널 ID를 넣어줘.",
+            ephemeral=True,
+        )
+        return
+
+    party_id = next_party_id()
+    clean_name = (파티이름 or f"{interaction.user.display_name}의 원정대").strip()[:40]
+    if not clean_name:
+        clean_name = f"파티 {party_id}"
+    party = {
+        "id": party_id,
+        "name": clean_name,
+        "guild_id": guild.id,
+        "leader_id": uid,
+        "members": [uid],
+        "jobs": {uid: None},
+        "hard_mode": bool(하드모드),
+        "start_terrain": "grassland",
+        "status": "lobby",
+        "recruit_channel_id": recruit_channel.id,
+        "recruit_message_id": None,
+        "thread_id": None,
+        "lobby_message_id": None,
+        "created_at": datetime.now(KST).isoformat(),
+        "run": None,
+    }
+    party_data.setdefault("parties", {})[party_id] = party
+    save_party_data()
+
+    try:
+        recruit_message = await recruit_channel.send(
+            embed=build_party_recruit_embed(party),
+            view=PartyRecruitView(party_id),
+        )
+        thread_name = f"🧭-{clean_name}-{party_id}"[:100]
+        thread = await recruit_message.create_thread(name=thread_name, auto_archive_duration=1440)
+        party["recruit_message_id"] = recruit_message.id
+        party["thread_id"] = thread.id
+        try:
+            await thread.add_user(interaction.user)
+        except (discord.Forbidden, discord.HTTPException):
+            pass
+        lobby_message = await thread.send(
+            content=f"{interaction.user.mention} 파티장이 생성한 파티 모험 스레드야!",
+            embed=build_party_lobby_embed(party),
+            view=PartyLobbyView(party_id),
+        )
+        party["lobby_message_id"] = lobby_message.id
+        save_party_data()
+        await recruit_message.edit(embed=build_party_recruit_embed(party), view=PartyRecruitView(party_id))
+        restore_party_persistent_views()
+        await interaction.followup.send(
+            f"✅ 파티를 만들었어! 모집 글: {recruit_message.jump_url}\n파티 스레드: {thread.mention}",
+            ephemeral=True,
+        )
+    except discord.Forbidden:
+        party_data.get("parties", {}).pop(party_id, None)
+        save_party_data()
+        await interaction.followup.send(
+            "❌ 봇에게 `메시지 보내기`, `공개 스레드 만들기`, `스레드에서 메시지 보내기`, `스레드 관리` 권한이 필요해.",
+            ephemeral=True,
+        )
+    except discord.HTTPException as error:
+        party_data.get("parties", {}).pop(party_id, None)
+        save_party_data()
+        await interaction.followup.send(f"❌ 파티를 만드는 중 오류가 났어: `{error}`", ephemeral=True)
+
+
+@bot.tree.command(name="나가기", description="현재 참가 중인 파티에서 나간다", guild=GUILD)
+async def party_leave_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    party = find_user_party(uid)
+    if not party:
+        await interaction.response.send_message("❌ 참가 중인 파티가 없어.", ephemeral=True)
+        return
+
+    party_id = party.get("id")
+    async with get_party_lock(party_id):
+        party = get_party(party_id)
+        if not party or uid not in party_human_members(party):
+            await interaction.response.send_message("❌ 참가 중인 파티가 없어.", ephemeral=True)
+            return
+
+        status = party.get("status")
+        party["members"] = [member_uid for member_uid in party_human_members(party) if member_uid != uid]
+        party.setdefault("jobs", {}).pop(uid, None)
+
+        if status == "playing":
+            run = party.get("run") or {}
+            player = run.get("players", {}).get(uid)
+            if player:
+                player["is_bot"] = True
+                player["user_id"] = None
+                player["name"] = f"대체 용병 ({player.get('job', '전사')})"
+
+        if not party_human_members(party):
+            party["status"] = "abandoned"
+            if party.get("run"):
+                party["run"]["phase"] = "ended"
+        elif uid == str(party.get("leader_id")):
+            party["leader_id"] = party_human_members(party)[0]
+
+        save_party_data()
+        thread = get_party_thread(party)
+        if thread:
+            try:
+                await thread.remove_user(interaction.user)
+            except (discord.Forbidden, discord.HTTPException):
+                pass
+        await interaction.response.send_message(f"✅ **{party.get('name')}** 파티에서 나갔어.", ephemeral=True)
+        await update_party_recruit_message(party)
+        if party.get("status") == "lobby":
+            await update_party_lobby_message(party)
+        elif party.get("status") == "abandoned" and thread:
+            try:
+                await thread.send("🔒 유저 파티원이 모두 나가 파티 모험이 종료됐어.")
+            except discord.HTTPException:
+                pass
+
+
+@bot.tree.command(name="파티상태", description="현재 참가 중인 파티 상태를 확인한다", guild=GUILD)
+async def party_status_command(interaction: discord.Interaction):
+    party = find_user_party(interaction.user.id)
+    if not party:
+        await interaction.response.send_message("❌ 참가 중인 파티가 없어.", ephemeral=True)
+        return
+    if party.get("status") == "lobby":
+        embed = build_party_lobby_embed(party)
+    else:
+        phase = (party.get("run") or {}).get("phase")
+        if phase == "battle":
+            embed = build_party_battle_embed(party)
+        elif phase == "camp":
+            embed = build_party_camp_embed(party)
+        elif phase == "merchant":
+            embed = build_party_merchant_embed(party)
+        elif phase == "event":
+            embed = build_party_event_embed(party)
+        elif phase == "route":
+            embed = build_party_route_embed(party)
+        else:
+            embed = build_party_explore_embed(party)
+    thread = get_party_thread(party)
+    content = thread.mention if thread else None
+    await interaction.response.send_message(content=content, embed=embed, ephemeral=True)
+
+
 
 @bot.event
 async def on_ready():
+    restore_party_persistent_views()
+
     for uid in list(warehouses.keys()):
         apply_warehouse_daily_tax(uid)
     if not ranking_update_loop.is_running():
