@@ -14733,6 +14733,7 @@ PARTY_TOTAL_SLOTS = 4
 PARTY_CAMP_INTERVAL = 5
 PARTY_REST_COOLDOWN_TURNS = 10
 PARTY_BOSS_INTERVAL = 10
+PARTY_BALANCE_VERSION = 2
 
 PARTY_JOB_INFO = {
     "전사": {
@@ -15723,21 +15724,35 @@ def create_party_monster(party, elite=False, boss=False, forced_name=None):
     terrain = ADVENTURE_TERRAINS.get(terrain_key, ADVENTURE_TERRAINS["grassland"])
     depth = ADVENTURE_TERRAIN_DEPTH.get(terrain_key, 1)
     turn = max(1, int(run.get("turn", 1)))
-    player_count = max(1, len(run.get("players", {})))
 
-    # 요청한 규칙: 전투에 참가하는 파티원 1명마다 몬스터 강함 +25%.
-    member_scale = 1.0 + 0.25 * player_count
-    hard_scale = 1.55 if party.get("hard_mode") else 1.0
-    elite_scale = 1.35 if elite else 1.0
-    boss_scale = 1.85 if boss else 1.0
+    # 첫 유저는 기준 배율 ×1.00이고, 추가로 참가한 유저 1명마다 +25%.
+    # 빈자리를 채운 NPC는 전력 보조용이므로 1명당 +10%만 반영한다.
+    human_count = max(1, len(party_human_members(party)))
+    npc_count = max(0, len(run.get("players", {})) - human_count)
+    member_scale = 1.0 + 0.25 * max(0, human_count - 1) + 0.10 * npc_count
+
+    # 체력은 파티 규모의 영향을 그대로 받지만 공격력은 완만하게 증가한다.
+    # 초반 1~5턴에는 공격력 보호 보정을 적용해 시작부터 즉사하지 않도록 한다.
+    attack_member_scale = 1.0 + (member_scale - 1.0) * 0.55
+    early_attack_scale = min(1.0, 0.72 + max(0, turn - 1) * 0.07)
+
+    hard_hp_scale = 1.40 if party.get("hard_mode") else 1.0
+    hard_attack_scale = 1.22 if party.get("hard_mode") else 1.0
+    elite_hp_scale = 1.30 if elite else 1.0
+    elite_attack_scale = 1.18 if elite else 1.0
+    boss_hp_scale = 1.70 if boss else 1.0
+    boss_attack_scale = 1.35 if boss else 1.0
     terrain_scale = max(0.8, float(terrain.get("danger_mul", 1.0)))
 
     average_level = party_average_level(run)
-    target_level = max(1, int(round(average_level + turn * 0.8 + depth * 2.5)))
+    target_level = max(
+        1,
+        int(round(average_level + max(0, turn - 1) * 0.55 + max(0, depth - 1) * 2.2)),
+    )
     if elite:
-        target_level += 4
+        target_level += 3
     if boss:
-        target_level += 8
+        target_level += 6
 
     if forced_name:
         name = forced_name
@@ -15752,11 +15767,20 @@ def create_party_monster(party, elite=False, boss=False, forced_name=None):
             candidates = [name for name in candidates if name != terrain.get("boss")]
         name = random.choice(candidates or [terrain.get("boss", "슬라임")])
 
-    base_hp = 90 + target_level * 20 + turn * 14
-    base_attack = 7 + target_level * 2.1 + turn * 1.15
-    scale = member_scale * hard_scale * elite_scale * boss_scale * terrain_scale
-    max_hp = max(60, int(round(base_hp * scale)))
-    attack = max(4, int(round(base_attack * scale)))
+    base_hp = 65 + target_level * 13 + max(0, turn - 1) * 9
+    base_attack = 4 + target_level * 1.0 + max(0, turn - 1) * 0.55
+
+    hp_scale = member_scale * hard_hp_scale * elite_hp_scale * boss_hp_scale * terrain_scale
+    attack_scale = (
+        attack_member_scale
+        * hard_attack_scale
+        * elite_attack_scale
+        * boss_attack_scale
+        * terrain_scale
+        * early_attack_scale
+    )
+    max_hp = max(55, int(round(base_hp * hp_scale)))
+    attack = max(4, int(round(base_attack * attack_scale)))
 
     return {
         "name": name,
@@ -15765,6 +15789,9 @@ def create_party_monster(party, elite=False, boss=False, forced_name=None):
         "max_hp": max_hp,
         "attack": attack,
         "member_scale": member_scale,
+        "human_count": human_count,
+        "npc_count": npc_count,
+        "balance_version": PARTY_BALANCE_VERSION,
         "is_elite": bool(elite),
         "is_boss": bool(boss),
         "attack_debuff": 0.0,
@@ -15969,11 +15996,15 @@ def resolve_party_battle_round(party):
     if not living:
         return "defeat", logs
 
+    # 일반 몬스터는 파티 인원이 많아도 기본 1회만 공격한다.
+    # 정예는 최대 2회, 보스는 2회(하드 보스는 최대 3회) 공격한다.
     attack_count = 1
-    if len(living) >= 3:
+    if monster.get("is_elite") and len(living) >= 3:
         attack_count = 2
-    if monster.get("is_boss") and len(living) >= 2:
-        attack_count += 1
+    if monster.get("is_boss"):
+        attack_count = 2
+        if party.get("hard_mode") and len(living) >= 3:
+            attack_count = 3
 
     for _ in range(attack_count):
         target = party_random_living_player(run)
@@ -17568,6 +17599,35 @@ class PartyRouteView(discord.ui.View):
         self.add_item(PartyRouteSelect(party_id))
 
 
+def migrate_party_battle_balance():
+    """이전 버전에서 생성된 과도하게 강한 진행 중 몬스터를 새 밸런스로 교체한다."""
+    changed = False
+    for party in party_data.get("parties", {}).values():
+        if party.get("status") != "playing":
+            continue
+        run = party.get("run") or {}
+        battle = run.get("battle") or {}
+        old_monster = battle.get("monster") or {}
+        if not old_monster or int(old_monster.get("balance_version", 0)) >= PARTY_BALANCE_VERSION:
+            continue
+
+        old_max_hp = max(1, int(old_monster.get("max_hp", 1)))
+        hp_ratio = max(0.0, min(1.0, int(old_monster.get("hp", old_max_hp)) / old_max_hp))
+        refreshed = create_party_monster(
+            party,
+            elite=bool(old_monster.get("is_elite")),
+            boss=bool(old_monster.get("is_boss")),
+            forced_name=old_monster.get("name"),
+        )
+        refreshed["hp"] = max(1, int(round(refreshed["max_hp"] * hp_ratio)))
+        battle["monster"] = refreshed
+        changed = True
+
+    if changed:
+        save_party_data()
+        print("파티 모험 밸런스 v2: 진행 중 몬스터 능력치를 새 기준으로 조정함")
+
+
 def restore_party_persistent_views():
     for party_id, party in party_data.get("parties", {}).items():
         if party.get("status") not in {"lobby", "playing"}:
@@ -17786,6 +17846,7 @@ async def party_status_command(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
+    migrate_party_battle_balance()
     restore_party_persistent_views()
 
     for uid in list(warehouses.keys()):
