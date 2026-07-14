@@ -14733,7 +14733,64 @@ PARTY_TOTAL_SLOTS = 4
 PARTY_CAMP_INTERVAL = 5
 PARTY_REST_COOLDOWN_TURNS = 10
 PARTY_BOSS_INTERVAL = 10
-PARTY_BALANCE_VERSION = 2
+PARTY_BALANCE_VERSION = 3
+PARTY_EXPLORE_WAIT_MIN = 2
+PARTY_EXPLORE_WAIT_MAX = 5
+PARTY_BATTLE_SAFE_TURNS = 1
+
+# 파티 모험에서만 사용되는 판별 유물. 획득 즉시 파티 전체에 적용되고 한 판이 끝나면 사라진다.
+PARTY_RELICS = {
+    "전쟁의 깃발": {
+        "emoji": "🚩",
+        "desc": "파티 전체 공격력 +6%",
+        "bonus": {"attack_pct": 0.06},
+    },
+    "수호자의 심장": {
+        "emoji": "💚",
+        "desc": "파티 전체 최대 체력 +8%",
+        "bonus": {"hp_pct": 0.08},
+    },
+    "강철 파편": {
+        "emoji": "🔩",
+        "desc": "파티 전체 방어력 +5%p",
+        "bonus": {"defense_flat": 5.0},
+    },
+    "붉은 송곳니": {
+        "emoji": "🦷",
+        "desc": "파티 전체 치명타 확률 +5%p",
+        "bonus": {"crit_flat": 0.05},
+    },
+    "바람의 깃털": {
+        "emoji": "🪶",
+        "desc": "파티 전체 회피 확률 +4%p",
+        "bonus": {"dodge_flat": 0.04},
+    },
+    "은빛 나침반": {
+        "emoji": "🧭",
+        "desc": "전투에서 얻는 공용 모라 +12%",
+        "bonus": {"reward_pct": 0.12},
+    },
+    "행운의 토끼발": {
+        "emoji": "🐇",
+        "desc": "장비 발견 확률 +7%p",
+        "bonus": {"equipment_rate": 0.07},
+    },
+    "낡은 상인 장부": {
+        "emoji": "📒",
+        "desc": "상인 장비 가격 12% 할인",
+        "bonus": {"merchant_discount": 0.12},
+    },
+    "잔불 부적": {
+        "emoji": "🔥",
+        "desc": "전투 승리 후 생존자 체력 5% 회복",
+        "bonus": {"after_battle_heal": 0.05},
+    },
+    "풍요의 주머니": {
+        "emoji": "🎒",
+        "desc": "탐험 중 재료를 발견하면 획득량 +1묶음",
+        "bonus": {"material_bonus": 1},
+    },
+}
 
 PARTY_JOB_INFO = {
     "전사": {
@@ -15277,6 +15334,13 @@ def party_player_stats(player, run=None):
         if int(buffs.get("attack_strong", 0)) > 0:
             attack *= 1.30
 
+        relic_bonuses = get_party_relic_bonuses(run)
+        attack *= 1.0 + float(relic_bonuses.get("attack_pct", 0.0))
+        max_hp *= 1.0 + float(relic_bonuses.get("hp_pct", 0.0))
+        defense += float(relic_bonuses.get("defense_flat", 0.0))
+        crit += float(relic_bonuses.get("crit_flat", 0.0))
+        dodge += float(relic_bonuses.get("dodge_flat", 0.0))
+
     return {
         "attack": max(1, int(round(attack))),
         "max_hp": max(1, int(round(max_hp))),
@@ -15325,13 +15389,24 @@ def build_party_explore_embed(party, result_text=None):
     )
     if result_text:
         description += f"{result_text}\n\n"
-    description += "## 파티 상태\n" + "\n".join(build_party_status_lines(party))
+
+    relics = run.get("relics", [])
+    relic_text = ", ".join(
+        f"{PARTY_RELICS.get(name, {}).get('emoji', '✨')} {name}" for name in relics
+    ) or "아직 발견한 유물 없음"
+    battle_rate = get_party_battle_spawn_rate(party) * 100
+    safe_text = " · 전투 직후 안전 구간" if int(run.get("battle_safe_turns", 0)) > 0 else ""
+    description += (
+        f"## 이번 판 유물\n{relic_text}\n\n"
+        f"다음 탐험 몬스터 조우 확률: **{battle_rate:.0f}%**{safe_text}\n\n"
+        "## 파티 상태\n" + "\n".join(build_party_status_lines(party))
+    )
     embed = discord.Embed(
         title=f"🧭 파티 모험 · {party.get('name')}",
         description=description,
         color=int(info.get("color", 0x5865F2)),
     )
-    embed.set_footer(text="파티장이 다음 턴을 진행하면 전투·상인·지형 이벤트 중 하나가 발생해.")
+    embed.set_footer(text="탐험에는 2~5초가 걸리며 전투·유물·장비·재료·상인·지형 이벤트가 무작위로 발생해.")
     return embed
 
 
@@ -15514,6 +15589,70 @@ def get_party_event_by_id(event_id):
     }
 
 
+def get_party_relic_bonuses(run):
+    bonuses = {
+        "attack_pct": 0.0,
+        "hp_pct": 0.0,
+        "defense_flat": 0.0,
+        "crit_flat": 0.0,
+        "dodge_flat": 0.0,
+        "reward_pct": 0.0,
+        "equipment_rate": 0.0,
+        "merchant_discount": 0.0,
+        "after_battle_heal": 0.0,
+        "material_bonus": 0,
+    }
+    for relic_name in run.get("relics", []):
+        relic = PARTY_RELICS.get(relic_name, {})
+        for key, value in relic.get("bonus", {}).items():
+            bonuses[key] = bonuses.get(key, 0) + value
+    return bonuses
+
+
+def roll_party_relic(run):
+    owned = set(run.get("relics", []))
+    candidates = [name for name in PARTY_RELICS if name not in owned]
+    if not candidates:
+        return None
+    relic_name = random.choice(candidates)
+    run.setdefault("relics", []).append(relic_name)
+
+    # 최대 체력 유물은 현재 체력 비율을 유지한 채 즉시 반영한다.
+    if relic_name == "수호자의 심장":
+        for player in run.get("players", {}).values():
+            refresh_party_player_max_hp(player, run, keep_ratio=True)
+    return relic_name
+
+
+def format_party_relic(relic_name):
+    relic = PARTY_RELICS.get(relic_name, {})
+    return f"{relic.get('emoji', '✨')} **{relic_name}** — {relic.get('desc', '알 수 없는 힘')}"
+
+
+def get_party_battle_spawn_rate(party):
+    run = party.get("run") or {}
+    if int(run.get("battle_safe_turns", 0)) > 0:
+        return 0.0
+    base = 0.27 if not party.get("hard_mode") else 0.32
+    pity = min(0.24, int(run.get("turns_without_battle", 0)) * 0.07)
+    return min(0.60, base + pity)
+
+
+def build_party_travel_embed(party, wait_seconds):
+    run = party.get("run") or {}
+    terrain = run.get("terrain", party.get("start_terrain", "grassland"))
+    return discord.Embed(
+        title="🚶 파티가 탐험 중이야...",
+        description=(
+            f"현재 지형: **{get_terrain_display(terrain)}**\n"
+            f"예상 탐험 시간: **{wait_seconds}초**\n\n"
+            "주변을 살피며 천천히 이동하고 있어.\n"
+            "몬스터뿐 아니라 유물·장비·재료·상인·지형 사건을 만날 수 있어."
+        ),
+        color=discord.Color.blurple(),
+    )
+
+
 def get_party_equipment_depth_allowed(name, depth):
     required = PARTY_SPECIAL_EQUIPMENT_DEPTH.get(name)
     if required is None:
@@ -15610,7 +15749,9 @@ def generate_party_merchant_offers(run):
         used.add(key)
         catalog = WEAPONS if equipment["kind"] == "weapon" else ARMORS
         bonus = int(catalog[equipment["name"]].get("bonus", 0))
-        price = max(120, int(120 + bonus * 16 + int(run.get("turn", 1)) * 28))
+        base_price = max(120, int(120 + bonus * 16 + int(run.get("turn", 1)) * 28))
+        discount = min(0.50, float(get_party_relic_bonuses(run).get("merchant_discount", 0.0)))
+        price = max(80, int(round(base_price * (1.0 - discount))))
         offers.append({
             "id": f"offer_{len(offers)}",
             "kind": equipment["kind"],
@@ -15709,6 +15850,10 @@ def initialize_party_run(party):
         "kills": 0,
         "boss_kills": 0,
         "equipment_found": 0,
+        "relics": [],
+        "turns_without_battle": 0,
+        "battle_safe_turns": 0,
+        "last_result": None,
         "started_at": datetime.now(KST).isoformat(),
     }
 
@@ -16053,6 +16198,8 @@ def reward_party_battle(party):
         reward = int(reward * 1.45)
     if party.get("hard_mode"):
         reward = int(reward * 1.4)
+    relic_bonuses = get_party_relic_bonuses(run)
+    reward = int(round(reward * (1.0 + float(relic_bonuses.get("reward_pct", 0.0)))))
     run["coins"] = int(run.get("coins", 0)) + reward
     run["kills"] = int(run.get("kills", 0)) + 1
     if monster.get("is_boss"):
@@ -16073,6 +16220,7 @@ def reward_party_battle(party):
         rate = 1.0
     if party.get("hard_mode"):
         rate *= 1.25
+    rate += float(relic_bonuses.get("equipment_rate", 0.0))
     if living and random.random() < min(1.0, rate):
         equipment = roll_party_equipment(
             run,
@@ -16088,7 +16236,7 @@ def reward_party_battle(party):
                 f"**{receiver.get('name')}** 장비 획득: **{equipment.get('name')}**"
             )
 
-    # 사제 생존 시 전투 종료 후 소량 회복.
+    # 사제와 유물의 전투 후 회복.
     priests = [player for player in living if player.get("job") == "사제"]
     priest_text = ""
     if priests:
@@ -16097,11 +16245,20 @@ def reward_party_battle(party):
             player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
         priest_text = "\n✨ 사제의 전투 후 기도로 생존자들이 최대 체력의 6%를 회복했다."
 
+    relic_heal_text = ""
+    relic_heal_rate = float(relic_bonuses.get("after_battle_heal", 0.0))
+    if living and relic_heal_rate > 0:
+        for player in living:
+            heal = max(1, int(player.get("max_hp", 1) * relic_heal_rate))
+            player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+        relic_heal_text = f"\n🔥 잔불 부적이 생존자들의 체력을 {relic_heal_rate * 100:.0f}% 회복했다."
+
     return (
         f"🏆 **{monster.get('name')}** 격파! 공용 모라 **+{reward:,}**"
         + material_text
         + equipment_text
         + priest_text
+        + relic_heal_text
     )
 
 
@@ -16136,6 +16293,7 @@ def party_run_summary_embed(party, victory=False, reason=None):
         f"처치 수: **{int(run.get('kills', 0))}마리**\n"
         f"보스 처치: **{int(run.get('boss_kills', 0))}마리**\n"
         f"발견 장비: **{int(run.get('equipment_found', 0))}개**\n"
+        f"발견 유물: **{len(run.get('relics', []))}개**\n"
         f"남은 공용 모라: **{int(run.get('coins', 0)):,}모라**"
     )
     if reason:
@@ -16197,6 +16355,16 @@ async def party_edit_interaction(interaction, embed, view=None, content=None):
 
 async def party_complete_turn(interaction, party, result_text=None):
     run = party.get("run") or {}
+    completed_battle = bool(run.get("battle"))
+    if completed_battle:
+        run["turns_without_battle"] = 0
+        run["battle_safe_turns"] = PARTY_BATTLE_SAFE_TURNS
+        run["last_result"] = "battle"
+    else:
+        run["turns_without_battle"] = int(run.get("turns_without_battle", 0)) + 1
+        run["battle_safe_turns"] = max(0, int(run.get("battle_safe_turns", 0)) - 1)
+        run["last_result"] = "non_battle"
+
     run["battle"] = None
     run["event_id"] = None
     run["event_votes"] = {}
@@ -16261,30 +16429,65 @@ async def party_complete_turn(interaction, party, result_text=None):
 
 async def start_party_encounter(interaction, party):
     run = party.get("run") or {}
+
+    # 이전 저장본도 새 탐험 흐름으로 안전하게 마이그레이션한다.
+    run.setdefault("relics", [])
+    run.setdefault("turns_without_battle", 0)
+    run.setdefault("battle_safe_turns", 0)
+    run.setdefault("last_result", None)
+
     run["turn"] = int(run.get("turn", 0)) + 1
     turn = int(run.get("turn", 1))
 
-    # 10턴마다 현재 지형 보스가 등장한다.
+    # 10턴마다 현재 지형 보스가 등장한다. 일반 조우 확률과는 별개다.
     if turn % PARTY_BOSS_INTERVAL == 0:
         run["pending_route"] = True
-        start_party_battle(party, boss=True, opening_log="👑 지형의 보스가 길을 막아섰다!")
+        start_party_battle(party, boss=True, opening_log="👑 긴 탐험 끝에 지형의 보스가 길을 막아섰다!")
         save_party_data()
         await party_edit_interaction(interaction, build_party_battle_embed(party), view=PartyBattleView(party.get("id")))
         return
 
-    roll = random.random()
-    battle_rate = 0.62 if party.get("hard_mode") else 0.54
-    event_rate = 0.24
-    merchant_rate = 0.16
+    battle_rate = get_party_battle_spawn_rate(party)
+    event_rate = 0.20
+    relic_rate = 0.16
+    equipment_rate = 0.12 + min(0.10, float(get_party_relic_bonuses(run).get("equipment_rate", 0.0)))
+    merchant_rate = 0.08
+    material_rate = 0.10
+    coin_rate = 0.06
+    recovery_rate = 0.05
+    quiet_rate = 0.03
 
-    if roll < battle_rate:
-        elite = random.random() < (0.25 if party.get("hard_mode") else 0.14)
+    outcomes = [
+        ("battle", battle_rate),
+        ("event", event_rate),
+        ("relic", relic_rate),
+        ("equipment", equipment_rate),
+        ("merchant", merchant_rate),
+        ("materials", material_rate),
+        ("coins", coin_rate),
+        ("recovery", recovery_rate),
+        ("quiet", quiet_rate),
+    ]
+    total = sum(weight for _, weight in outcomes if weight > 0)
+    roll = random.random() * total
+    selected = "quiet"
+    cursor = 0.0
+    for name, weight in outcomes:
+        if weight <= 0:
+            continue
+        cursor += weight
+        if roll <= cursor:
+            selected = name
+            break
+
+    if selected == "battle":
+        elite = random.random() < (0.22 if party.get("hard_mode") else 0.12)
         start_party_battle(party, elite=elite)
         save_party_data()
         await party_edit_interaction(interaction, build_party_battle_embed(party), view=PartyBattleView(party.get("id")))
         return
 
-    if roll < battle_rate + event_rate:
+    if selected == "event":
         events = PARTY_TERRAIN_EVENTS.get(run.get("terrain"), PARTY_TERRAIN_EVENTS["grassland"])
         event = random.choice(events)
         run["phase"] = "event"
@@ -16294,19 +16497,87 @@ async def start_party_encounter(interaction, party):
         await party_edit_interaction(interaction, build_party_event_embed(party), view=PartyEventView(party.get("id")))
         return
 
-    if roll < battle_rate + event_rate + merchant_rate:
+    if selected == "merchant":
         run["phase"] = "merchant"
         run["merchant_offers"] = generate_party_merchant_offers(run)
         save_party_data()
         await party_edit_interaction(interaction, build_party_merchant_embed(party), view=PartyMerchantView(party.get("id")))
         return
 
-    receiver = party_random_living_player(run)
-    gained_text = ""
-    if receiver:
-        gained = add_party_materials(receiver, count=1)
-        gained_text = f"\n🎒 **{receiver.get('name')}**이 {format_gained_materials(gained)}을 주웠다."
-    await party_complete_turn(interaction, party, "🌤️ 별다른 위협 없이 길을 통과했다." + gained_text)
+    if selected == "relic":
+        relic_name = roll_party_relic(run)
+        if relic_name:
+            await party_complete_turn(
+                interaction,
+                party,
+                "✨ 오래된 빛을 따라가 **파티 유물**을 발견했다!\n" + format_party_relic(relic_name),
+            )
+            return
+        selected = "equipment"
+
+    if selected == "equipment":
+        receiver = party_random_living_player(run)
+        equipment = roll_party_equipment(run, low_tier=(turn <= 5))
+        if receiver and equipment:
+            give_party_equipment_to_player(receiver, equipment)
+            run["equipment_found"] = int(run.get("equipment_found", 0)) + 1
+            icon = "🗡️" if equipment.get("kind") == "weapon" else "🛡️"
+            await party_complete_turn(
+                interaction,
+                party,
+                f"{icon} 길가의 상자에서 **{equipment.get('name')}**을 발견했다! "
+                f"**{receiver.get('name')}**의 가방에 넣었어. 캠프에서 착용할 수 있어.",
+            )
+            return
+        selected = "materials"
+
+    if selected == "materials":
+        receiver = party_random_living_player(run)
+        if receiver:
+            bonus_count = int(get_party_relic_bonuses(run).get("material_bonus", 0))
+            gained = add_party_materials(receiver, count=1 + bonus_count)
+            await party_complete_turn(
+                interaction,
+                party,
+                f"🌿 탐험 중 쓸 만한 재료를 발견했다.\n"
+                f"🎒 **{receiver.get('name')}** 획득: {format_gained_materials(gained)}",
+            )
+            return
+        selected = "quiet"
+
+    if selected == "coins":
+        depth = ADVENTURE_TERRAIN_DEPTH.get(run.get("terrain"), 1)
+        amount = random.randint(80, 160) + turn * 14 + depth * 35
+        run["coins"] = int(run.get("coins", 0)) + amount
+        await party_complete_turn(
+            interaction,
+            party,
+            f"🪙 버려진 짐에서 공용 모라 **{amount:,}**를 발견했다.",
+        )
+        return
+
+    if selected == "recovery":
+        living = [player for player in run.get("players", {}).values() if player.get("alive")]
+        for player in living:
+            heal = max(1, int(player.get("max_hp", 1) * 0.18))
+            player["hp"] = min(int(player.get("max_hp", 1)), int(player.get("hp", 0)) + heal)
+        await party_complete_turn(
+            interaction,
+            party,
+            "💧 잠시 쉴 만한 작은 샘을 발견해 생존자 전원이 최대 체력의 18%를 회복했다.",
+        )
+        return
+
+    await party_complete_turn(
+        interaction,
+        party,
+        random.choice([
+            "🌤️ 별다른 위협 없이 조용히 길을 통과했다.",
+            "👣 오래된 발자국을 따라갔지만 이미 흔적은 끊겨 있었다.",
+            "🌬️ 바람 소리만 들리는 평온한 구간을 지나갔다.",
+            "🔎 주변을 샅샅이 살폈지만 특별한 것은 발견하지 못했다.",
+        ]),
+    )
 
 
 def resolve_party_event_outcome(party, choice):
@@ -16715,8 +16986,8 @@ class PartyExploreView(discord.ui.View):
         super().__init__(timeout=None)
         self.party_id = str(party_id)
         button = discord.ui.Button(
-            label="다음 턴 진행",
-            emoji="➡️",
+            label="탐험 시작",
+            emoji="🥾",
             style=discord.ButtonStyle.primary,
             custom_id=f"party_next_turn:{self.party_id}",
         )
@@ -16730,12 +17001,19 @@ class PartyExploreView(discord.ui.View):
                 await interaction.response.send_message("❌ 진행 중인 파티가 아니야.", ephemeral=True)
                 return
             if str(interaction.user.id) != str(party.get("leader_id")):
-                await interaction.response.send_message("❌ 다음 턴은 파티장만 진행할 수 있어.", ephemeral=True)
+                await interaction.response.send_message("❌ 탐험 시작은 파티장만 할 수 있어.", ephemeral=True)
                 return
             run = party.get("run") or {}
             if run.get("phase") != "explore":
-                await interaction.response.send_message("❌ 지금은 다음 턴을 진행할 수 없는 상태야.", ephemeral=True)
+                await interaction.response.send_message("❌ 지금은 탐험을 시작할 수 없는 상태야.", ephemeral=True)
                 return
+
+            wait_seconds = random.randint(PARTY_EXPLORE_WAIT_MIN, PARTY_EXPLORE_WAIT_MAX)
+            await interaction.response.edit_message(
+                embed=build_party_travel_embed(party, wait_seconds),
+                view=None,
+            )
+            await asyncio.sleep(wait_seconds)
             await start_party_encounter(interaction, party)
 
 
