@@ -73,7 +73,8 @@ data = {
     "discovered_items": {},
     "discovered_foods": {},
     "relic_upgrades": {},
-    "shop_items": {}
+    "shop_items": {},
+    "fever_multiplier": 1.0
 }
 
 warehouses = {}
@@ -135,6 +136,12 @@ def load_data():
         data["primogems"] = loaded.get("primogems", {})
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
+        data["fever_multiplier"] = loaded.get("fever_multiplier", 1.0)
+
+    try:
+        data["fever_multiplier"] = max(0.0, float(data.get("fever_multiplier", 1.0)))
+    except (TypeError, ValueError):
+        data["fever_multiplier"] = 1.0
 
     data["sticky_message_id"] = data.get("sticky_message_id")
     warnings = data["warnings"]
@@ -181,6 +188,7 @@ def save_data():
     data["discovered_foods"] = discovered_foods
     data["relic_upgrades"] = relic_upgrades
     data["shop_items"] = shop_items
+    data["fever_multiplier"] = get_fever_multiplier()
     data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
     data["levels"] = levels
@@ -252,6 +260,32 @@ def required_xp(level):
     return 100 + (level - 1) * 50
 
 
+def get_fever_multiplier():
+    try:
+        multiplier = float(data.get("fever_multiplier", 1.0))
+    except (TypeError, ValueError):
+        multiplier = 1.0
+
+    if not math.isfinite(multiplier):
+        multiplier = 1.0
+
+    return max(0.0, multiplier)
+
+
+def apply_fever_multiplier(amount):
+    try:
+        base_amount = max(0.0, float(amount))
+    except (TypeError, ValueError):
+        return 0
+
+    multiplied = base_amount * get_fever_multiplier()
+    if multiplied <= 0:
+        return 0
+
+    # 소수 배수에서도 실제 획득 경험치가 0으로 사라지지 않도록 반올림한다.
+    return max(1, int(math.floor(multiplied + 0.5)))
+
+
 def clean_level_nickname(name):
     import re
     return re.sub(r"\s*\[Lv\.\d+\]$", "", name)
@@ -278,12 +312,13 @@ async def update_level_nickname(member):
 
 async def add_xp(member, amount, reason="채팅"):
     if member.bot:
-        return
+        return 0
 
+    amount = apply_fever_multiplier(amount)
     info = get_level_data(member.id)
     old_level = info["level"]
 
-    info["xp"] += int(amount)
+    info["xp"] += amount
 
     leveled_up = False
     while info["xp"] >= required_xp(info["level"]):
@@ -314,6 +349,8 @@ async def add_xp(member, amount, reason="채팅"):
             )
             embed.set_thumbnail(url=member.display_avatar.url)
             await channel.send(embed=embed)
+
+    return amount
             
 def get_favor(user_id):
     return favor.get(str(user_id), 0)
@@ -5717,6 +5754,7 @@ def calc_hospital_fee(user, money):
 
 
 def give_hunt_exp(user, amount):
+    amount = apply_fever_multiplier(amount)
     user["exp"] += amount
     leveled = 0
 
@@ -5726,7 +5764,7 @@ def give_hunt_exp(user, amount):
         user["stat_point"] += 5
         leveled += 1
 
-    return leveled
+    return leveled, amount
 
 
 async def run_hunt_battle(interaction, user, monster, monster_level, trait=None, is_target=False):
@@ -5784,7 +5822,7 @@ async def run_hunt_battle(interaction, user, monster, monster_level, trait=None,
         add_quest_progress(uid, "hunt_win", 1)
         add_quest_progress(uid, "mora_earned", reward)
 
-        leveled = give_hunt_exp(user, exp)
+        leveled, exp = give_hunt_exp(user, exp)
 
         # 현재 레벨 그대로 업적에 반영
         add_quest_progress(uid, "level", user["level"], mode="max")
@@ -7433,6 +7471,64 @@ async def remove_stat(
         f"현재 수치: **{user[stat_key]}**"
     )
 
+@bot.tree.command(
+    name="피버타임",
+    description="서버 전체 경험치 배수를 설정한다 (서버장 전용)",
+    guild=GUILD
+)
+@app_commands.describe(
+    배수="적용할 경험치 배수 (예: 2, 1.2, 0.5 / 1은 정상 배율)"
+)
+async def fever_time_command(
+    interaction: discord.Interaction,
+    배수: float
+):
+    if interaction.guild is None or interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message(
+            "❌ 이 명령어는 서버장만 사용할 수 있어.",
+            ephemeral=True
+        )
+        return
+
+    if not math.isfinite(배수) or 배수 < 0 or 배수 > 100:
+        await interaction.response.send_message(
+            "❌ 배수는 **0 이상 100 이하의 숫자**로 입력해줘.",
+            ephemeral=True
+        )
+        return
+
+    old_multiplier = get_fever_multiplier()
+    data["fever_multiplier"] = float(배수)
+    save_data()
+
+    if 배수 == 1:
+        title = "✅ 피버타임 종료"
+        description = "서버 전체 경험치 배수가 **1배(기본값)**로 돌아왔어."
+        color = discord.Color.green()
+    elif 배수 == 0:
+        title = "⛔ 경험치 획득 중지"
+        description = "서버 전체 경험치 배수가 **0배**로 설정됐어."
+        color = discord.Color.red()
+    else:
+        title = "🔥 피버타임 설정"
+        description = f"이 서버에서 얻는 모든 경험치가 이제 **{배수:g}배**로 적용돼!"
+        color = discord.Color.gold()
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color
+    )
+    embed.add_field(
+        name="배수 변경",
+        value=f"`{old_multiplier:g}배` → `{배수:g}배`",
+        inline=False
+    )
+    embed.set_footer(text="채팅 · 음성 · 출석 · 사냥 · 모험 · 파티 모험 경험치에 적용")
+
+    await interaction.response.send_message(embed=embed)
+
+
 @bot.tree.command(name="레벨", description="내 레벨과 경험치를 확인합니다.", guild=GUILD)
 async def level_check(interaction: discord.Interaction, member: discord.Member = None):
     member = member or interaction.user
@@ -7727,7 +7823,7 @@ async def checkin_command(interaction: discord.Interaction):
         mora_reward = 1000 + (streak - 10) * 100
         add_poker_money(uid, mora_reward)
 
-    await add_xp(interaction.user, xp_reward, "출석 체크")
+    xp_reward = await add_xp(interaction.user, xp_reward, "출석 체크")
 
     save_data()
 
@@ -9530,7 +9626,8 @@ def get_adventure_required_exp(level):
 
 
 def give_adventure_exp(adventure, amount):
-    adventure["exp"] = max(0, int(adventure.get("exp", 0)) + int(amount))
+    amount = apply_fever_multiplier(amount)
+    adventure["exp"] = max(0, int(adventure.get("exp", 0)) + amount)
     leveled = 0
 
     while adventure["exp"] >= get_adventure_required_exp(adventure["level"]):
@@ -9538,7 +9635,7 @@ def give_adventure_exp(adventure, amount):
         adventure["level"] += 1
         leveled += 1
 
-    return leveled
+    return leveled, amount
 
 
 def calc_adventure_win_chance(adventure, monster, monster_level, trait=None):
@@ -12060,7 +12157,7 @@ async def resolve_adventure_battle(message, member):
     exp = int(exp * tier_info["exp_mul"] * terrain["reward_mul"])
 
     add_poker_money(uid, reward)
-    leveled = give_adventure_exp(adventure, exp)
+    leveled, exp = give_adventure_exp(adventure, exp)
 
     adventure["kills"] += 1
     adventure["total_kills"] += 1
@@ -16167,6 +16264,8 @@ def grant_party_battle_experience(party):
         gained = int(round(gained * 2.0))
     if party.get("hard_mode"):
         gained = int(round(gained * 1.15))
+
+    gained = apply_fever_multiplier(gained)
 
     leveled = []
     for player in run.get("players", {}).values():
