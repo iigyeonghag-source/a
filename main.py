@@ -6324,9 +6324,14 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
         lines = []
 
         for name, info in ARMORS.items():
+            # 전용 획득 방어구는 상점 목록에서 제외
+            if info.get("obtain_only"):
+                continue
+
             owned = " ✅ 장착중" if user["armor"] == name else ""
             lines.append(
-                f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
+                f"**{name}** - {info['price']:,}모라 / "
+                f"승률 +{info['bonus']}%{owned}"
             )
 
         embed.description = "\n".join(lines)
@@ -6334,7 +6339,19 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
         return
 
     if 이름 not in ARMORS:
-        await interaction.response.send_message("❌ 그런 갑옷은 없음.", ephemeral=True)
+        await interaction.response.send_message(
+            "❌ 그런 갑옷은 없음.",
+            ephemeral=True
+        )
+        return
+
+    # 이름을 직접 입력해 구매하는 것도 차단
+    if ARMORS[이름].get("obtain_only"):
+        await interaction.response.send_message(
+            "❌ 이 갑옷은 상점에서 살 수 없어. "
+            "외곽의 해당 신을 처치해야만 일정 확률로 획득할 수 있어.",
+            ephemeral=True,
+        )
         return
 
     price = ARMORS[이름]["price"]
@@ -6342,7 +6359,9 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
 
     if money < price:
         await interaction.response.send_message(
-            f"❌ 모라 부족!\n필요: **{price:,}모라**\n보유: **{money:,}모라**",
+            f"❌ 모라 부족!\n"
+            f"필요: **{price:,}모라**\n"
+            f"보유: **{money:,}모라**",
             ephemeral=True
         )
         return
@@ -6478,6 +6497,99 @@ async def remove_hunt_level(
         f"현재 레벨: **Lv.{user['level']}**"
     )
 
+@bot.tree.command(
+    name="사냥장비변경",
+    description="보유 중인 사냥 장비를 변경한다",
+    guild=GUILD
+)
+@app_commands.describe(
+    종류="변경할 장비 종류",
+    이름="장착할 장비 이름"
+)
+@app_commands.choices(
+    종류=[
+        app_commands.Choice(name="무기", value="weapon"),
+        app_commands.Choice(name="갑옷", value="armor"),
+    ]
+)
+async def hunt_equipment_change(
+    interaction: discord.Interaction,
+    종류: app_commands.Choice[str],
+    이름: str
+):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if 종류.value == "weapon":
+        equipment_data = WEAPONS
+        owned_key = "owned_weapons"
+        equipped_key = "weapon"
+        equipment_name = "무기"
+        emoji = "🗡️"
+    else:
+        equipment_data = ARMORS
+        owned_key = "owned_armors"
+        equipped_key = "armor"
+        equipment_name = "갑옷"
+        emoji = "🛡️"
+
+    owned = user.get(owned_key, [])
+
+    if 이름 not in equipment_data:
+        await interaction.response.send_message(
+            f"❌ 존재하지 않는 {equipment_name}야.",
+            ephemeral=True
+        )
+        return
+
+    if 이름 not in owned:
+        await interaction.response.send_message(
+            f"❌ **{이름}**은(는) 보유하지 않은 {equipment_name}야.",
+            ephemeral=True
+        )
+        return
+
+    if user[equipped_key] == 이름:
+        await interaction.response.send_message(
+            f"❌ 이미 **{이름}**을(를) 장착 중이야.",
+            ephemeral=True
+        )
+        return
+
+    user[equipped_key] = 이름
+    save_data()
+
+    await interaction.response.send_message(
+        f"{emoji} 사냥 {equipment_name} 변경 완료!\n"
+        f"장착 장비: **{이름}**\n"
+        f"승률 보너스: **+{equipment_data[이름]['bonus']}%**"
+    )
+
+
+@hunt_equipment_change.autocomplete("이름")
+async def hunt_equipment_change_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    namespace = interaction.namespace
+    equipment_type = getattr(namespace, "종류", None)
+
+    if equipment_type == "weapon":
+        owned = user.get("owned_weapons", [])
+    elif equipment_type == "armor":
+        owned = user.get("owned_armors", [])
+    else:
+        owned = []
+
+    return [
+        app_commands.Choice(name=name, value=name)
+        for name in owned
+        if current.lower() in name.lower()
+    ][:25]
+    
 @bot.tree.command(name="원석교환", description="모라를 원석으로 교환한다", guild=GUILD)
 @app_commands.describe(원석="교환할 원석 수")
 async def exchange_primogems(interaction: discord.Interaction, 원석: int):
