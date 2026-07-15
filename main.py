@@ -14854,16 +14854,42 @@ async def confiscate_equipment(
     구분: app_commands.Choice[str],
     장비: str
 ):
-    # 혹시 디스코드 명령어 권한 설정이 꼬여도 관리자만 실행 가능
     if not interaction.user.guild_permissions.administrator:
         await interaction.response.send_message(
-            "❌ 관리자만 사용할 수 있는 명령어야.",
+            "❌ 관리자만 사용할 수 있어.",
             ephemeral=True
         )
         return
 
     uid = str(대상.id)
     equipment_name = 장비.strip()
+
+    if equipment_name in {"무인검", "모험가 세트"}:
+        await interaction.response.send_message(
+            "❌ 기본 장비는 압수할 수 없어.",
+            ephemeral=True
+        )
+        return
+
+    # 장비 종류 판별
+    if equipment_name in WEAPONS:
+        equipment_type = "무기"
+        equipped_key = "weapon"
+        owned_key = "owned_weapons"
+        default_equipment = "무인검"
+
+    elif equipment_name in ARMORS:
+        equipment_type = "갑옷"
+        equipped_key = "armor"
+        owned_key = "owned_armors"
+        default_equipment = "모험가 세트"
+
+    else:
+        await interaction.response.send_message(
+            "❌ 존재하지 않는 장비 이름이야.",
+            ephemeral=True
+        )
+        return
 
     if 구분.value == "hunt":
         user_data = get_hunt_user(uid)
@@ -14872,75 +14898,51 @@ async def confiscate_equipment(
         user_data = get_adventure(uid)
         mode_name = "모험"
 
-    owned_weapons = user_data.setdefault(
-        "owned_weapons",
-        ["무인검"]
+    # 현재 장착 여부
+    is_equipped = user_data.get(equipped_key) == equipment_name
+
+    # 보유 목록이 존재하면 그 목록도 검사
+    owned_list = user_data.get(owned_key, [])
+    is_owned = (
+        isinstance(owned_list, list)
+        and equipment_name in owned_list
     )
-    owned_armors = user_data.setdefault(
-        "owned_armors",
-        ["모험가 세트"]
-    )
 
-    # 기본 장비는 압수 불가
-    if equipment_name in {"무인검", "모험가 세트"}:
-        await interaction.response.send_message(
-            "❌ 기본 장비는 압수할 수 없어.",
-            ephemeral=True
-        )
-        return
-
-    changed_to_default = False
-
-    # 무기 압수
-    if equipment_name in owned_weapons:
-        user_data["owned_weapons"] = [
-            name for name in owned_weapons
-            if name != equipment_name
-        ]
-
-        if user_data.get("weapon") == equipment_name:
-            user_data["weapon"] = "무인검"
-            changed_to_default = True
-
-        equipment_type = "무기"
-        default_name = "무인검"
-
-    # 갑옷 압수
-    elif equipment_name in owned_armors:
-        user_data["owned_armors"] = [
-            name for name in owned_armors
-            if name != equipment_name
-        ]
-
-        if user_data.get("armor") == equipment_name:
-            user_data["armor"] = "모험가 세트"
-            changed_to_default = True
-
-        equipment_type = "갑옷"
-        default_name = "모험가 세트"
-
-    else:
+    # 사냥 시스템은 원래 보유 목록이 없으므로
+    # 현재 착용 중이면 보유 중인 것으로 인정
+    if not is_equipped and not is_owned:
         await interaction.response.send_message(
             f"❌ {대상.mention}은(는) {mode_name}에서 "
-            f"**{equipment_name}** 장비를 보유하고 있지 않아.",
+            f"**{equipment_name}**을(를) 보유하거나 장착하고 있지 않아.",
             ephemeral=True
         )
         return
+
+    # 보유 목록에서 제거
+    if is_owned:
+        user_data[owned_key] = [
+            name for name in owned_list
+            if name != equipment_name
+        ]
+
+    # 장착 중이었다면 기본 장비로 교체
+    if is_equipped:
+        user_data[equipped_key] = default_equipment
 
     save_data()
 
-    result = (
+    message = (
         f"🔨 {대상.mention}의 {mode_name} {equipment_type} "
         f"**{equipment_name}**을(를) 압수했어."
     )
 
-    if changed_to_default:
-        result += (
+    if is_equipped:
+        message += (
             f"\n장착 중이던 장비라서 "
-            f"**{default_name}**으로 변경됐어."
+            f"**{default_equipment}**으로 변경했어."
         )
 
-    await interaction.response.send_message(result)
+    await interaction.response.send_message(message)
 
 @confiscate_equipment.autocomplete("장비")
 async def confiscate_equipment_autocomplete(
@@ -14962,12 +14964,24 @@ async def confiscate_equipment_autocomplete(
     else:
         return []
 
-    equipment_names = (
-        user_data.get("owned_weapons", [])
-        + user_data.get("owned_armors", [])
-    )
+    equipment_names = []
 
-    # 기본 장비는 압수 목록에서 제외
+    # 현재 착용 장비도 반드시 포함
+    current_weapon = user_data.get("weapon")
+    current_armor = user_data.get("armor")
+
+    if current_weapon:
+        equipment_names.append(current_weapon)
+
+    if current_armor:
+        equipment_names.append(current_armor)
+
+    # 보유 목록이 있으면 추가
+    equipment_names.extend(user_data.get("owned_weapons", []))
+    equipment_names.extend(user_data.get("owned_armors", []))
+
+    # 중복 및 기본 장비 제거
+    equipment_names = list(dict.fromkeys(equipment_names))
     equipment_names = [
         name for name in equipment_names
         if name not in {"무인검", "모험가 세트"}
@@ -14976,10 +14990,7 @@ async def confiscate_equipment_autocomplete(
     current = current.strip().lower()
 
     return [
-        app_commands.Choice(
-            name=name[:100],
-            value=name
-        )
+        app_commands.Choice(name=name, value=name)
         for name in equipment_names
         if current in name.lower()
     ][:25]
