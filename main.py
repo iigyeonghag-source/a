@@ -14831,7 +14831,158 @@ async def warehouse_command(
         )
         return
 
+@bot.tree.command(
+    name="장비압수",
+    description="유저의 사냥 또는 모험 장비를 압수한다",
+    guild=GUILD
+)
+@app_commands.describe(
+    대상="장비를 압수할 유저",
+    구분="사냥 장비인지 모험 장비인지 선택",
+    장비="압수할 장비 이름"
+)
+@app_commands.choices(
+    구분=[
+        app_commands.Choice(name="사냥", value="hunt"),
+        app_commands.Choice(name="모험", value="adventure"),
+    ]
+)
+@app_commands.default_permissions(administrator=True)
+async def confiscate_equipment(
+    interaction: discord.Interaction,
+    대상: discord.Member,
+    구분: app_commands.Choice[str],
+    장비: str
+):
+    # 혹시 디스코드 명령어 권한 설정이 꼬여도 관리자만 실행 가능
+    if not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message(
+            "❌ 관리자만 사용할 수 있는 명령어야.",
+            ephemeral=True
+        )
+        return
 
+    uid = str(대상.id)
+    equipment_name = 장비.strip()
+
+    if 구분.value == "hunt":
+        user_data = get_hunt_user(uid)
+        mode_name = "사냥"
+    else:
+        user_data = get_adventure(uid)
+        mode_name = "모험"
+
+    owned_weapons = user_data.setdefault(
+        "owned_weapons",
+        ["무인검"]
+    )
+    owned_armors = user_data.setdefault(
+        "owned_armors",
+        ["모험가 세트"]
+    )
+
+    # 기본 장비는 압수 불가
+    if equipment_name in {"무인검", "모험가 세트"}:
+        await interaction.response.send_message(
+            "❌ 기본 장비는 압수할 수 없어.",
+            ephemeral=True
+        )
+        return
+
+    changed_to_default = False
+
+    # 무기 압수
+    if equipment_name in owned_weapons:
+        user_data["owned_weapons"] = [
+            name for name in owned_weapons
+            if name != equipment_name
+        ]
+
+        if user_data.get("weapon") == equipment_name:
+            user_data["weapon"] = "무인검"
+            changed_to_default = True
+
+        equipment_type = "무기"
+        default_name = "무인검"
+
+    # 갑옷 압수
+    elif equipment_name in owned_armors:
+        user_data["owned_armors"] = [
+            name for name in owned_armors
+            if name != equipment_name
+        ]
+
+        if user_data.get("armor") == equipment_name:
+            user_data["armor"] = "모험가 세트"
+            changed_to_default = True
+
+        equipment_type = "갑옷"
+        default_name = "모험가 세트"
+
+    else:
+        await interaction.response.send_message(
+            f"❌ {대상.mention}은(는) {mode_name}에서 "
+            f"**{equipment_name}** 장비를 보유하고 있지 않아.",
+            ephemeral=True
+        )
+        return
+
+    save_data()
+
+    result = (
+        f"🔨 {대상.mention}의 {mode_name} {equipment_type} "
+        f"**{equipment_name}**을(를) 압수했어."
+    )
+
+    if changed_to_default:
+        result += (
+            f"\n장착 중이던 장비라서 "
+            f"**{default_name}**으로 변경됐어."
+        )
+
+    await interaction.response.send_message(result)
+
+@confiscate_equipment.autocomplete("장비")
+async def confiscate_equipment_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    target = getattr(interaction.namespace, "대상", None)
+    mode = getattr(interaction.namespace, "구분", None)
+
+    if target is None or mode is None:
+        return []
+
+    uid = str(target.id)
+
+    if mode == "hunt":
+        user_data = get_hunt_user(uid)
+    elif mode == "adventure":
+        user_data = get_adventure(uid)
+    else:
+        return []
+
+    equipment_names = (
+        user_data.get("owned_weapons", [])
+        + user_data.get("owned_armors", [])
+    )
+
+    # 기본 장비는 압수 목록에서 제외
+    equipment_names = [
+        name for name in equipment_names
+        if name not in {"무인검", "모험가 세트"}
+    ]
+
+    current = current.strip().lower()
+
+    return [
+        app_commands.Choice(
+            name=name[:100],
+            value=name
+        )
+        for name in equipment_names
+        if current in name.lower()
+    ][:25]
 # =========================================================
 # 파티 모험 시스템 (기존 개인 /모험과 완전히 분리된 로그라이크 모드)
 # =========================================================
