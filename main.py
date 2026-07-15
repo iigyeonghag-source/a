@@ -5531,7 +5531,7 @@ async def stat_window(interaction: discord.Interaction):
 def get_hunt_user(uid):
     uid = str(uid)
 
-    if uid not in hunt_users:
+    if uid not in hunt_users or not isinstance(hunt_users[uid], dict):
         hunt_users[uid] = {}
 
     user = hunt_users[uid]
@@ -5541,6 +5541,8 @@ def get_hunt_user(uid):
         "exp": 0,
         "weapon": "무인검",
         "armor": "모험가 세트",
+        "owned_weapons": ["무인검"],
+        "owned_armors": ["모험가 세트"],
         "lives": 3,
         "stat_point": 3,
         "job": None,
@@ -5552,8 +5554,46 @@ def get_hunt_user(uid):
     }
 
     for key, value in defaults.items():
-        user.setdefault(key, value)
-    
+        if key not in user:
+            if isinstance(value, list):
+                user[key] = value.copy()
+            elif isinstance(value, dict):
+                user[key] = value.copy()
+            else:
+                user[key] = value
+
+    # 예전 사냥 데이터에는 보유 장비 목록이 없었으므로 안전하게 마이그레이션한다.
+    if not isinstance(user.get("owned_weapons"), list):
+        user["owned_weapons"] = ["무인검"]
+    if not isinstance(user.get("owned_armors"), list):
+        user["owned_armors"] = ["모험가 세트"]
+
+    # 존재하지 않는 장비와 중복값을 제거한다.
+    user["owned_weapons"] = list(dict.fromkeys(
+        name for name in user["owned_weapons"]
+        if isinstance(name, str) and name in WEAPONS
+    ))
+    user["owned_armors"] = list(dict.fromkeys(
+        name for name in user["owned_armors"]
+        if isinstance(name, str) and name in ARMORS
+    ))
+
+    if "무인검" not in user["owned_weapons"]:
+        user["owned_weapons"].insert(0, "무인검")
+    if "모험가 세트" not in user["owned_armors"]:
+        user["owned_armors"].insert(0, "모험가 세트")
+
+    # 기존에 장착 중이던 장비는 보유 장비로 자동 등록한다.
+    if user.get("weapon") not in WEAPONS:
+        user["weapon"] = "무인검"
+    if user.get("armor") not in ARMORS:
+        user["armor"] = "모험가 세트"
+
+    if user["weapon"] not in user["owned_weapons"]:
+        user["owned_weapons"].append(user["weapon"])
+    if user["armor"] not in user["owned_armors"]:
+        user["owned_armors"].append(user["armor"])
+
     return user
 
 
@@ -6253,10 +6293,11 @@ async def choose_job(interaction: discord.Interaction, 이름: str = None):
 
 
 @bot.tree.command(name="무기", description="무기를 구매하거나 확인한다", guild=GUILD)
-@app_commands.describe(이름="구매할 무기 이름")
+@app_commands.describe(이름="구매하거나 장착할 무기 이름")
 async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
     uid = str(interaction.user.id)
     user = get_hunt_user(uid)
+    owned_weapons = user["owned_weapons"]
 
     if 이름 is None:
         embed = discord.Embed(
@@ -6265,18 +6306,27 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
         )
 
         lines = []
-
         for name, info in WEAPONS.items():
             if info.get("obtain_only"):
                 continue
-            owned = " ✅ 장착중" if user["weapon"] == name else ""
+
+            if user["weapon"] == name:
+                state = " ✅ 장착중"
+            elif name in owned_weapons:
+                state = " ✅ 보유중"
+            else:
+                state = ""
+
             lines.append(
-                f"**{name}** - {info['price']:,}모라 / 승률 +{info['bonus']}%{owned}"
+                f"**{name}** - {info['price']:,}모라 / "
+                f"승률 +{info['bonus']}%{state}"
             )
 
         embed.description = "\n".join(lines)
         await interaction.response.send_message(embed=embed)
         return
+
+    이름 = 이름.strip()
 
     if 이름 not in WEAPONS:
         await interaction.response.send_message("❌ 그런 무기는 없음.", ephemeral=True)
@@ -6284,8 +6334,18 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
 
     if WEAPONS[이름].get("obtain_only"):
         await interaction.response.send_message(
-            "❌ 이 무기는 상점에서 살 수 없어. 17번 연구소의 해당 적을 처치해야만 일정 확률로 획득할 수 있어.",
+            "❌ 이 무기는 상점에서 살 수 없어. 지정된 적을 처치해야만 획득할 수 있어.",
             ephemeral=True,
+        )
+        return
+
+    # 이미 구매한 장비는 다시 돈을 받지 않고 바로 장착한다.
+    if 이름 in owned_weapons:
+        user["weapon"] = 이름
+        save_data()
+        await interaction.response.send_message(
+            f"🗡️ **{이름}** 장착 완료!\n"
+            f"승률 보너스: **+{WEAPONS[이름]['bonus']}%**"
         )
         return
 
@@ -6300,6 +6360,7 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
         return
 
     remove_poker_money(uid, price)
+    owned_weapons.append(이름)
     user["weapon"] = 이름
     save_data()
 
@@ -6310,10 +6371,11 @@ async def weapon_shop(interaction: discord.Interaction, 이름: str = None):
 
 
 @bot.tree.command(name="갑옷", description="갑옷을 구매하거나 확인한다", guild=GUILD)
-@app_commands.describe(이름="구매할 갑옷 이름")
+@app_commands.describe(이름="구매하거나 장착할 갑옷 이름")
 async def armor_shop(interaction: discord.Interaction, 이름: str = None):
     uid = str(interaction.user.id)
     user = get_hunt_user(uid)
+    owned_armors = user["owned_armors"]
 
     if 이름 is None:
         embed = discord.Embed(
@@ -6322,35 +6384,46 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
         )
 
         lines = []
-
         for name, info in ARMORS.items():
-            # 전용 획득 방어구는 상점 목록에서 제외
             if info.get("obtain_only"):
                 continue
 
-            owned = " ✅ 장착중" if user["armor"] == name else ""
+            if user["armor"] == name:
+                state = " ✅ 장착중"
+            elif name in owned_armors:
+                state = " ✅ 보유중"
+            else:
+                state = ""
+
             lines.append(
                 f"**{name}** - {info['price']:,}모라 / "
-                f"승률 +{info['bonus']}%{owned}"
+                f"승률 +{info['bonus']}%{state}"
             )
 
         embed.description = "\n".join(lines)
         await interaction.response.send_message(embed=embed)
         return
 
+    이름 = 이름.strip()
+
     if 이름 not in ARMORS:
+        await interaction.response.send_message("❌ 그런 갑옷은 없음.", ephemeral=True)
+        return
+
+    if ARMORS[이름].get("obtain_only"):
         await interaction.response.send_message(
-            "❌ 그런 갑옷은 없음.",
-            ephemeral=True
+            "❌ 이 갑옷은 상점에서 살 수 없어. 지정된 적을 처치해야만 획득할 수 있어.",
+            ephemeral=True,
         )
         return
 
-    # 이름을 직접 입력해 구매하는 것도 차단
-    if ARMORS[이름].get("obtain_only"):
+    # 이미 구매한 장비는 다시 돈을 받지 않고 바로 장착한다.
+    if 이름 in owned_armors:
+        user["armor"] = 이름
+        save_data()
         await interaction.response.send_message(
-            "❌ 이 갑옷은 상점에서 살 수 없어. "
-            "외곽의 해당 신을 처치해야만 일정 확률로 획득할 수 있어.",
-            ephemeral=True,
+            f"🛡️ **{이름}** 장착 완료!\n"
+            f"승률 보너스: **+{ARMORS[이름]['bonus']}%**"
         )
         return
 
@@ -6359,14 +6432,13 @@ async def armor_shop(interaction: discord.Interaction, 이름: str = None):
 
     if money < price:
         await interaction.response.send_message(
-            f"❌ 모라 부족!\n"
-            f"필요: **{price:,}모라**\n"
-            f"보유: **{money:,}모라**",
+            f"❌ 모라 부족!\n필요: **{price:,}모라**\n보유: **{money:,}모라**",
             ephemeral=True
         )
         return
 
     remove_poker_money(uid, price)
+    owned_armors.append(이름)
     user["armor"] = 이름
     save_data()
 
@@ -6519,50 +6591,50 @@ async def hunt_equipment_change(
 ):
     uid = str(interaction.user.id)
     user = get_hunt_user(uid)
+    equipment_type = 종류.value
+    equipment_name = 이름.strip()
 
-    if 종류.value == "weapon":
+    if equipment_type == "weapon":
         equipment_data = WEAPONS
         owned_key = "owned_weapons"
         equipped_key = "weapon"
-        equipment_name = "무기"
+        type_name = "무기"
         emoji = "🗡️"
     else:
         equipment_data = ARMORS
         owned_key = "owned_armors"
         equipped_key = "armor"
-        equipment_name = "갑옷"
+        type_name = "갑옷"
         emoji = "🛡️"
 
-    owned = user.get(owned_key, [])
-
-    if 이름 not in equipment_data:
+    if equipment_name not in equipment_data:
         await interaction.response.send_message(
-            f"❌ 존재하지 않는 {equipment_name}야.",
+            f"❌ 존재하지 않는 {type_name}야.",
             ephemeral=True
         )
         return
 
-    if 이름 not in owned:
+    if equipment_name not in user[owned_key]:
         await interaction.response.send_message(
-            f"❌ **{이름}**은(는) 보유하지 않은 {equipment_name}야.",
+            f"❌ **{equipment_name}**은(는) 보유하지 않은 {type_name}야.",
             ephemeral=True
         )
         return
 
-    if user[equipped_key] == 이름:
+    if user[equipped_key] == equipment_name:
         await interaction.response.send_message(
-            f"❌ 이미 **{이름}**을(를) 장착 중이야.",
+            f"❌ 이미 **{equipment_name}**을(를) 장착 중이야.",
             ephemeral=True
         )
         return
 
-    user[equipped_key] = 이름
+    user[equipped_key] = equipment_name
     save_data()
 
     await interaction.response.send_message(
-        f"{emoji} 사냥 {equipment_name} 변경 완료!\n"
-        f"장착 장비: **{이름}**\n"
-        f"승률 보너스: **+{equipment_data[이름]['bonus']}%**"
+        f"{emoji} 사냥 {type_name} 변경 완료!\n"
+        f"장착 장비: **{equipment_name}**\n"
+        f"승률 보너스: **+{equipment_data[equipment_name]['bonus']}%**"
     )
 
 
@@ -6571,25 +6643,27 @@ async def hunt_equipment_change_autocomplete(
     interaction: discord.Interaction,
     current: str
 ):
-    uid = str(interaction.user.id)
-    user = get_hunt_user(uid)
+    user = get_hunt_user(interaction.user.id)
+    equipment_type = getattr(interaction.namespace, "종류", None)
 
-    namespace = interaction.namespace
-    equipment_type = getattr(namespace, "종류", None)
+    if isinstance(equipment_type, app_commands.Choice):
+        equipment_type = equipment_type.value
 
     if equipment_type == "weapon":
-        owned = user.get("owned_weapons", [])
+        owned = user["owned_weapons"]
     elif equipment_type == "armor":
-        owned = user.get("owned_armors", [])
+        owned = user["owned_armors"]
     else:
         owned = []
 
+    current = current.strip().lower()
     return [
-        app_commands.Choice(name=name, value=name)
+        app_commands.Choice(name=name[:100], value=name)
         for name in owned
-        if current.lower() in name.lower()
+        if current in name.lower()
     ][:25]
-    
+
+
 @bot.tree.command(name="원석교환", description="모라를 원석으로 교환한다", guild=GUILD)
 @app_commands.describe(원석="교환할 원석 수")
 async def exchange_primogems(interaction: discord.Interaction, 원석: int):
@@ -14863,6 +14937,7 @@ async def confiscate_equipment(
 
     uid = str(대상.id)
     equipment_name = 장비.strip()
+    mode = 구분.value
 
     if equipment_name in {"무인검", "모험가 세트"}:
         await interaction.response.send_message(
@@ -14871,19 +14946,16 @@ async def confiscate_equipment(
         )
         return
 
-    # 장비 종류 판별
     if equipment_name in WEAPONS:
         equipment_type = "무기"
         equipped_key = "weapon"
         owned_key = "owned_weapons"
         default_equipment = "무인검"
-
     elif equipment_name in ARMORS:
         equipment_type = "갑옷"
         equipped_key = "armor"
         owned_key = "owned_armors"
         default_equipment = "모험가 세트"
-
     else:
         await interaction.response.send_message(
             "❌ 존재하지 않는 장비 이름이야.",
@@ -14891,43 +14963,40 @@ async def confiscate_equipment(
         )
         return
 
-    if 구분.value == "hunt":
+    if mode == "hunt":
         user_data = get_hunt_user(uid)
         mode_name = "사냥"
     else:
         user_data = get_adventure(uid)
         mode_name = "모험"
 
-    # 현재 장착 여부
-    is_equipped = user_data.get(equipped_key) == equipment_name
-
-    # 보유 목록이 존재하면 그 목록도 검사
     owned_list = user_data.get(owned_key, [])
-    is_owned = (
-        isinstance(owned_list, list)
-        and equipment_name in owned_list
-    )
+    if not isinstance(owned_list, list):
+        owned_list = []
 
-    # 사냥 시스템은 원래 보유 목록이 없으므로
-    # 현재 착용 중이면 보유 중인 것으로 인정
-    if not is_equipped and not is_owned:
+    is_equipped = user_data.get(equipped_key) == equipment_name
+    is_owned = equipment_name in owned_list
+
+    if not is_owned and not is_equipped:
         await interaction.response.send_message(
             f"❌ {대상.mention}은(는) {mode_name}에서 "
-            f"**{equipment_name}**을(를) 보유하거나 장착하고 있지 않아.",
+            f"**{equipment_name}**을(를) 보유하고 있지 않아.",
             ephemeral=True
         )
         return
 
-    # 보유 목록에서 제거
-    if is_owned:
-        user_data[owned_key] = [
-            name for name in owned_list
-            if name != equipment_name
-        ]
+    user_data[owned_key] = [
+        name for name in owned_list
+        if name != equipment_name
+    ]
 
-    # 장착 중이었다면 기본 장비로 교체
+    # 장착 중인 장비를 압수하면 즉시 기본 장비로 교체한다.
     if is_equipped:
         user_data[equipped_key] = default_equipment
+
+    # 기본 장비는 어떤 경우에도 보유 목록에서 사라지지 않게 한다.
+    if default_equipment not in user_data[owned_key]:
+        user_data[owned_key].insert(0, default_equipment)
 
     save_data()
 
@@ -14935,14 +15004,11 @@ async def confiscate_equipment(
         f"🔨 {대상.mention}의 {mode_name} {equipment_type} "
         f"**{equipment_name}**을(를) 압수했어."
     )
-
     if is_equipped:
-        message += (
-            f"\n장착 중이던 장비라서 "
-            f"**{default_equipment}**으로 변경했어."
-        )
+        message += f"\n장착 장비는 **{default_equipment}**으로 변경됐어."
 
     await interaction.response.send_message(message)
+
 
 @confiscate_equipment.autocomplete("장비")
 async def confiscate_equipment_autocomplete(
@@ -14952,48 +15018,45 @@ async def confiscate_equipment_autocomplete(
     target = getattr(interaction.namespace, "대상", None)
     mode = getattr(interaction.namespace, "구분", None)
 
-    if target is None or mode is None:
-        return []
+    if isinstance(mode, app_commands.Choice):
+        mode = mode.value
 
-    uid = str(target.id)
+    target_id = getattr(target, "id", None)
+    if target_id is None or mode not in {"hunt", "adventure"}:
+        return []
 
     if mode == "hunt":
-        user_data = get_hunt_user(uid)
-    elif mode == "adventure":
-        user_data = get_adventure(uid)
+        user_data = get_hunt_user(target_id)
     else:
-        return []
+        user_data = get_adventure(target_id)
 
     equipment_names = []
-
-    # 현재 착용 장비도 반드시 포함
-    current_weapon = user_data.get("weapon")
-    current_armor = user_data.get("armor")
-
-    if current_weapon:
-        equipment_names.append(current_weapon)
-
-    if current_armor:
-        equipment_names.append(current_armor)
-
-    # 보유 목록이 있으면 추가
     equipment_names.extend(user_data.get("owned_weapons", []))
     equipment_names.extend(user_data.get("owned_armors", []))
 
-    # 중복 및 기본 장비 제거
-    equipment_names = list(dict.fromkeys(equipment_names))
+    # 손상된 구버전 데이터에서도 현재 장착 장비를 찾을 수 있게 포함한다.
+    equipment_names.extend([
+        user_data.get("weapon"),
+        user_data.get("armor"),
+    ])
+
+    equipment_names = list(dict.fromkeys(
+        name for name in equipment_names
+        if isinstance(name, str)
+    ))
     equipment_names = [
         name for name in equipment_names
         if name not in {"무인검", "모험가 세트"}
+        and (name in WEAPONS or name in ARMORS)
     ]
 
     current = current.strip().lower()
-
     return [
-        app_commands.Choice(name=name, value=name)
+        app_commands.Choice(name=name[:100], value=name)
         for name in equipment_names
         if current in name.lower()
     ][:25]
+
 # =========================================================
 # 파티 모험 시스템 (기존 개인 /모험과 완전히 분리된 로그라이크 모드)
 # =========================================================
