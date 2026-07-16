@@ -74,6 +74,8 @@ data = {
     "discovered_foods": {},
     "relic_upgrades": {},
     "shop_items": {},
+    "party_profiles": {},
+    "relic_discovery_stats": {},
     "fever_multiplier": 1.0
 }
 
@@ -92,6 +94,8 @@ discovered_items = {}
 discovered_foods = {}
 relic_upgrades = {}
 shop_items = {}
+party_profiles = {}
+relic_discovery_stats = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -104,7 +108,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, discovered_foods, relic_upgrades, shop_items
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, discovered_foods, relic_upgrades, shop_items, party_profiles, relic_discovery_stats
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -120,6 +124,8 @@ def load_data():
         data["discovered_foods"] = loaded.get("discovered_foods", {})
         data["relic_upgrades"] = loaded.get("relic_upgrades", {})
         data["shop_items"] = loaded.get("shop_items", {})
+        data["party_profiles"] = loaded.get("party_profiles", {})
+        data["relic_discovery_stats"] = loaded.get("relic_discovery_stats", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
@@ -163,6 +169,14 @@ def load_data():
     discovered_foods = data.get("discovered_foods", {})
     relic_upgrades = data["relic_upgrades"]
     shop_items = data["shop_items"]
+    party_profiles = data.get("party_profiles", {})
+    relic_discovery_stats = data.get("relic_discovery_stats", {})
+    if not isinstance(party_profiles, dict):
+        party_profiles = {}
+    if not isinstance(relic_discovery_stats, dict):
+        relic_discovery_stats = {}
+    data["party_profiles"] = party_profiles
+    data["relic_discovery_stats"] = relic_discovery_stats
     
     warehouses = data["warehouses"]
 
@@ -188,6 +202,8 @@ def save_data():
     data["discovered_foods"] = discovered_foods
     data["relic_upgrades"] = relic_upgrades
     data["shop_items"] = shop_items
+    data["party_profiles"] = party_profiles
+    data["relic_discovery_stats"] = relic_discovery_stats
     data["fever_multiplier"] = get_fever_multiplier()
     data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
@@ -1871,7 +1887,7 @@ SIGNATURE_WEAPONS = {
     for name in GENSHIN_CHARACTERS.keys()
 }
 
-WEAPON_GACHA_COST = 500
+WEAPON_GACHA_COST = 120
 
 
 def get_user_characters(user_id):
@@ -3343,7 +3359,7 @@ print(get_time_key())
 print(datetime.now())
 
 CHARACTER_GACHA_COST = 160
-WEAPON_GACHA_COST = 200
+WEAPON_GACHA_COST = 120
 CHARACTER_TEN_GACHA_COST = CHARACTER_GACHA_COST * 10
 
 @bot.tree.command(name="캐릭터뽑기", description="원신 캐릭터를 뽑는다", guild=GUILD)
@@ -3541,14 +3557,14 @@ async def signature_weapon_gacha(interaction: discord.Interaction, 횟수: int =
 
     cost = WEAPON_GACHA_COST * 횟수
 
-    if get_poker_money(uid) < cost:
+    if get_primogems(uid) < cost:
         await interaction.response.send_message(
-            f"❌ 모라 부족!\n필요: **{cost:,}모라**\n보유: **{get_poker_money(uid):,}모라**",
+            f"❌ 원석 부족!\n필요: **{cost:,}원석**\n보유: **{get_primogems(uid):,}원석**",
             ephemeral=True
         )
         return
 
-    add_poker_money(uid, -cost)
+    add_primogems(uid, -cost)
 
     user_weapons = get_user_weapons(uid)
     user_chars = get_user_characters(uid)
@@ -3600,10 +3616,12 @@ async def signature_weapon_gacha(interaction: discord.Interaction, 횟수: int =
     )
 
     embed.add_field(
-        name="현재 모라",
-        value=f"{get_poker_money(uid):,} 모라",
+        name="현재 원석",
+        value=f"{get_primogems(uid):,} 원석",
         inline=True
     )
+
+    embed.set_footer(text=f"전무 기원 1회 {WEAPON_GACHA_COST}원석")
 
     await interaction.response.send_message(embed=embed)
     
@@ -5161,23 +5179,26 @@ STAT_KR = {
 }
 
 JOBS = {
-    "궁수": {
-        "stats": ["str", "vit"],
-        "desc": "힘과 체력 특화. 안정적으로 승률을 올리는 직업."
-    },
     "전사": {
-        "stats": ["dex", "vit"],
-        "desc": "민첩과 체력 특화. 약한 적을 잘 만나고 버티는 직업."
+        "stats": ["str", "vit"],
+        "desc": "힘과 체력 특화. 정면 전투의 승률과 생존력을 함께 올리는 직업."
+    },
+    "궁수": {
+        "stats": ["dex", "str"],
+        "desc": "민첩과 힘 특화. 약한 적을 잘 포착하고 안정적으로 피해를 누적하는 직업."
     },
     "도적": {
-        "stats": ["int", "dex"],
-        "desc": "지능과 민첩 특화. 보상과 사냥 안정성을 챙기는 직업."
+        "stats": ["dex", "int"],
+        "desc": "민첩과 지능 특화. 사냥 안정성과 모라·경험치 수익을 함께 챙기는 직업."
     },
     "법사": {
-        "stats": ["mag", "vit"],
-        "desc": "마력과 체력 특화. 승률 2배와 생존력을 노리는 직업."
+        "stats": ["mag", "int"],
+        "desc": "마력과 지능 특화. 마력 폭주와 높은 보상 효율을 노리는 직업."
     }
 }
+
+JOB_CHANGE_BASE_COST = 50_000
+JOB_CHANGE_MAX_COST = 500_000
 
 WEAPONS = {
     "무인검": {"price": 0, "bonus": 1},
@@ -5583,6 +5604,8 @@ def get_hunt_user(uid):
         "lives": 3,
         "stat_point": 3,
         "job": None,
+        "job_change_count": 0,
+        "allocated_stat_points": 0,
         "str": 0,
         "dex": 0,
         "int": 0,
@@ -5630,6 +5653,14 @@ def get_hunt_user(uid):
         user["owned_weapons"].append(user["weapon"])
     if user["armor"] not in user["owned_armors"]:
         user["owned_armors"].append(user["armor"])
+
+    user["job_change_count"] = max(0, int(user.get("job_change_count", 0)))
+    if "allocated_stat_points" not in user or not isinstance(user.get("allocated_stat_points"), int):
+        total_stats = sum(max(0, int(user.get(key, 0))) for key in STAT_KR)
+        earned_points = 3 + max(0, int(user.get("level", 1)) - 1) * 5
+        estimated_spent = max(0, earned_points - max(0, int(user.get("stat_point", 0))))
+        user["allocated_stat_points"] = min(total_stats, estimated_spent)
+    user["allocated_stat_points"] = max(0, int(user.get("allocated_stat_points", 0)))
 
     return user
 
@@ -6184,6 +6215,7 @@ class StatAmountModal(discord.ui.Modal):
             total_gain += gain
 
         user["stat_point"] -= amount
+        user["allocated_stat_points"] = max(0, int(user.get("allocated_stat_points", 0))) + amount
 
         save_data()
 
@@ -6327,6 +6359,59 @@ async def choose_job(interaction: discord.Interaction, 이름: str = None):
         f"직업: **{이름}**\n"
         f"특화 스탯: **{stats}**\n\n"
         f"이제 특화 스탯을 찍으면 50% 확률로 +2 오름."
+    )
+
+
+@bot.tree.command(name="직업변경", description="직업과 사냥 스탯을 초기화하고 다른 직업으로 변경한다", guild=GUILD)
+@app_commands.describe(이름="변경할 직업")
+async def change_job(interaction: discord.Interaction, 이름: str):
+    uid = str(interaction.user.id)
+    user = get_hunt_user(uid)
+
+    if user["level"] < 21:
+        await interaction.response.send_message("❌ 21레벨부터 직업을 변경할 수 있어.", ephemeral=True)
+        return
+    if 이름 not in JOBS:
+        await interaction.response.send_message("❌ 없는 직업이야. 가능: 전사, 궁수, 도적, 법사", ephemeral=True)
+        return
+    if user.get("job") is None:
+        await interaction.response.send_message("❌ 아직 직업이 없어. 먼저 `/직업`으로 선택해줘.", ephemeral=True)
+        return
+    if user.get("job") == 이름:
+        await interaction.response.send_message("❌ 이미 그 직업이야.", ephemeral=True)
+        return
+
+    change_count = max(0, int(user.get("job_change_count", 0)))
+    cost = 0 if change_count == 0 else min(JOB_CHANGE_MAX_COST, JOB_CHANGE_BASE_COST * (2 ** (change_count - 1)))
+    if get_poker_money(uid) < cost:
+        await interaction.response.send_message(
+            f"❌ 직업 변경 비용이 부족해.\n필요: **{cost:,}모라**\n보유: **{get_poker_money(uid):,}모라**",
+            ephemeral=True,
+        )
+        return
+
+    old_job = user["job"]
+    refunded = max(0, int(user.get("allocated_stat_points", 0)))
+    if cost > 0:
+        add_poker_money(uid, -cost)
+
+    for stat_key in STAT_KR:
+        user[stat_key] = 0
+    user["stat_point"] = max(0, int(user.get("stat_point", 0))) + refunded
+    user["allocated_stat_points"] = 0
+    user["job"] = 이름
+    user["job_change_count"] = change_count + 1
+    save_data()
+
+    stats = ", ".join(STAT_KR[s] for s in JOBS[이름]["stats"])
+    next_count = user["job_change_count"]
+    next_cost = min(JOB_CHANGE_MAX_COST, JOB_CHANGE_BASE_COST * (2 ** max(0, next_count - 1)))
+    await interaction.response.send_message(
+        f"✅ **{old_job} → {이름}** 직업 변경 완료!\n"
+        f"환급된 스탯 포인트: **{refunded}P**\n"
+        f"지불 비용: **{cost:,}모라**\n"
+        f"새 특화 스탯: **{stats}**\n"
+        f"다음 변경 비용: **{next_cost:,}모라**"
     )
 
 
@@ -8453,6 +8538,10 @@ ADVENTURE_INVENTORY_PAGE_SIZE = 10
 ADVENTURE_RELIC_PAGE_SIZE = 10
 
 RELIC_MAX_ENHANCEMENT = 7
+RELIC_MAX_EQUIPPED = 3
+RELIC_FAILURE_MATERIAL_CONSUME_RATE = 0.50
+RELIC_PITY_BONUS_PER_FAIL = 8.0
+RELIC_PITY_MAX_SUCCESS_RATE = 95.0
 
 # 디스코드는 일반 글자에 임의 색상을 넣을 수 없어서,
 # 상세 화면에서는 ANSI 색상 + 색상 이모지 + 임베드 색상을 함께 사용한다.
@@ -8473,38 +8562,38 @@ RELIC_UPGRADE_RULES = {
     "uncommon": {
         "type_range": (2, 3),
         "amount_range": (2, 5),
-        "success": [90, 80, 70, 60, 50, 40, 30],
+        "success": [100, 95, 90, 82, 74, 66, 58],
     },
     "rare": {
         "type_range": (2, 4),
         "amount_range": (3, 7),
-        "success": [85, 75, 65, 55, 45, 35, 25],
+        "success": [100, 92, 84, 76, 68, 60, 52],
     },
     "epic": {
         "type_range": (3, 4),
         "amount_range": (4, 9),
-        "success": [80, 68, 56, 44, 34, 24, 16],
+        "success": [96, 88, 80, 72, 64, 54, 44],
     },
     "legendary": {
         "type_range": (3, 5),
         "amount_range": (6, 12),
-        "success": [75, 62, 50, 38, 28, 18, 10],
+        "success": [92, 84, 76, 68, 58, 48, 38],
     },
     "mythic": {
         "type_range": (4, 6),
         "amount_range": (8, 16),
-        "success": [70, 58, 46, 34, 24, 15, 8],
+        "success": [88, 80, 72, 64, 54, 44, 34],
     },
     "transcendent": {
         "type_range": (5, 6),
         "amount_range": (14, 28),
-        "success": [55, 42, 30, 20, 12, 6, 2],
+        "success": [84, 76, 68, 60, 50, 40, 30],
     },
 }
 
 
-# 최초 발견자가 지은 이름에 아래 키워드가 포함되면 해당 계열 재료가 우선적으로 뽑힌다.
-# 그래도 매 단계 일부는 전체 전리품에서 뽑혀, 모든 모험 전리품이 강화 재료로 쓰일 수 있다.
+# 유물 속성은 이름과 무관하게 유물 ID와 출현 지형으로 고정된다.
+# 최초 발견자는 성능 부담 없이 자유롭게 이름을 지을 수 있다.
 RELIC_MATERIAL_THEMES = {
     "fire": {
         "display": "화염",
@@ -8572,6 +8661,39 @@ RELIC_MATERIAL_THEMES = {
         "material_keywords": ["마력", "정수", "핵", "결정", "수정", "원석", "가루", "진주"],
         "terrains": ["cave", "demon", "heaven"],
     },
+}
+
+RELIC_THEME_EFFECTS = {
+    "fire": {"main": ("battle", 3.5), "sub": ("loot", 2.0), "desc": "전투와 전리품 획득 강화"},
+    "ice": {"main": ("life_save", 3.5), "sub": ("escape", 2.0), "desc": "생존과 도주 강화"},
+    "wind": {"main": ("escape", 4.0), "sub": ("luck", 2.0), "desc": "도주와 행운 강화"},
+    "water": {"main": ("life_save", 3.0), "sub": ("loot", 2.5), "desc": "생존과 전리품 강화"},
+    "earth": {"main": ("battle", 2.8), "sub": ("life_save", 2.5), "desc": "전투와 생존 강화"},
+    "nature": {"main": ("loot", 4.0), "sub": ("relic", 0.7), "desc": "전리품과 유물 발견 강화"},
+    "dark": {"main": ("battle", 4.0), "sub": ("luck", 2.2), "desc": "전투와 행운 강화"},
+    "light": {"main": ("relic", 1.0), "sub": ("life_save", 3.0), "desc": "유물 발견과 생존 강화"},
+    "beast": {"main": ("battle", 3.6), "sub": ("escape", 2.0), "desc": "전투와 추적 강화"},
+    "machine": {"main": ("loot", 3.2), "sub": ("battle", 2.2), "desc": "전리품 분석과 전투 강화"},
+    "magic": {"main": ("relic", 1.2), "sub": ("luck", 2.5), "desc": "유물 발견과 행운 강화"},
+}
+
+RELIC_RARITY_EFFECT_MULTIPLIER = {
+    "uncommon": 1.00,
+    "rare": 1.25,
+    "epic": 1.60,
+    "legendary": 2.15,
+    "mythic": 2.85,
+    "transcendent": 4.50,
+}
+
+RELIC_EFFECT_LABELS = {
+    "battle": "전투 승률",
+    "luck": "행운",
+    "loot": "전리품",
+    "escape": "도주",
+    "life_save": "생존",
+    "relic": "유물 발견률",
+    "max_lives": "최대 목숨",
 }
 
 # 한 번 이동했을 때 일반 몬스터를 만날 기본 확률.
@@ -9039,6 +9161,10 @@ ADVENTURE_RELIC_RARITY_COUNTS = {
 
 # 퍼센트 단위다. 0.00015% = 약 666,667번에 1번.
 ADVENTURE_TRANSCENDENT_RELIC_CHANCE_PERCENT = 0.00015
+ADVENTURE_TRANSCENDENT_SOFT_PITY_START = 2_000
+ADVENTURE_TRANSCENDENT_HARD_PITY = 10_000
+ADVENTURE_TRANSCENDENT_SOFT_PITY_PER_100 = 0.002
+TRANSCENDENT_SYNTHESIS_COST = 1_000_000
 
 
 ADVENTURE_SHOP_CATALOG = {
@@ -9413,6 +9539,7 @@ def get_adventure(uid):
         "armor": "모험가 세트",
         "owned_weapons": ["무인검"],
         "owned_armors": ["모험가 세트"],
+        "equipped_relics": [],
 
         "boosts": {
             "battle": 0,
@@ -9472,6 +9599,15 @@ def get_adventure(uid):
         adventure["lab_defeated"] = []
     adventure["ending_cleared"] = bool(adventure.get("ending_cleared", False))
     adventure["ending_clear_count"] = max(0, int(adventure.get("ending_clear_count", 0)))
+    if not isinstance(adventure.get("equipped_relics"), list):
+        adventure["equipped_relics"] = []
+    owned_inventory = inventories.get(str(uid), {}) if isinstance(inventories.get(str(uid), {}), dict) else {}
+    adventure["equipped_relics"] = list(dict.fromkeys(
+        item_id for item_id in adventure.get("equipped_relics", [])
+        if item_id in ADVENTURE_ITEM_CATALOG
+        and ADVENTURE_ITEM_CATALOG[item_id].get("kind") == "relic"
+        and int(owned_inventory.get(item_id, 0)) > 0
+    ))[:RELIC_MAX_EQUIPPED]
 
     # 기존 유저도 과거 최고 도달 지형 기록이나 현재 이동 기록에 마계가 있으면 자동 해금한다.
     if (
@@ -9554,6 +9690,11 @@ def get_equipped_adventure_boosts(uid):
         for key in boosts:
             boosts[key] += item.get(key, 0)
 
+    relic_boosts = get_equipped_relic_boosts(uid)
+    for key in boosts:
+        boosts[key] += relic_boosts.get(key, 0)
+
+    boosts["max_lives"] = int(boosts.get("max_lives", 0))
     return boosts
 
 
@@ -10221,12 +10362,14 @@ def get_relic_upgrade_state(uid, item_id):
             "level": 0,
             "attempts": 0,
             "failures": 0,
+            "fail_streak": 0,
         }
 
     state = relic_upgrades[uid][item_id]
     state["level"] = max(0, min(RELIC_MAX_ENHANCEMENT, int(state.get("level", 0))))
     state["attempts"] = max(0, int(state.get("attempts", 0)))
     state["failures"] = max(0, int(state.get("failures", 0)))
+    state["fail_streak"] = max(0, int(state.get("fail_streak", 0)))
     return state
 
 
@@ -10292,24 +10435,101 @@ def resolve_owned_relic_id(uid, query):
 
 
 def get_relic_name_themes(item_id):
-    name = normalize_item_name_for_filter(get_adventure_item_name(item_id))
-    matched = []
+    """호환용 이름. 실제 속성은 작명과 무관하게 유물 ID와 출현 지형으로 결정된다."""
+    item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
+    terrain_key = item.get("terrain")
+    terrain_themes = {
+        "desert": ["fire", "earth", "machine"],
+        "grassland": ["wind", "nature", "water"],
+        "jungle": ["nature", "beast", "dark"],
+        "cave": ["earth", "dark", "magic", "machine"],
+        "mountain": ["wind", "earth", "beast"],
+        "ice": ["ice", "wind", "beast"],
+        "demon": ["dark", "fire", "magic", "beast"],
+        "heaven": ["light", "wind", "magic"],
+    }
+    candidates = terrain_themes.get(terrain_key, list(RELIC_MATERIAL_THEMES.keys()))
+    seed = int(hashlib.sha256(f"{item_id}|relic-affinity-v2".encode("utf-8")).hexdigest()[:16], 16)
+    return [random.Random(seed).choice(candidates)]
 
-    if name and name != normalize_item_name_for_filter("이름 없는 유물"):
-        for theme_key, theme in RELIC_MATERIAL_THEMES.items():
-            if any(normalize_item_name_for_filter(keyword) in name for keyword in theme["relic_keywords"]):
-                matched.append(theme_key)
 
-    if matched:
-        return matched
+def get_relic_effects(uid, item_id, override_level=None):
+    item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
+    if item.get("kind") != "relic":
+        return {}
+    level = get_relic_upgrade_state(uid, item_id)["level"] if override_level is None else int(override_level)
+    level = max(0, min(RELIC_MAX_ENHANCEMENT, level))
+    theme_key = get_relic_name_themes(item_id)[0]
+    effect_info = RELIC_THEME_EFFECTS[theme_key]
+    rarity_mul = RELIC_RARITY_EFFECT_MULTIPLIER.get(item.get("rarity"), 1.0)
+    level_mul = 1.0 + level * 0.28
+    if level >= 5:
+        level_mul += 0.12
+    if level >= 7:
+        level_mul += 0.25
 
-    # 이름에 지정 키워드가 없더라도 같은 유물은 항상 같은 속성을 갖도록 고정 랜덤 처리한다.
-    seed_text = f"{item_id}|{name}|fallback-theme-v1"
-    seed = int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16)
-    rng = random.Random(seed)
-    theme_keys = list(RELIC_MATERIAL_THEMES.keys())
-    rng.shuffle(theme_keys)
-    return theme_keys[:rng.randint(1, 2)]
+    effects = {}
+    main_key, main_base = effect_info["main"]
+    effects[main_key] = effects.get(main_key, 0.0) + main_base * rarity_mul * level_mul
+
+    # +4부터 보조 특성이 열리고 +7에서 완성 보정을 받는다.
+    if level >= 4:
+        sub_key, sub_base = effect_info["sub"]
+        sub_mul = 1.0 + (level - 4) * 0.20
+        if level >= 7:
+            sub_mul += 0.25
+        effects[sub_key] = effects.get(sub_key, 0.0) + sub_base * rarity_mul * sub_mul
+
+    # 초월 +7은 원정 시작 목숨을 하나 더 준다.
+    if item.get("rarity") == "transcendent" and level >= 7:
+        effects["max_lives"] = effects.get("max_lives", 0) + 1
+
+    return effects
+
+
+def format_relic_effects(uid, item_id, override_level=None):
+    effects = get_relic_effects(uid, item_id, override_level=override_level)
+    parts = []
+    for key, value in effects.items():
+        label = RELIC_EFFECT_LABELS.get(key, key)
+        if key == "max_lives":
+            parts.append(f"{label} +{int(value)}")
+        elif key == "relic":
+            parts.append(f"{label} +{value:.2f}%p")
+        else:
+            parts.append(f"{label} +{value:.1f}%")
+    return " · ".join(parts) if parts else "효과 없음"
+
+
+def get_equipped_relic_ids(uid):
+    adventure = get_adventure(uid)
+    inventory = get_adventure_inventory(uid)
+    equipped = [
+        item_id for item_id in adventure.get("equipped_relics", [])
+        if ADVENTURE_ITEM_CATALOG.get(item_id, {}).get("kind") == "relic"
+        and int(inventory.get(item_id, 0)) > 0
+    ]
+    adventure["equipped_relics"] = list(dict.fromkeys(equipped))[:RELIC_MAX_EQUIPPED]
+    return adventure["equipped_relics"]
+
+
+def get_equipped_relic_boosts(uid):
+    boosts = {"battle": 0.0, "luck": 0.0, "loot": 0.0, "escape": 0.0, "life_save": 0.0, "relic": 0.0, "max_lives": 0}
+    for item_id in get_equipped_relic_ids(uid):
+        for key, value in get_relic_effects(uid, item_id).items():
+            boosts[key] = boosts.get(key, 0) + value
+    boosts["max_lives"] = int(boosts.get("max_lives", 0))
+    return boosts
+
+
+def get_equipped_relic_summary(uid):
+    equipped = get_equipped_relic_ids(uid)
+    if not equipped:
+        return "장착 중인 유물 없음"
+    return "\n".join(
+        f"💠 {format_relic_name(uid, item_id)} — {format_relic_effects(uid, item_id)}"
+        for item_id in equipped
+    )
 
 
 def get_upgrade_material_search_text(item_id):
@@ -10338,25 +10558,27 @@ def material_matches_relic_themes(item_id, theme_keys):
     return False
 
 
-def get_relic_upgrade_success_rate(item_id, target_level):
+def get_relic_upgrade_success_rate(item_id, target_level, uid=None):
     item = ADVENTURE_ITEM_CATALOG[item_id]
     rules = RELIC_UPGRADE_RULES[item["rarity"]]
     target_level = max(1, min(RELIC_MAX_ENHANCEMENT, int(target_level)))
-    return float(rules["success"][target_level - 1])
+    base = float(rules["success"][target_level - 1])
+    if uid is None:
+        return base
+    fail_streak = get_relic_upgrade_state(uid, item_id).get("fail_streak", 0)
+    return min(RELIC_PITY_MAX_SUCCESS_RATE, base + fail_streak * RELIC_PITY_BONUS_PER_FAIL)
 
 
 def get_relic_upgrade_requirements(item_id, target_level):
     """
-    이름 키워드, 유물 ID, 등급, 목표 강화 단계를 씨앗으로 재료를 고정 랜덤 생성한다.
+    유물 ID, 고유 속성, 등급, 목표 강화 단계를 씨앗으로 재료를 고정 랜덤 생성한다.
     서버가 재시작되어도 같은 유물의 같은 단계는 항상 같은 재료를 요구한다.
     """
     item = ADVENTURE_ITEM_CATALOG[item_id]
     rarity_key = item["rarity"]
     rules = RELIC_UPGRADE_RULES[rarity_key]
     target_level = max(1, min(RELIC_MAX_ENHANCEMENT, int(target_level)))
-    relic_name = get_adventure_item_name(item_id)
-
-    seed_text = f"{item_id}|{relic_name}|{rarity_key}|{target_level}|upgrade-recipe-v1"
+    seed_text = f"{item_id}|{rarity_key}|{target_level}|upgrade-recipe-v2"
     seed = int(hashlib.sha256(seed_text.encode("utf-8")).hexdigest()[:16], 16)
     rng = random.Random(seed)
 
@@ -10382,8 +10604,7 @@ def get_relic_upgrade_requirements(item_id, target_level):
     attempts = 0
     while len(selected) < type_count and attempts < 500:
         attempts += 1
-        # 이름 속성과 맞는 재료가 75%, 전체 전리품에서 무작위 재료가 25%.
-        # 이 덕분에 특정 이름이어도 모든 전리품이 강화 재료가 될 가능성이 있다.
+        # 고유 속성과 맞는 재료가 75%, 전체 전리품에서 무작위 재료가 25%.
         pool = themed_materials if themed_materials and rng.random() < 0.75 else all_materials
         candidate = rng.choice(pool)
         if candidate not in selected:
@@ -10428,14 +10649,19 @@ def get_missing_relic_materials(uid, requirements):
     return missing
 
 
-def consume_relic_upgrade_materials(uid, requirements):
+def consume_relic_upgrade_materials(uid, requirements, consume_rate=1.0):
     inventory = get_adventure_inventory(uid)
+    consumed = []
+    consume_rate = max(0.0, min(1.0, float(consume_rate)))
     for material_id, required in requirements:
-        remaining = max(0, int(inventory.get(material_id, 0)) - int(required))
+        amount = max(1, int(math.ceil(int(required) * consume_rate))) if consume_rate > 0 else 0
+        remaining = max(0, int(inventory.get(material_id, 0)) - amount)
         if remaining > 0:
             inventory[material_id] = remaining
         else:
             inventory.pop(material_id, None)
+        consumed.append((material_id, amount))
+    return consumed
 
 
 def build_owned_relic_embed(member, uid, page=0):
@@ -10464,11 +10690,12 @@ def build_owned_relic_embed(member, uid, page=0):
             elif level >= RELIC_MAX_ENHANCEMENT:
                 next_text = "최대 강화 완료"
             else:
-                chance = get_relic_upgrade_success_rate(item_id, level + 1)
+                chance = get_relic_upgrade_success_rate(item_id, level + 1, uid)
                 next_text = f"다음 강화 성공률 {chance:.0f}%"
 
+            equipped_mark = " · ✅ 장착" if item_id in get_equipped_relic_ids(uid) else ""
             lines.append(
-                f"{format_relic_name(uid, item_id)} ×{count}\n"
+                f"{format_relic_name(uid, item_id)} ×{count}{equipped_mark}\n"
                 f"└ {rarity['emoji']} {rarity['name']} · {next_text}"
             )
         embed.description = "\n\n".join(lines)
@@ -10492,6 +10719,7 @@ def build_relic_detail_embed(member, uid, item_id):
     owned_count = max(0, int(inventory.get(item_id, 0)))
     theme_keys = get_relic_name_themes(item_id)
     theme_text = ", ".join(RELIC_MATERIAL_THEMES[key]["display"] for key in theme_keys)
+    equipped = item_id in get_equipped_relic_ids(uid)
 
     embed = discord.Embed(
         title=f"{style['emoji']} 유물 상세",
@@ -10504,8 +10732,13 @@ def build_relic_detail_embed(member, uid, item_id):
             f"등급: {rarity['emoji']} **{rarity['name']}**\n"
             f"강화: **+{level}/{RELIC_MAX_ENHANCEMENT}** · 색상: **{style['name']}**\n"
             f"보유 수량: **{owned_count}개**\n"
-            f"재료 공명: **{theme_text}**"
+            f"고유 속성: **{theme_text}** · {'✅ 장착 중' if equipped else '미장착'}"
         ),
+        inline=False,
+    )
+    embed.add_field(
+        name="현재 유물 효과",
+        value=format_relic_effects(uid, item_id),
         inline=False,
     )
 
@@ -10523,7 +10756,7 @@ def build_relic_detail_embed(member, uid, item_id):
         )
     else:
         target_level = level + 1
-        chance = get_relic_upgrade_success_rate(item_id, target_level)
+        chance = get_relic_upgrade_success_rate(item_id, target_level, uid)
         requirements = get_relic_upgrade_requirements(item_id, target_level)
         lines = []
         for material_id, required in requirements:
@@ -10544,13 +10777,14 @@ def build_relic_detail_embed(member, uid, item_id):
         embed.add_field(
             name="성공 확률",
             value=(
-                f"**{chance:.0f}%**\n"
-                "강화 버튼을 누르면 성공 여부와 관계없이 표시된 재료가 소모돼."
+                f"**{chance:.0f}%** · 연속 실패 보정 **+{state['fail_streak'] * RELIC_PITY_BONUS_PER_FAIL:.0f}%p**\n"
+                f"성공하면 재료 전부, 실패하면 재료의 **{RELIC_FAILURE_MATERIAL_CONSUME_RATE * 100:.0f}%**만 소모돼.\n"
+                f"다음 단계 효과: {format_relic_effects(uid, item_id, override_level=target_level)}"
             ),
             inline=False,
         )
 
-    embed.set_footer(text=f"강화 시도 {state['attempts']}회 · 실패 {state['failures']}회")
+    embed.set_footer(text=f"강화 시도 {state['attempts']}회 · 누적 실패 {state['failures']}회 · 연속 실패 {state['fail_streak']}회")
     return embed
 
 
@@ -10595,6 +10829,9 @@ class RelicUpgradeView(discord.ui.View):
             state["level"] >= RELIC_MAX_ENHANCEMENT
             or self.item_id not in discovered_items
         )
+        equipped = self.item_id in get_equipped_relic_ids(self.user_id)
+        self.equip_button.label = "💠 유물 해제" if equipped else "💠 유물 장착"
+        self.equip_button.style = discord.ButtonStyle.secondary if equipped else discord.ButtonStyle.success
 
     @discord.ui.button(label="🔨 강화 도전", style=discord.ButtonStyle.danger)
     async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -10630,22 +10867,36 @@ class RelicUpgradeView(discord.ui.View):
                 )
                 return
 
-            consume_relic_upgrade_materials(self.user_id, requirements)
-            chance = get_relic_upgrade_success_rate(self.item_id, target_level)
+            chance = get_relic_upgrade_success_rate(self.item_id, target_level, self.user_id)
             success = random.random() * 100 < chance
             state["attempts"] += 1
 
             if success:
+                consume_relic_upgrade_materials(self.user_id, requirements, 1.0)
                 state["level"] = target_level
+                state["fail_streak"] = 0
                 result_text = (
                     f"🎉 **강화 성공!** {get_adventure_item_name(self.item_id)}이(가) "
-                    f"**+{target_level}**이 됐어."
+                    f"**+{target_level}**이 됐어.\n"
+                    f"새 효과: **{format_relic_effects(self.user_id, self.item_id)}**"
                 )
             else:
+                consumed = consume_relic_upgrade_materials(
+                    self.user_id,
+                    requirements,
+                    RELIC_FAILURE_MATERIAL_CONSUME_RATE,
+                )
                 state["failures"] += 1
+                state["fail_streak"] += 1
+                consumed_text = ", ".join(
+                    f"{get_adventure_item_name(material_id)} ×{amount}"
+                    for material_id, amount in consumed
+                )
+                next_chance = get_relic_upgrade_success_rate(self.item_id, target_level, self.user_id)
                 result_text = (
-                    f"💥 **강화 실패...** 성공 확률은 **{chance:.0f}%**였어. "
-                    "재료는 소모됐지만 강화 단계는 유지돼."
+                    f"💥 **강화 실패...** 이번 성공 확률은 **{chance:.0f}%**였어.\n"
+                    f"절반 소모: {consumed_text}\n"
+                    f"연속 실패 보정으로 다음 성공 확률은 **{next_chance:.0f}%**야."
                 )
 
             save_data()
@@ -10655,6 +10906,38 @@ class RelicUpgradeView(discord.ui.View):
                 embed=embed,
                 view=RelicUpgradeView(self.user_id, self.member, self.item_id),
             )
+
+    @discord.ui.button(label="💠 유물 장착", style=discord.ButtonStyle.success)
+    async def equip_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        owned_ids = {item_id for item_id, _ in get_owned_relic_entries(self.user_id)}
+        if self.item_id not in owned_ids:
+            await interaction.response.send_message("❌ 그 유물을 가지고 있지 않아.", ephemeral=True)
+            return
+
+        adventure = get_adventure(self.user_id)
+        equipped = get_equipped_relic_ids(self.user_id)
+        if self.item_id in equipped:
+            adventure["equipped_relics"] = [item_id for item_id in equipped if item_id != self.item_id]
+            result = "✅ 유물을 해제했어."
+        else:
+            if len(equipped) >= RELIC_MAX_EQUIPPED:
+                await interaction.response.send_message(
+                    f"❌ 유물은 최대 **{RELIC_MAX_EQUIPPED}개**까지 장착할 수 있어.",
+                    ephemeral=True,
+                )
+                return
+            adventure["equipped_relics"] = equipped + [self.item_id]
+            result = "✅ 유물을 장착했어. 효과는 다음 개인 모험 시작부터 적용돼."
+        save_data()
+        embed = build_relic_detail_embed(self.member, self.user_id, self.item_id)
+        embed.add_field(name="장착 변경", value=result, inline=False)
+        await interaction.response.edit_message(
+            embed=embed,
+            view=RelicUpgradeView(self.user_id, self.member, self.item_id),
+        )
+
 
 def add_adventure_item(uid, item_id, amount=1):
     if item_id not in ADVENTURE_ITEM_CATALOG:
@@ -10982,34 +11265,47 @@ def pick_world_loot(adventure):
     )
 
 
+def get_relic_discovery_stats():
+    global relic_discovery_stats
+    if not isinstance(relic_discovery_stats, dict):
+        relic_discovery_stats = {}
+    relic_discovery_stats.setdefault("total_relic_rolls", 0)
+    relic_discovery_stats.setdefault("attempts_since_transcendent", 0)
+    relic_discovery_stats["total_relic_rolls"] = max(0, int(relic_discovery_stats.get("total_relic_rolls", 0)))
+    relic_discovery_stats["attempts_since_transcendent"] = max(0, int(relic_discovery_stats.get("attempts_since_transcendent", 0)))
+    data["relic_discovery_stats"] = relic_discovery_stats
+    return relic_discovery_stats
+
+
+def get_transcendent_relic_chance_percent(attempts):
+    attempts = max(0, int(attempts))
+    if attempts >= ADVENTURE_TRANSCENDENT_HARD_PITY:
+        return 100.0
+    chance = ADVENTURE_TRANSCENDENT_RELIC_CHANCE_PERCENT
+    if attempts >= ADVENTURE_TRANSCENDENT_SOFT_PITY_START:
+        pity_blocks = (attempts - ADVENTURE_TRANSCENDENT_SOFT_PITY_START) // 100 + 1
+        chance += pity_blocks * ADVENTURE_TRANSCENDENT_SOFT_PITY_PER_100
+    return min(5.0, chance)
+
+
 def pick_mystery_relic(adventure=None):
-    """
-    초월 유물은 일반 유물 풀에서 완전히 제외하고,
-    유물 획득 시도마다 정확히 0.00015% 확률로만 별도 등장한다.
-    """
+    """초월은 서버 공유 천장으로 판정하고, 나머지는 지형별 일반 유물 풀에서 뽑는다."""
     terrain_key = (adventure or {}).get("terrain") or "grassland"
+    stats = get_relic_discovery_stats()
+    stats["total_relic_rolls"] += 1
+    stats["attempts_since_transcendent"] += 1
 
     transcendent_relics = [
         item_id
         for item_id, item in ADVENTURE_ITEM_CATALOG.items()
-        if item.get("kind") == "relic"
-        and item.get("rarity") == "transcendent"
+        if item.get("kind") == "relic" and item.get("rarity") == "transcendent"
     ]
+    chance = get_transcendent_relic_chance_percent(stats["attempts_since_transcendent"])
+    if transcendent_relics and random.random() * 100 < chance:
+        stats["attempts_since_transcendent"] = 0
+        undiscovered = [item_id for item_id in transcendent_relics if item_id not in discovered_items]
+        return random.choice(undiscovered or transcendent_relics)
 
-    # random.random() * 100은 0~100 퍼센트 값이므로
-    # 0.00015와 비교하면 정확히 0.00015% 확률이다.
-    if (
-        transcendent_relics
-        and random.random() * 100 < ADVENTURE_TRANSCENDENT_RELIC_CHANCE_PERCENT
-    ):
-        undiscovered_transcendent = [
-            item_id
-            for item_id in transcendent_relics
-            if item_id not in discovered_items
-        ]
-        return random.choice(undiscovered_transcendent or transcendent_relics)
-
-    # 초월 판정에 실패했을 때는 절대로 일반 랜덤에서 초월이 나오지 않는다.
     all_relics = [
         item_id
         for item_id, item in ADVENTURE_ITEM_CATALOG.items()
@@ -11017,26 +11313,16 @@ def pick_mystery_relic(adventure=None):
         and item.get("rarity") != "transcendent"
         and item.get("terrain") == terrain_key
     ]
-
     if not all_relics:
         all_relics = [
             item_id
             for item_id, item in ADVENTURE_ITEM_CATALOG.items()
-            if item.get("kind") == "relic"
-            and item.get("rarity") != "transcendent"
+            if item.get("kind") == "relic" and item.get("rarity") != "transcendent"
         ]
 
-    undiscovered = [
-        item_id
-        for item_id in all_relics
-        if item_id not in discovered_items
-    ]
-
-    # 아직 이름 없는 유물이 있으면 새 발견이 더 잘 나오지만,
-    # 이 보정으로 초월 유물이 끼어들지는 못한다.
+    undiscovered = [item_id for item_id in all_relics if item_id not in discovered_items]
     if undiscovered and random.random() < 0.78:
         return random.choice(undiscovered)
-
     return random.choice(all_relics)
 
 
@@ -14302,7 +14588,7 @@ async def adventure_inventory_command(interaction: discord.Interaction):
 
 
 
-@bot.tree.command(name="유물", description="보유한 유물과 강화 재료를 확인한다", guild=GUILD)
+@bot.tree.command(name="유물", description="보유 유물의 효과·장착·강화를 관리한다", guild=GUILD)
 @app_commands.describe(이름="상세 확인하거나 강화할 유물. 비워두면 전체 목록 표시")
 async def owned_relic_command(interaction: discord.Interaction, 이름: str = None):
     uid = str(interaction.user.id)
@@ -14350,6 +14636,90 @@ async def owned_relic_autocomplete(interaction: discord.Interaction, current: st
             break
 
     return choices
+
+
+@bot.tree.command(name="초월합성", description="서로 다른 +7 신화 유물 3개와 모라로 초월 유물을 합성한다", guild=GUILD)
+@app_commands.describe(이름="초월 유물이 아직 발견되지 않았다면 등록할 이름(1~6자)")
+async def transcend_relic_synthesis(interaction: discord.Interaction, 이름: str = None):
+    uid = str(interaction.user.id)
+    inventory = get_adventure_inventory(uid)
+    transcendent_ids = [
+        item_id for item_id, item in ADVENTURE_ITEM_CATALOG.items()
+        if item.get("kind") == "relic" and item.get("rarity") == "transcendent"
+    ]
+    if not transcendent_ids:
+        await interaction.response.send_message("❌ 초월 유물 데이터가 없어.", ephemeral=True)
+        return
+    transcendent_id = transcendent_ids[0]
+    if int(inventory.get(transcendent_id, 0)) > 0:
+        await interaction.response.send_message("❌ 이미 초월 유물을 보유하고 있어.", ephemeral=True)
+        return
+
+    eligible = [
+        item_id for item_id, count in inventory.items()
+        if int(count) > 0
+        and ADVENTURE_ITEM_CATALOG.get(item_id, {}).get("rarity") == "mythic"
+        and get_relic_upgrade_state(uid, item_id)["level"] >= RELIC_MAX_ENHANCEMENT
+    ]
+    eligible = list(dict.fromkeys(eligible))
+    if len(eligible) < 3:
+        await interaction.response.send_message(
+            f"❌ 서로 다른 **+7 신화 유물 3개**가 필요해. 현재 조건 충족: **{len(eligible)}개**",
+            ephemeral=True,
+        )
+        return
+    if get_poker_money(uid) < TRANSCENDENT_SYNTHESIS_COST:
+        await interaction.response.send_message(
+            f"❌ 합성 비용이 부족해. 필요: **{TRANSCENDENT_SYNTHESIS_COST:,}모라**",
+            ephemeral=True,
+        )
+        return
+
+    if transcendent_id not in discovered_items:
+        if not 이름:
+            await interaction.response.send_message(
+                "❌ 서버 최초 초월 합성이야. `이름`에 1~6자의 유물 이름을 입력해줘.",
+                ephemeral=True,
+            )
+            return
+        valid, result = validate_relic_name(이름)
+        if not valid:
+            await interaction.response.send_message(f"❌ {result}", ephemeral=True)
+            return
+        clean_name = result
+    else:
+        clean_name = discovered_items[transcendent_id]["name"]
+
+    consumed = eligible[:3]
+    for item_id in consumed:
+        inventory[item_id] = int(inventory.get(item_id, 0)) - 1
+        if inventory[item_id] <= 0:
+            inventory.pop(item_id, None)
+            relic_upgrades.get(uid, {}).pop(item_id, None)
+        adventure = get_adventure(uid)
+        adventure["equipped_relics"] = [rid for rid in adventure.get("equipped_relics", []) if rid != item_id]
+
+    add_poker_money(uid, -TRANSCENDENT_SYNTHESIS_COST)
+    add_adventure_item(uid, transcendent_id, 1)
+    if transcendent_id not in discovered_items:
+        discovered_items[transcendent_id] = {
+            "name": clean_name,
+            "discoverer_id": uid,
+            "discoverer_name": interaction.user.display_name,
+            "discovered_at": datetime.now(KST).isoformat(),
+            "upgrade_recipe_version": 2,
+            "discovery_method": "mythic_synthesis",
+        }
+    get_relic_discovery_stats()["attempts_since_transcendent"] = 0
+    save_data()
+
+    consumed_names = ", ".join(get_adventure_item_name(item_id) for item_id in consumed)
+    await interaction.response.send_message(
+        f"🌌 **초월 합성 성공!**\n"
+        f"획득: **{clean_name}**\n"
+        f"소모 신화 유물: {consumed_names}\n"
+        f"소모 모라: **{TRANSCENDENT_SYNTHESIS_COST:,}모라**"
+    )
 
 
 @bot.tree.command(name="유물도감", description="서버에서 발견된 이름 있는 유물을 확인한다", guild=GUILD)
@@ -15173,6 +15543,7 @@ PARTY_EXPLORE_WAIT_MAX = 5
 PARTY_BATTLE_SAFE_TURNS = 1
 PARTY_LEVEL_SYSTEM_VERSION = 1
 PARTY_BOT_STORAGE_CHANCE = 0.30
+PARTY_TOKEN_NAME = "원정 인장"
 
 # 파티 모험에서만 사용되는 판별 유물. 획득 즉시 파티 전체에 적용되고 한 판이 끝나면 사라진다.
 PARTY_RELICS = {
@@ -15563,6 +15934,93 @@ def save_party_data():
 load_party_data()
 
 
+def get_party_profile(uid):
+    uid = str(uid)
+    if uid not in party_profiles or not isinstance(party_profiles[uid], dict):
+        party_profiles[uid] = {}
+    profile = party_profiles[uid]
+    defaults = {
+        "tokens": 0,
+        "runs": 0,
+        "clears": 0,
+        "hard_clears": 0,
+        "boss_kills": 0,
+        "total_turns": 0,
+        "best_depth": 0,
+        "first_clear_rewarded": False,
+        "titles": [],
+    }
+    for key, value in defaults.items():
+        if key not in profile:
+            profile[key] = value.copy() if isinstance(value, list) else value
+    for key in ("tokens", "runs", "clears", "hard_clears", "boss_kills", "total_turns", "best_depth"):
+        profile[key] = max(0, int(profile.get(key, 0)))
+    profile["first_clear_rewarded"] = bool(profile.get("first_clear_rewarded", False))
+    if not isinstance(profile.get("titles"), list):
+        profile["titles"] = []
+    profile["titles"] = list(dict.fromkeys(str(title) for title in profile["titles"]))
+    return profile
+
+
+def grant_party_permanent_rewards(party, victory=False, voluntary=False):
+    run = party.get("run") or {}
+    if run.get("permanent_rewards_granted"):
+        return str(run.get("permanent_reward_summary", ""))
+
+    humans = party_human_members(party)
+    if not humans:
+        run["permanent_rewards_granted"] = True
+        run["permanent_reward_summary"] = "영구 보상을 받을 실제 유저가 없었어."
+        save_party_data()
+        return run["permanent_reward_summary"]
+
+    turns = max(0, int(run.get("turn", 0)))
+    bosses = max(0, int(run.get("boss_kills", 0)))
+    depth = ADVENTURE_TERRAIN_DEPTH.get(run.get("terrain"), 1)
+    token_base = max(5, turns * 2 + bosses * 15 + depth * 10)
+    if victory:
+        token_base += 100
+    elif voluntary:
+        token_base = max(5, int(token_base * 0.45))
+    else:
+        token_base = max(5, int(token_base * 0.65))
+    if party.get("hard_mode"):
+        token_base = int(token_base * 1.4)
+
+    mora_rate = 0.50 if victory else (0.15 if voluntary else 0.25)
+    mora_each = int(int(run.get("coins", 0)) * mora_rate / max(1, len(humans)))
+    reward_lines = []
+
+    for uid in humans:
+        profile = get_party_profile(uid)
+        profile["tokens"] += token_base
+        profile["runs"] += 1
+        profile["boss_kills"] += bosses
+        profile["total_turns"] += turns
+        profile["best_depth"] = max(profile["best_depth"], depth)
+        first_clear_gems = 0
+        if victory:
+            profile["clears"] += 1
+            if party.get("hard_mode"):
+                profile["hard_clears"] += 1
+            if not profile["first_clear_rewarded"]:
+                profile["first_clear_rewarded"] = True
+                first_clear_gems = 160
+                add_primogems(uid, first_clear_gems)
+        if mora_each > 0:
+            add_poker_money(uid, mora_each)
+        reward_lines.append(
+            f"<@{uid}> · {PARTY_TOKEN_NAME} **+{token_base}** · 모라 **+{mora_each:,}**"
+            + (f" · 첫 완주 원석 **+{first_clear_gems}**" if first_clear_gems else "")
+        )
+
+    run["permanent_rewards_granted"] = True
+    run["permanent_reward_summary"] = "\n".join(reward_lines)
+    save_data()
+    save_party_data()
+    return run["permanent_reward_summary"]
+
+
 def get_party_lock(party_id):
     party_id = str(party_id)
     if party_id not in party_locks:
@@ -15684,7 +16142,7 @@ def build_party_recruit_embed(party):
             f"시작 지형: **{get_terrain_display(party.get('start_terrain', 'grassland'))}**\n"
             f"파티 스레드: {thread_text}\n\n"
             + "\n".join(member_lines)
-            + "\n\n빈자리가 남은 채 시작하면 NPC 용병이 자동으로 채워져."
+            + "\n\n빈자리가 남은 채 시작하면 NPC 용병이 자동으로 채워져.\n원정 레벨·장비·유물은 판이 끝나면 사라지고, 원정 인장과 정산 모라는 영구 지급돼."
         ),
         color=discord.Color.red() if party.get("hard_mode") else discord.Color.blurple(),
     )
@@ -15700,7 +16158,7 @@ def build_party_lobby_embed(party):
         job = party.get("jobs", {}).get(uid)
         leader = "👑 " if uid == str(party.get("leader_id")) else ""
         job_text = party_job_text(job) if job in PARTY_JOB_INFO else "🎭 미선택"
-        lines.append(f"{leader}**{name}** · 파티 Lv.1 시작 · {job_text}")
+        lines.append(f"{leader}**{name}** · 원정 Lv.1 시작 · {job_text}")
 
     missing = PARTY_TOTAL_SLOTS - len(lines)
     if missing > 0:
@@ -15724,7 +16182,7 @@ def build_party_lobby_embed(party):
         ),
         color=discord.Color.dark_teal(),
     )
-    embed.set_footer(text="파티 모험 레벨은 기존 서버 레벨과 별개이며, 유저와 용병 모두 Lv.1에서 시작해.")
+    embed.set_footer(text="원정 레벨·장비·유물은 이번 판 전용이며 종료 시 초기화돼. 대신 원정 인장과 일부 모라는 영구 지급돼.")
     return embed
 
 
@@ -15811,9 +16269,9 @@ def build_party_status_lines(party):
         need_exp = party_level_exp_required(level)
         rookie = " · 🌱 초보자 강화 +15%" if level <= 20 else ""
         lines.append(
-            f"{marker} **{player.get('name')}** · 파티 Lv.{level} ({exp}/{need_exp} EXP) · "
+            f"{marker} **{player.get('name')}** · 원정 Lv.{level} ({exp}/{need_exp} EXP) · "
             f"{party_job_text(player.get('job', '전사'))} · {state}{rookie}\n"
-            f"└ 🗡️ {player.get('weapon')} / 🛡️ {player.get('armor')}"
+            f"└ 🗡️ [원정] {player.get('weapon')} / 🛡️ [원정] {player.get('armor')}"
         )
     return lines
 
@@ -16415,6 +16873,8 @@ def initialize_party_run(party):
         "battle_safe_turns": 0,
         "last_result": None,
         "end_votes": [],
+        "permanent_rewards_granted": False,
+        "permanent_reward_summary": "",
         "level_system_version": PARTY_LEVEL_SYSTEM_VERSION,
         "started_at": datetime.now(KST).isoformat(),
     }
@@ -16850,6 +17310,7 @@ def revive_party_at_camp(run):
 
 def party_run_summary_embed(party, victory=False, reason=None, voluntary=False):
     run = party.get("run") or {}
+    permanent_reward_text = grant_party_permanent_rewards(party, victory=victory, voluntary=voluntary)
     if voluntary:
         title = "🏳️ 파티 모험 중도 종료"
         color = discord.Color.orange()
@@ -16866,11 +17327,12 @@ def party_run_summary_embed(party, victory=False, reason=None, voluntary=False):
         f"보스 처치: **{int(run.get('boss_kills', 0))}마리**\n"
         f"발견 장비: **{int(run.get('equipment_found', 0))}개**\n"
         f"발견 유물: **{len(run.get('relics', []))}개**\n"
-        f"평균 파티 레벨: **Lv.{average_party_level:.1f}**\n"
+        f"평균 원정 레벨: **Lv.{average_party_level:.1f}**\n"
         f"남은 공용 모라: **{int(run.get('coins', 0)):,}모라**"
     )
     if reason:
         description += f"\n\n{reason}"
+    description += f"\n\n## 영구 원정 보상\n{permanent_reward_text}"
     return discord.Embed(title=title, description=description, color=color)
 
 
@@ -18764,6 +19226,118 @@ async def party_status_command(interaction: discord.Interaction):
     content = thread.mention if thread else None
     await interaction.response.send_message(content=content, embed=embed, ephemeral=True)
 
+
+@bot.tree.command(name="원정프로필", description="파티 원정의 영구 기록과 원정 인장을 확인한다", guild=GUILD)
+async def expedition_profile_command(interaction: discord.Interaction):
+    profile = get_party_profile(interaction.user.id)
+    best_depth = int(profile.get("best_depth", 0))
+    best_terrain = next(
+        (info.get("name", key) for key, info in ADVENTURE_TERRAINS.items() if ADVENTURE_TERRAIN_DEPTH.get(key) == best_depth),
+        "기록 없음",
+    )
+    titles = ", ".join(profile.get("titles", [])) or "없음"
+    embed = discord.Embed(title=f"🧭 {interaction.user.display_name}의 원정 프로필", color=discord.Color.teal())
+    embed.add_field(
+        name="영구 기록",
+        value=(
+            f"{PARTY_TOKEN_NAME}: **{profile['tokens']:,}개**\n"
+            f"참가: **{profile['runs']}회** · 완주: **{profile['clears']}회** · 하드 완주: **{profile['hard_clears']}회**\n"
+            f"누적 보스: **{profile['boss_kills']}마리** · 누적 턴: **{profile['total_turns']}턴**\n"
+            f"최고 도달: **{best_terrain}**\n칭호: **{titles}**"
+        ),
+        inline=False,
+    )
+    embed.set_footer(text="원정 내부 레벨·장비·유물은 매 판 초기화되지만 이 기록과 인장은 유지돼.")
+    await interaction.response.send_message(embed=embed)
+
+
+@bot.tree.command(name="원정교환", description="원정 인장을 영구 보상으로 교환한다", guild=GUILD)
+@app_commands.describe(보상="교환할 보상")
+@app_commands.choices(보상=[
+    app_commands.Choice(name="100 인장 → 20,000 모라", value="mora"),
+    app_commands.Choice(name="250 인장 → 160 원석", value="primogem"),
+    app_commands.Choice(name="1,000 인장 → 숙련 원정대원 칭호", value="title"),
+])
+async def expedition_exchange_command(interaction: discord.Interaction, 보상: app_commands.Choice[str]):
+    uid = str(interaction.user.id)
+    profile = get_party_profile(uid)
+    rewards = {
+        "mora": (100, "20,000 모라"),
+        "primogem": (250, "160 원석"),
+        "title": (1000, "숙련 원정대원 칭호"),
+    }
+    cost, label = rewards[보상.value]
+    if profile["tokens"] < cost:
+        await interaction.response.send_message(
+            f"❌ {PARTY_TOKEN_NAME}이 부족해. 필요 **{cost}개**, 보유 **{profile['tokens']}개**",
+            ephemeral=True,
+        )
+        return
+    if 보상.value == "title" and "숙련 원정대원" in profile["titles"]:
+        await interaction.response.send_message("❌ 이미 그 칭호를 보유하고 있어.", ephemeral=True)
+        return
+    profile["tokens"] -= cost
+    if 보상.value == "mora":
+        add_poker_money(uid, 20_000)
+    elif 보상.value == "primogem":
+        add_primogems(uid, 160)
+    else:
+        profile["titles"].append("숙련 원정대원")
+    save_data()
+    await interaction.response.send_message(
+        f"✅ {PARTY_TOKEN_NAME} **{cost}개**를 사용해 **{label}**을(를) 받았어.\n"
+        f"남은 인장: **{profile['tokens']}개**"
+    )
+
+
+@bot.tree.command(name="게임프로필", description="서버 활동·사냥·개인 모험·파티 원정 진행도를 한 번에 확인한다", guild=GUILD)
+async def game_profile_command(interaction: discord.Interaction):
+    uid = str(interaction.user.id)
+    activity = get_level_data(interaction.user.id)
+    hunt_user = get_hunt_user(uid)
+    adventure = get_adventure(uid)
+    expedition = get_party_profile(uid)
+    user_chars = characters.get(uid, {})
+    equipped_relics = get_equipped_relic_ids(uid)
+
+    embed = discord.Embed(title=f"🎮 {interaction.user.display_name}의 게임 프로필", color=discord.Color.blurple())
+    embed.add_field(
+        name="💬 서버 활동 레벨",
+        value=f"Lv.**{activity['level']}** · XP **{activity['xp']}/{required_xp(activity['level'])}**",
+        inline=False,
+    )
+    embed.add_field(
+        name="⚔️ 사냥 성장(영구)",
+        value=(
+            f"사냥 Lv.**{hunt_user['level']}** · 직업 **{hunt_user.get('job') or '미선택'}**\n"
+            f"장비: 🗡️ **{hunt_user['weapon']}** / 🛡️ **{hunt_user['armor']}**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🧭 개인 모험 성장(영구)",
+        value=(
+            f"모험 Lv.**{adventure['level']}** · 최고 지형 깊이 **{adventure.get('best_terrain_rank', 0)}**\n"
+            f"장비: 🗡️ **{adventure['weapon']}** / 🛡️ **{adventure['armor']}**\n"
+            f"장착 유물: **{len(equipped_relics)}/{RELIC_MAX_EQUIPPED}개**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🏕️ 파티 원정 기록(판 내부 성장은 초기화)",
+        value=(
+            f"{PARTY_TOKEN_NAME} **{expedition['tokens']}개** · 완주 **{expedition['clears']}회**\n"
+            f"누적 보스 **{expedition['boss_kills']}마리** · 최고 깊이 **{expedition['best_depth']}**"
+        ),
+        inline=False,
+    )
+    embed.add_field(
+        name="🌠 캐릭터 수집",
+        value=f"보유 캐릭터 **{len(user_chars)}명** · 원석 **{get_primogems(uid):,}개** · 모라 **{get_poker_money(uid):,}**",
+        inline=False,
+    )
+    embed.set_footer(text="서버 활동 / 사냥 / 개인 모험 / 파티 원정은 서로 다른 성장축이야.")
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.event
