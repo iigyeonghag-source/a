@@ -8696,6 +8696,38 @@ RELIC_EFFECT_LABELS = {
     "max_lives": "최대 목숨",
 }
 
+# 최초 발견자가 유물 성능을 설계할 때 사용할 수 있는 총 코스트.
+# 각 비유물 아이템에는 build_adventure_item_catalog()에서 고유 코스트가 부여된다.
+RELIC_CREATION_MAX_COST = 100
+RELIC_CREATION_PROFILE_VERSION = 3
+RELIC_CREATION_MATERIAL_PAGE_SIZE = 25
+RELIC_MATERIAL_BASE_COST_BY_RARITY = {
+    "common": 2,
+    "uncommon": 4,
+    "rare": 7,
+    "epic": 12,
+    "legendary": 20,
+    "mythic": 30,
+    "transcendent": 40,
+}
+
+# 지형별 사건 성향. 배율이 1보다 크면 해당 사건이 더 자주 등장한다.
+# 재료 기본 구간도 종전보다 소폭 늘려 전체적으로 재료가 조금 더 잘 나온다.
+ADVENTURE_TERRAIN_EVENT_MODIFIERS = {
+    "desert": {"relic": 1.55, "material": 1.00, "monster": 1.00, "spring": 1.00},
+    "grassland": {"relic": 1.00, "material": 1.55, "monster": 0.95, "spring": 1.00},
+    "jungle": {"relic": 1.00, "material": 1.70, "monster": 1.00, "spring": 1.00},
+    "cave": {"relic": 1.80, "material": 1.05, "monster": 1.00, "spring": 0.85},
+    "mountain": {"relic": 1.45, "material": 1.00, "monster": 1.22, "spring": 0.90},
+    "ice": {"relic": 1.00, "material": 0.45, "monster": 1.42, "spring": 0.80},
+    "demon": {"relic": 1.00, "material": 0.90, "monster": 1.50, "spring": 0.00},
+    "heaven": {"relic": 1.00, "material": 1.00, "monster": 1.00, "spring": 2.20},
+}
+ADVENTURE_BASE_MATERIAL_EVENT_SPAN = 25.0
+ADVENTURE_BASE_MONEY_EVENT_SPAN = 13.0
+ADVENTURE_BASE_SPRING_EVENT_SPAN = 7.0
+ADVENTURE_CAVE_HEAVEN_SHORTCUT_RATE = 20.0
+
 # 한 번 이동했을 때 일반 몬스터를 만날 기본 확률.
 # 기본 35%이며, 몬스터가 나오지 않은 턴마다 15%p씩 올라 최대 80%가 된다.
 # 보스 출현 판정은 이 확률과 별개로 매 턴 진행된다.
@@ -9092,8 +9124,10 @@ def get_terrain_name(terrain_key):
     return f"{terrain['emoji']} {terrain['name']}"
 
 
-def valid_terrain_destinations(source, destinations=None):
-    allowed = ADVENTURE_TERRAIN_ROUTES.get(source, [])
+def valid_terrain_destinations(source, destinations=None, allow_cave_heaven_shortcut=False):
+    allowed = list(ADVENTURE_TERRAIN_ROUTES.get(source, []))
+    if allow_cave_heaven_shortcut and source == "cave" and "heaven" not in allowed:
+        allowed.append("heaven")
     if destinations is None:
         destinations = allowed
 
@@ -9102,9 +9136,10 @@ def valid_terrain_destinations(source, destinations=None):
         # 마계 진입은 고산지대와 얼음 지대에서만 허용한다.
         if destination == "demon" and source not in {"mountain", "ice"}:
             continue
-        # 천계 진입은 마계에서만 허용한다.
+        # 천계는 원래 마계에서만 갈 수 있지만, 갈림길 생성 순간 20%에 당첨된 동굴은 예외다.
         if destination == "heaven" and source != "demon":
-            continue
+            if not (allow_cave_heaven_shortcut and source == "cave"):
+                continue
         # 최종장 지형은 반드시 바로 이전 스테이지의 보스 진행으로만 연결된다.
         if destination == "outskirts" and source != "heaven":
             continue
@@ -9149,14 +9184,14 @@ ADVENTURE_DROP_WEIGHTS = {
     "transcendent": 0.00015,
 }
 
-ADVENTURE_RELIC_TOTAL_COUNT = 1000
+ADVENTURE_RELIC_TOTAL_COUNT = 5000
 ADVENTURE_RELIC_RARITY_COUNTS = {
-    "uncommon": 665,
-    "rare": 230,
-    "epic": 86,
-    "legendary": 15,
-    "mythic": 3,
-    "transcendent": 1,
+    "uncommon": 3325,
+    "rare": 1150,
+    "epic": 430,
+    "legendary": 75,
+    "mythic": 15,
+    "transcendent": 5,
 }
 
 # 퍼센트 단위다. 0.00015% = 약 666,667번에 1번.
@@ -9852,18 +9887,26 @@ def get_adventure_boss_spawn_rate(adventure, next_turn=False):
     )
 
 
+def get_terrain_event_modifiers(terrain_key):
+    default = {"relic": 1.0, "material": 1.0, "monster": 1.0, "spring": 1.0}
+    modifiers = ADVENTURE_TERRAIN_EVENT_MODIFIERS.get(terrain_key, {})
+    return {key: float(modifiers.get(key, value)) for key, value in default.items()}
+
+
 def get_adventure_monster_spawn_rate(adventure):
-    """다음 일반 몬스터 조우 확률. 평화로운 턴이 이어질수록 확률이 오른다."""
+    """다음 일반 몬스터 조우 확률. 평화로운 턴과 현재 지형의 성향을 함께 반영한다."""
     quiet_turns = max(0, int(adventure.get("quiet_turns", 0)))
     boosts = adventure.get("boosts", {})
     good_event_shift = min(12.0, boosts.get("luck", 0) * 0.6)
+    terrain_key = adventure.get("terrain") or "grassland"
+    monster_mul = get_terrain_event_modifiers(terrain_key)["monster"]
 
     rate = (
         ADVENTURE_MONSTER_EVENT_RATE
         + quiet_turns * ADVENTURE_MONSTER_PITY_PER_TURN
         - good_event_shift * 0.20
-    )
-    return max(5.0, min(ADVENTURE_MONSTER_EVENT_RATE_MAX, rate))
+    ) * monster_mul
+    return max(5.0, min(88.0, rate))
 
 
 def get_adventure_equipment_text(adventure):
@@ -9957,8 +10000,8 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
 
 def build_adventure_relic_rarity_map():
     """
-    유물 1~120번은 기존 등급을 그대로 유지하고,
-    121~1000번만 추가 배치하여 기존 보유 유물의 등급이 바뀌지 않게 한다.
+    1~1000번은 이전 버전의 등급 배치를 그대로 유지하고,
+    1001~5000번만 추가 배치하여 이미 존재하던 유물의 등급이 바뀌지 않게 한다.
     """
     rarity_map = {}
 
@@ -9976,54 +10019,69 @@ def build_adventure_relic_rarity_map():
             rarity = "uncommon"
         rarity_map[relic_number] = rarity
 
-    # 기존 신화 1개/전설 4개를 유지한 채 목표 개수까지 추가한다.
+    # 기존 1000종에 고정되어 있던 상위 등급 ID를 그대로 보존한다.
     for relic_number in {499, 997}:
         rarity_map[relic_number] = "mythic"
-
     for relic_number in {
         174, 232, 290, 348, 406, 464,
         522, 580, 638, 696, 754,
     }:
         rarity_map[relic_number] = "legendary"
-
-    # 1000번은 단 하나뿐인 초월 유물이다.
     rarity_map[1000] = "transcendent"
 
-    available_numbers = [
-        relic_number
-        for relic_number in range(121, 1000)
+    # 121~999번을 예전 목표 개수에 맞춰 채워 기존 1000종의 배치를 완전히 재현한다.
+    legacy_targets = {
+        "uncommon": 665,
+        "rare": 230,
+        "epic": 86,
+        "legendary": 15,
+        "mythic": 3,
+        "transcendent": 1,
+    }
+    legacy_available = [
+        relic_number for relic_number in range(121, 1000)
         if relic_number not in rarity_map
     ]
+    legacy_rng = random.Random(20260707)
+    legacy_rng.shuffle(legacy_available)
+    legacy_cursor = 0
+    for rarity in ("epic", "rare", "uncommon"):
+        current = list(rarity_map.values()).count(rarity)
+        needed = legacy_targets[rarity] - current
+        for relic_number in legacy_available[legacy_cursor:legacy_cursor + needed]:
+            rarity_map[relic_number] = rarity
+        legacy_cursor += needed
 
-    # 새 일반/희귀/영웅 유물은 고정 시드로 섞어 서버 재시작 후에도 등급이 유지된다.
-    rng = random.Random(20260707)
-    rng.shuffle(available_numbers)
+    if len(rarity_map) != 1000:
+        raise RuntimeError(f"기존 유물 등급 복원 오류: {len(rarity_map)} / 1000")
+
+    # 새 초월 유물은 각 1000번 단위의 끝에 배치한다.
+    for relic_number in (2000, 3000, 4000, 5000):
+        rarity_map[relic_number] = "transcendent"
+
+    new_available = [
+        relic_number for relic_number in range(1001, ADVENTURE_RELIC_TOTAL_COUNT + 1)
+        if relic_number not in rarity_map
+    ]
+    rng = random.Random(20260716)
+    rng.shuffle(new_available)
 
     current_counts = {
         rarity: list(rarity_map.values()).count(rarity)
         for rarity in ADVENTURE_RELIC_RARITY_COUNTS
     }
-    epic_needed = ADVENTURE_RELIC_RARITY_COUNTS["epic"] - current_counts["epic"]
-    rare_needed = ADVENTURE_RELIC_RARITY_COUNTS["rare"] - current_counts["rare"]
-    uncommon_needed = ADVENTURE_RELIC_RARITY_COUNTS["uncommon"] - current_counts["uncommon"]
-
-    expected_remaining = epic_needed + rare_needed + uncommon_needed
-    if expected_remaining != len(available_numbers):
-        raise RuntimeError(
-            f"유물 등급 배치 수가 맞지 않음: 필요 {expected_remaining}, 남은 ID {len(available_numbers)}"
-        )
-
     cursor = 0
-    for relic_number in available_numbers[cursor:cursor + epic_needed]:
-        rarity_map[relic_number] = "epic"
-    cursor += epic_needed
+    # 상위 등급부터 고정 배치한 뒤 남은 전부를 고급으로 채운다.
+    for rarity in ("mythic", "legendary", "epic", "rare", "uncommon"):
+        needed = ADVENTURE_RELIC_RARITY_COUNTS[rarity] - current_counts.get(rarity, 0)
+        if needed < 0:
+            raise RuntimeError(f"유물 등급 목표가 기존 개수보다 적음: {rarity}")
+        for relic_number in new_available[cursor:cursor + needed]:
+            rarity_map[relic_number] = rarity
+        cursor += needed
 
-    for relic_number in available_numbers[cursor:cursor + rare_needed]:
-        rarity_map[relic_number] = "rare"
-    cursor += rare_needed
-
-    for relic_number in available_numbers[cursor:cursor + uncommon_needed]:
-        rarity_map[relic_number] = "uncommon"
+    if cursor != len(new_available):
+        raise RuntimeError(f"신규 유물 배치 오류: 사용 {cursor}, 남음 {len(new_available)}")
 
     actual_counts = {
         rarity: list(rarity_map.values()).count(rarity)
@@ -10034,9 +10092,7 @@ def build_adventure_relic_rarity_map():
             f"유물 총 개수 오류: {len(rarity_map)} / {ADVENTURE_RELIC_TOTAL_COUNT}"
         )
     if actual_counts != ADVENTURE_RELIC_RARITY_COUNTS:
-        raise RuntimeError(
-            f"유물 등급 개수 오류: {actual_counts}"
-        )
+        raise RuntimeError(f"유물 등급 개수 오류: {actual_counts}")
 
     return rarity_map
 
@@ -10045,7 +10101,7 @@ ADVENTURE_RELIC_RARITY_MAP = build_adventure_relic_rarity_map()
 
 
 def build_adventure_item_catalog():
-    """몬스터 전리품, 월드 재료, 이름을 붙이는 유물 1000종을 만든다."""
+    """몬스터 전리품, 확장 월드 재료, 이름을 붙이는 유물 5000종을 만든다."""
     catalog = {}
     terrain_keys = list(ADVENTURE_LOOT_TERRAINS)
 
@@ -10070,11 +10126,15 @@ def build_adventure_item_catalog():
                 "custom_name": False,
             }
 
+    # 앞 12개는 기존 ID를 보존한다. 뒤 항목만 신규 재료로 추가된다.
     prefixes = [
         "새벽빛", "해질녘", "푸른", "붉은", "은빛", "금빛",
         "고요한", "울부짖는", "메마른", "축축한", "별무늬", "심해의",
+        "달빛", "핏빛", "녹슨", "찬란한", "검푸른", "폭풍의",
+        "잊힌", "공허의",
     ]
 
+    # 앞 12개는 기존 ID를 보존한다. 신규 재료는 유물 성능 제작에도 사용할 수 있다.
     world_materials = [
         ("약초", "herb"),
         ("버섯", "herb"),
@@ -10088,6 +10148,14 @@ def build_adventure_item_catalog():
         ("물방울", "material"),
         ("조개", "material"),
         ("유리조각", "material"),
+        ("마력 가루", "material"),
+        ("정령핵", "material"),
+        ("야수의 털", "material"),
+        ("고대 톱니", "material"),
+        ("성광 조각", "material"),
+        ("암흑 정수", "material"),
+        ("폭풍 씨앗", "material"),
+        ("용의 비늘", "material"),
     ]
 
     for prefix_index, prefix in enumerate(prefixes):
@@ -10114,15 +10182,40 @@ def build_adventure_item_catalog():
                 "terrain": terrain_keys[(prefix_index + material_index) % len(terrain_keys)],
             }
 
+    # 앞 6개는 기존 지형 재료 ID를 보존하고, 뒤 6개를 신규 추가한다.
     terrain_materials = {
-        "desert": ["태양 선인장", "유리 모래", "전갈 독침", "사막 장미", "고대 토기", "열풍 결정"],
-        "grassland": ["바람풀", "들꽃 꿀", "푸른 씨앗", "초원 양털", "맑은 이슬", "야생 곡식"],
-        "jungle": ["독버섯", "거대 잎사귀", "덩굴 수액", "밀림 열매", "맹수 발톱", "녹빛 원석"],
-        "cave": ["박쥐 날개", "암흑 수정", "동굴 이끼", "고대 철편", "석회 진주", "메아리석"],
-        "mountain": ["독수리 깃", "고산 약초", "운철 조각", "산맥 수정", "폭풍석", "구름 이끼"],
-        "ice": ["영구빙", "서리꽃", "빙정 조각", "설원 모피", "얼음 송곳니", "극광 가루"],
-        "demon": ["마력 응혈", "악마의 뿔", "저주받은 뼈", "핏빛 결정", "검은 불씨", "심연 가죽"],
-        "heaven": ["천사의 깃", "성광 결정", "구름 비단", "별의 가루", "신성한 이슬", "찬란한 파편"],
+        "desert": [
+            "태양 선인장", "유리 모래", "전갈 독침", "사막 장미", "고대 토기", "열풍 결정",
+            "태양석 파편", "모래 정령핵", "황금 풍뎅이 등껍질", "불타는 야자수액", "오아시스 진주", "적열 수정",
+        ],
+        "grassland": [
+            "바람풀", "들꽃 꿀", "푸른 씨앗", "초원 양털", "맑은 이슬", "야생 곡식",
+            "산들바람 깃", "대지의 새싹", "은방울 꽃가루", "초록 정령핵", "들소의 뿔", "무지개 이슬",
+        ],
+        "jungle": [
+            "독버섯", "거대 잎사귀", "덩굴 수액", "밀림 열매", "맹수 발톱", "녹빛 원석",
+            "포식꽃의 이빨", "고대 수목 심재", "독안개 주머니", "밀림 정령핵", "비취 벌레껍질", "야수왕의 털",
+        ],
+        "cave": [
+            "박쥐 날개", "암흑 수정", "동굴 이끼", "고대 철편", "석회 진주", "메아리석",
+            "심층 마력석", "유적 톱니", "검은 종유석", "광맥의 심장", "공허 박쥐 송곳니", "봉인된 기계핵",
+        ],
+        "mountain": [
+            "독수리 깃", "고산 약초", "운철 조각", "산맥 수정", "폭풍석", "구름 이끼",
+            "천둥 염소뿔", "하늘 철광", "절벽꽃", "폭풍 정령핵", "거인의 뼛조각", "운해 진주",
+        ],
+        "ice": [
+            "영구빙", "서리꽃", "빙정 조각", "설원 모피", "얼음 송곳니", "극광 가루",
+            "빙하의 심장", "서리 정령핵", "설인 털", "푸른 얼음장미", "동결된 별조각", "극한 수정",
+        ],
+        "demon": [
+            "마력 응혈", "악마의 뿔", "저주받은 뼈", "핏빛 결정", "검은 불씨", "심연 가죽",
+            "마왕의 피", "지옥불 정수", "망자의 혼", "공포의 눈동자", "심연 정령핵", "타락한 성광석",
+        ],
+        "heaven": [
+            "천사의 깃", "성광 결정", "구름 비단", "별의 가루", "신성한 이슬", "찬란한 파편",
+            "천공 정령핵", "신의 눈물", "새벽별 조각", "성수 결정", "천상의 금실", "심판의 광휘",
+        ],
     }
 
     for terrain_index, (terrain_key, names) in enumerate(terrain_materials.items()):
@@ -10144,11 +10237,11 @@ def build_adventure_item_catalog():
                 "terrain": terrain_key,
             }
 
-    # 이름을 최초 발견자가 붙이는 유물 1000종
+    # 이름을 최초 발견자가 붙이는 유물 5000종
     for relic_number in range(1, ADVENTURE_RELIC_TOTAL_COUNT + 1):
         rarity = ADVENTURE_RELIC_RARITY_MAP[relic_number]
 
-        # :03d는 1~999번의 기존 ID 형식을 보존하고, 1000번은 relic_1000이 된다.
+        # :03d는 기존 1~999번 ID 형식을 보존하며 1000 이상은 자연스럽게 네 자리 ID가 된다.
         item_id = f"relic_{relic_number:03d}"
         relic_terrain = terrain_keys[(relic_number - 1) % len(terrain_keys)]
         if item_id in ADVENTURE_ROUTE_RELICS:
@@ -10165,6 +10258,23 @@ def build_adventure_item_catalog():
             "route_relic": item_id in ADVENTURE_ROUTE_RELICS,
         }
 
+
+    # 모든 비유물 아이템에 유물 제작용 고유 코스트를 지정한다.
+    # 등급/종류/지형 깊이와 아이템 ID의 고정 해시를 함께 사용하므로 재시작해도 변하지 않는다.
+    for material_id, material in catalog.items():
+        if material.get("kind") == "relic":
+            continue
+        rarity_cost = RELIC_MATERIAL_BASE_COST_BY_RARITY.get(material.get("rarity"), 2)
+        kind_bonus = {
+            "herb": 0,
+            "ore": 1,
+            "material": 1,
+            "monster_loot": 2,
+        }.get(material.get("kind"), 0)
+        terrain_depth = ADVENTURE_TERRAIN_DEPTH.get(material.get("terrain"), 0)
+        depth_bonus = min(3, terrain_depth // 2)
+        hash_bonus = int(hashlib.sha256(f"{material_id}|relic-cost-v1".encode("utf-8")).hexdigest()[:2], 16) % 3
+        material["relic_cost"] = max(1, min(30, rarity_cost + kind_bonus + depth_bonus + hash_bonus))
 
     return catalog
 
@@ -10434,8 +10544,7 @@ def resolve_owned_relic_id(uid, query):
     return None
 
 
-def get_relic_name_themes(item_id):
-    """호환용 이름. 실제 속성은 작명과 무관하게 유물 ID와 출현 지형으로 결정된다."""
+def get_relic_default_theme_candidates(item_id):
     item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
     terrain_key = item.get("terrain")
     terrain_themes = {
@@ -10448,19 +10557,169 @@ def get_relic_name_themes(item_id):
         "demon": ["dark", "fire", "magic", "beast"],
         "heaven": ["light", "wind", "magic"],
     }
-    candidates = terrain_themes.get(terrain_key, list(RELIC_MATERIAL_THEMES.keys()))
-    seed = int(hashlib.sha256(f"{item_id}|relic-affinity-v2".encode("utf-8")).hexdigest()[:16], 16)
+    return list(terrain_themes.get(terrain_key, RELIC_MATERIAL_THEMES.keys()))
+
+
+def get_material_relic_affinity(material_id):
+    """재료 이름과 출현 지형을 바탕으로 하나의 고정 유물 속성을 정한다."""
+    material = ADVENTURE_ITEM_CATALOG.get(material_id, {})
+    if not material or material.get("kind") == "relic":
+        return "magic"
+
+    search_text = normalize_item_name_for_filter(
+        f"{get_adventure_item_name(material_id)} {material.get('source_monster') or ''}"
+    )
+    scores = {}
+    for theme_key, theme in RELIC_MATERIAL_THEMES.items():
+        score = 0
+        for keyword in theme.get("material_keywords", []):
+            normalized = normalize_item_name_for_filter(keyword)
+            if normalized and normalized in search_text:
+                score += 3
+        if material.get("terrain") in theme.get("terrains", []):
+            score += 2
+        if score > 0:
+            scores[theme_key] = score
+
+    if scores:
+        top_score = max(scores.values())
+        candidates = sorted(key for key, score in scores.items() if score == top_score)
+    else:
+        terrain_key = material.get("terrain")
+        candidates = [
+            key for key, theme in RELIC_MATERIAL_THEMES.items()
+            if terrain_key in theme.get("terrains", [])
+        ] or list(RELIC_MATERIAL_THEMES.keys())
+
+    seed = int(hashlib.sha256(f"{material_id}|material-affinity-v1".encode("utf-8")).hexdigest()[:16], 16)
+    return random.Random(seed).choice(candidates)
+
+
+def get_relic_material_cost(material_id):
+    item = ADVENTURE_ITEM_CATALOG.get(material_id, {})
+    if not item or item.get("kind") == "relic":
+        return 0
+    return max(1, int(item.get("relic_cost", 1)))
+
+
+def build_legacy_relic_profile(item_id):
+    """업데이트 이전에 이미 발견된 유물에 자동으로 100코스트 속성과 성능을 부여한다."""
+    candidates = get_relic_default_theme_candidates(item_id)
+    seed = int(hashlib.sha256(f"{item_id}|legacy-profile-v3".encode("utf-8")).hexdigest()[:16], 16)
+    rng = random.Random(seed)
+    primary = rng.choice(candidates)
+    secondary_candidates = [key for key in candidates if key != primary]
+    if not secondary_candidates:
+        secondary_candidates = [key for key in RELIC_MATERIAL_THEMES if key != primary]
+    secondary = rng.choice(secondary_candidates)
+    primary_points = rng.randint(68, 82)
+    return {
+        "version": RELIC_CREATION_PROFILE_VERSION,
+        "mode": "legacy_auto",
+        "finalized": True,
+        "budget": RELIC_CREATION_MAX_COST,
+        "materials": {},
+        "theme_points": {
+            primary: primary_points,
+            secondary: RELIC_CREATION_MAX_COST - primary_points,
+        },
+        "creator_id": None,
+        "created_at": datetime.now(KST).isoformat(),
+    }
+
+
+def new_pending_relic_profile(discoverer_id):
+    return {
+        "version": RELIC_CREATION_PROFILE_VERSION,
+        "mode": "crafted",
+        "finalized": False,
+        "budget": 0,
+        "materials": {},
+        "theme_points": {},
+        "creator_id": str(discoverer_id),
+        "created_at": None,
+    }
+
+
+def get_relic_profile(item_id, create_legacy=True):
+    info = discovered_items.get(item_id)
+    if not isinstance(info, dict):
+        return None
+    profile = info.get("relic_profile")
+    if isinstance(profile, dict):
+        profile.setdefault("version", RELIC_CREATION_PROFILE_VERSION)
+        profile.setdefault("mode", "crafted")
+        profile.setdefault("finalized", False)
+        profile.setdefault("budget", 0)
+        profile.setdefault("materials", {})
+        profile.setdefault("theme_points", {})
+        profile.setdefault("creator_id", info.get("discoverer_id"))
+        return profile
+    if not create_legacy:
+        return None
+    profile = build_legacy_relic_profile(item_id)
+    info["relic_profile"] = profile
+    return profile
+
+
+def migrate_existing_relic_profiles():
+    changed = False
+    for item_id, info in list(discovered_items.items()):
+        item = ADVENTURE_ITEM_CATALOG.get(item_id)
+        if not item or item.get("kind") != "relic" or not isinstance(info, dict):
+            continue
+        if not isinstance(info.get("relic_profile"), dict):
+            info["relic_profile"] = build_legacy_relic_profile(item_id)
+            changed = True
+    if changed:
+        save_data()
+    return changed
+
+
+def get_relic_name_themes(item_id):
+    """현재 유물 성능에 실제로 반영되는 속성 목록을 반환한다."""
+    profile = get_relic_profile(item_id, create_legacy=True)
+    if profile and profile.get("finalized"):
+        points = profile.get("theme_points", {})
+        themes = [key for key, value in points.items() if key in RELIC_MATERIAL_THEMES and float(value) > 0]
+        if themes:
+            themes.sort(key=lambda key: -float(points.get(key, 0)))
+            return themes
+    candidates = get_relic_default_theme_candidates(item_id)
+    seed = int(hashlib.sha256(f"{item_id}|relic-affinity-v3".encode("utf-8")).hexdigest()[:16], 16)
     return [random.Random(seed).choice(candidates)]
 
 
-def get_relic_effects(uid, item_id, override_level=None):
+def get_relic_affinity_text(item_id):
+    profile = get_relic_profile(item_id, create_legacy=True)
+    if not profile:
+        return "미발견"
+    if not profile.get("finalized"):
+        return f"성능 제작 대기 · 코스트 {int(profile.get('budget', 0))}/{RELIC_CREATION_MAX_COST}"
+    points = profile.get("theme_points", {})
+    parts = []
+    for key, value in sorted(points.items(), key=lambda pair: -float(pair[1])):
+        if key not in RELIC_MATERIAL_THEMES or float(value) <= 0:
+            continue
+        parts.append(f"{RELIC_MATERIAL_THEMES[key]['display']} {float(value):g}")
+    return " · ".join(parts) if parts else "속성 없음"
+
+
+def get_relic_profile_effects(item_id, profile, level):
     item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
-    if item.get("kind") != "relic":
+    if item.get("kind") != "relic" or not profile or not profile.get("finalized"):
         return {}
-    level = get_relic_upgrade_state(uid, item_id)["level"] if override_level is None else int(override_level)
-    level = max(0, min(RELIC_MAX_ENHANCEMENT, level))
-    theme_key = get_relic_name_themes(item_id)[0]
-    effect_info = RELIC_THEME_EFFECTS[theme_key]
+
+    level = max(0, min(RELIC_MAX_ENHANCEMENT, int(level)))
+    theme_points = {
+        key: max(0.0, float(value))
+        for key, value in profile.get("theme_points", {}).items()
+        if key in RELIC_THEME_EFFECTS
+    }
+    total_points = min(float(RELIC_CREATION_MAX_COST), sum(theme_points.values()))
+    if total_points <= 0:
+        return {}
+
     rarity_mul = RELIC_RARITY_EFFECT_MULTIPLIER.get(item.get("rarity"), 1.0)
     level_mul = 1.0 + level * 0.28
     if level >= 5:
@@ -10469,22 +10728,33 @@ def get_relic_effects(uid, item_id, override_level=None):
         level_mul += 0.25
 
     effects = {}
-    main_key, main_base = effect_info["main"]
-    effects[main_key] = effects.get(main_key, 0.0) + main_base * rarity_mul * level_mul
+    for theme_key, points in theme_points.items():
+        # 총 100코스트를 채웠을 때 기존 단일 속성 유물과 비슷한 기본 성능이 된다.
+        share = points / RELIC_CREATION_MAX_COST
+        effect_info = RELIC_THEME_EFFECTS[theme_key]
+        main_key, main_base = effect_info["main"]
+        effects[main_key] = effects.get(main_key, 0.0) + main_base * rarity_mul * level_mul * share
 
-    # +4부터 보조 특성이 열리고 +7에서 완성 보정을 받는다.
-    if level >= 4:
-        sub_key, sub_base = effect_info["sub"]
-        sub_mul = 1.0 + (level - 4) * 0.20
-        if level >= 7:
-            sub_mul += 0.25
-        effects[sub_key] = effects.get(sub_key, 0.0) + sub_base * rarity_mul * sub_mul
+        # +4부터 각 재료 속성의 보조 효과가 함께 열린다.
+        if level >= 4:
+            sub_key, sub_base = effect_info["sub"]
+            sub_mul = 1.0 + (level - 4) * 0.20
+            if level >= 7:
+                sub_mul += 0.25
+            effects[sub_key] = effects.get(sub_key, 0.0) + sub_base * rarity_mul * sub_mul * share
 
-    # 초월 +7은 원정 시작 목숨을 하나 더 준다.
-    if item.get("rarity") == "transcendent" and level >= 7:
+    if item.get("rarity") == "transcendent" and level >= 7 and total_points >= 90:
         effects["max_lives"] = effects.get("max_lives", 0) + 1
-
     return effects
+
+
+def get_relic_effects(uid, item_id, override_level=None):
+    item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
+    if item.get("kind") != "relic":
+        return {}
+    level = get_relic_upgrade_state(uid, item_id)["level"] if override_level is None else int(override_level)
+    profile = get_relic_profile(item_id, create_legacy=True)
+    return get_relic_profile_effects(item_id, profile, level)
 
 
 def format_relic_effects(uid, item_id, override_level=None):
@@ -10508,6 +10778,7 @@ def get_equipped_relic_ids(uid):
         item_id for item_id in adventure.get("equipped_relics", [])
         if ADVENTURE_ITEM_CATALOG.get(item_id, {}).get("kind") == "relic"
         and int(inventory.get(item_id, 0)) > 0
+        and bool((get_relic_profile(item_id, create_legacy=True) or {}).get("finalized"))
     ]
     adventure["equipped_relics"] = list(dict.fromkeys(equipped))[:RELIC_MAX_EQUIPPED]
     return adventure["equipped_relics"]
@@ -10685,8 +10956,11 @@ def build_owned_relic_embed(member, uid, page=0):
             rarity = ADVENTURE_RARITIES[item["rarity"]]
             state = get_relic_upgrade_state(uid, item_id)
             level = state["level"]
+            profile = get_relic_profile(item_id, create_legacy=True)
             if item_id not in discovered_items:
                 next_text = "이름 등록 대기 중"
+            elif not profile or not profile.get("finalized"):
+                next_text = "최초 발견자 성능 설정 대기"
             elif level >= RELIC_MAX_ENHANCEMENT:
                 next_text = "최대 강화 완료"
             else:
@@ -10717,8 +10991,8 @@ def build_relic_detail_embed(member, uid, item_id):
     style = get_relic_enhancement_style(level)
     inventory = get_adventure_inventory(uid)
     owned_count = max(0, int(inventory.get(item_id, 0)))
-    theme_keys = get_relic_name_themes(item_id)
-    theme_text = ", ".join(RELIC_MATERIAL_THEMES[key]["display"] for key in theme_keys)
+    profile = get_relic_profile(item_id, create_legacy=True)
+    theme_text = get_relic_affinity_text(item_id)
     equipped = item_id in get_equipped_relic_ids(uid)
 
     embed = discord.Embed(
@@ -10732,7 +11006,8 @@ def build_relic_detail_embed(member, uid, item_id):
             f"등급: {rarity['emoji']} **{rarity['name']}**\n"
             f"강화: **+{level}/{RELIC_MAX_ENHANCEMENT}** · 색상: **{style['name']}**\n"
             f"보유 수량: **{owned_count}개**\n"
-            f"고유 속성: **{theme_text}** · {'✅ 장착 중' if equipped else '미장착'}"
+            f"속성 배분: **{theme_text}** · {'✅ 장착 중' if equipped else '미장착'}\n"
+            f"성능 제작: **{'완료' if profile and profile.get('finalized') else '미완료'}**"
         ),
         inline=False,
     )
@@ -10742,10 +11017,35 @@ def build_relic_detail_embed(member, uid, item_id):
         inline=False,
     )
 
+    if profile and profile.get("finalized"):
+        material_lines = []
+        for material_id, amount in profile.get("materials", {}).items():
+            if material_id in ADVENTURE_ITEM_CATALOG and int(amount) > 0:
+                cost = get_relic_material_cost(material_id) * int(amount)
+                material_lines.append(f"• {get_adventure_item_name(material_id)} ×{int(amount)} ({cost}코스트)")
+        recipe_text = "\n".join(material_lines) if material_lines else "기존 발견 유물 자동 성능 부여"
+        embed.add_field(
+            name=f"🧪 성능 구성 · {int(profile.get('budget', 0))}/{RELIC_CREATION_MAX_COST} 코스트",
+            value=recipe_text[:1024],
+            inline=False,
+        )
+    elif item_id in discovered_items:
+        embed.add_field(
+            name="🧪 성능 설정 대기",
+            value="최초 발견자가 `/유물성능설정`에서 재료를 넣어 최대 100코스트의 성능을 완성해야 해.",
+            inline=False,
+        )
+
     if item_id not in discovered_items:
         embed.add_field(
             name="강화 불가",
             value="아직 이름이 등록되지 않은 유물이야. 최초 발견자가 이름을 정한 뒤 강화할 수 있어.",
+            inline=False,
+        )
+    elif not profile or not profile.get("finalized"):
+        embed.add_field(
+            name="강화 불가",
+            value="최초 발견자가 재료로 유물 성능을 완성한 뒤 강화할 수 있어.",
             inline=False,
         )
     elif level >= RELIC_MAX_ENHANCEMENT:
@@ -10788,6 +11088,327 @@ def build_relic_detail_embed(member, uid, item_id):
     return embed
 
 
+def get_relic_craft_material_entries(uid):
+    inventory = get_adventure_inventory(uid)
+    entries = []
+    for material_id, amount in inventory.items():
+        item = ADVENTURE_ITEM_CATALOG.get(material_id)
+        if not item or item.get("kind") == "relic" or int(amount) <= 0:
+            continue
+        entries.append((material_id, int(amount)))
+    entries.sort(
+        key=lambda pair: (
+            get_relic_material_cost(pair[0]),
+            -ADVENTURE_RARITY_ORDER.get(ADVENTURE_ITEM_CATALOG[pair[0]]["rarity"], 0),
+            get_adventure_item_name(pair[0]),
+        )
+    )
+    return entries
+
+
+def can_manage_relic_profile(uid, item_id):
+    info = discovered_items.get(item_id, {})
+    profile = get_relic_profile(item_id, create_legacy=False)
+    return (
+        isinstance(info, dict)
+        and str(info.get("discoverer_id")) == str(uid)
+        and isinstance(profile, dict)
+        and profile.get("mode") == "crafted"
+        and not profile.get("finalized")
+    )
+
+
+def calculate_relic_draft_theme_points(materials):
+    points = {}
+    budget = 0
+    for material_id, amount in materials.items():
+        amount = max(0, int(amount))
+        if amount <= 0 or material_id not in ADVENTURE_ITEM_CATALOG:
+            continue
+        cost = get_relic_material_cost(material_id) * amount
+        affinity = get_material_relic_affinity(material_id)
+        points[affinity] = points.get(affinity, 0) + cost
+        budget += cost
+    return points, budget
+
+
+def build_relic_craft_embed(member, uid, item_id, page=0):
+    item = ADVENTURE_ITEM_CATALOG[item_id]
+    rarity = ADVENTURE_RARITIES[item["rarity"]]
+    info = discovered_items.get(item_id, {})
+    profile = get_relic_profile(item_id, create_legacy=False)
+    entries = get_relic_craft_material_entries(uid)
+    total_pages = max(1, (len(entries) + RELIC_CREATION_MATERIAL_PAGE_SIZE - 1) // RELIC_CREATION_MATERIAL_PAGE_SIZE)
+    page = max(0, min(int(page), total_pages - 1))
+    draft = dict((profile or {}).get("materials", {}))
+    theme_points, budget = calculate_relic_draft_theme_points(draft)
+    if profile is not None:
+        profile["theme_points"] = theme_points
+        profile["budget"] = budget
+
+    draft_lines = []
+    for material_id, amount in draft.items():
+        if int(amount) <= 0 or material_id not in ADVENTURE_ITEM_CATALOG:
+            continue
+        unit_cost = get_relic_material_cost(material_id)
+        affinity = get_material_relic_affinity(material_id)
+        draft_lines.append(
+            f"• **{get_adventure_item_name(material_id)}** ×{int(amount)} "
+            f"— {unit_cost * int(amount)}코스트 · {RELIC_MATERIAL_THEMES[affinity]['display']}"
+        )
+    if not draft_lines:
+        draft_lines = ["아직 넣은 재료가 없어. 아래 선택 메뉴에서 재료를 골라 수량을 입력해."]
+
+    preview_profile = {
+        "finalized": budget > 0,
+        "budget": budget,
+        "theme_points": theme_points,
+    }
+    preview_effect = get_relic_profile_effects(item_id, preview_profile, 0)
+    effect_parts = []
+    for key, value in preview_effect.items():
+        label = RELIC_EFFECT_LABELS.get(key, key)
+        suffix = "%p" if key == "relic" else "%"
+        effect_parts.append(f"{label} +{value:.2f}{suffix}")
+
+    affinity_parts = [
+        f"{RELIC_MATERIAL_THEMES[key]['display']} {value:g}"
+        for key, value in sorted(theme_points.items(), key=lambda pair: -pair[1])
+    ]
+
+    embed = discord.Embed(
+        title=f"🧪 {get_adventure_item_name(item_id)} 성능 제작",
+        description=(
+            f"{rarity['emoji']} **{rarity['name']} 유물** · 최초 발견자 {member.mention}\n"
+            f"재료 코스트 합계는 최대 **{RELIC_CREATION_MAX_COST}**를 넘을 수 없어.\n"
+            "재료를 많이 채울수록 성능이 강해지고, 재료 속성이 그대로 유물 속성 비율이 돼.\n\n"
+            f"📊 현재 코스트: **{budget}/{RELIC_CREATION_MAX_COST}**\n"
+            f"🌈 속성 배분: **{' · '.join(affinity_parts) if affinity_parts else '없음'}**\n"
+            f"⚙️ 기본 성능 미리보기: **{' · '.join(effect_parts) if effect_parts else '효과 없음'}**"
+        ),
+        color=discord.Color.purple(),
+    )
+    embed.add_field(name="넣을 재료", value="\n".join(draft_lines)[:1024], inline=False)
+    embed.set_footer(
+        text=f"재료 목록 {page + 1}/{total_pages} · 완성 버튼을 누르면 재료가 실제로 소모되며 이후 변경 불가"
+    )
+    return embed, total_pages
+
+
+class RelicCraftAmountModal(discord.ui.Modal, title="유물 재료 수량 입력"):
+    amount = discord.ui.TextInput(
+        label="추가할 수량",
+        placeholder="1 이상의 숫자",
+        min_length=1,
+        max_length=4,
+        required=True,
+    )
+
+    def __init__(self, user_id, item_id, material_id, page):
+        super().__init__()
+        self.user_id = str(user_id)
+        self.item_id = item_id
+        self.material_id = material_id
+        self.page = int(page)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        if not can_manage_relic_profile(self.user_id, self.item_id):
+            await interaction.response.send_message("❌ 이 유물은 설정할 수 없거나 이미 완성됐어.", ephemeral=True)
+            return
+        try:
+            amount = int(str(self.amount.value).strip())
+        except ValueError:
+            await interaction.response.send_message("❌ 수량은 숫자로 입력해.", ephemeral=True)
+            return
+        if amount <= 0:
+            await interaction.response.send_message("❌ 수량은 1개 이상이어야 해.", ephemeral=True)
+            return
+
+        inventory = get_adventure_inventory(self.user_id)
+        profile = get_relic_profile(self.item_id, create_legacy=False)
+        draft = profile.setdefault("materials", {})
+        already = max(0, int(draft.get(self.material_id, 0)))
+        owned = max(0, int(inventory.get(self.material_id, 0)))
+        if already + amount > owned:
+            await interaction.response.send_message(
+                f"❌ 보유 수량이 부족해. 보유 **{owned}개**, 이미 선택 **{already}개**야.",
+                ephemeral=True,
+            )
+            return
+
+        unit_cost = get_relic_material_cost(self.material_id)
+        _, current_budget = calculate_relic_draft_theme_points(draft)
+        if current_budget + unit_cost * amount > RELIC_CREATION_MAX_COST:
+            remaining = RELIC_CREATION_MAX_COST - current_budget
+            await interaction.response.send_message(
+                f"❌ 100코스트를 넘을 수 없어. 남은 코스트는 **{remaining}**, "
+                f"이 재료는 개당 **{unit_cost}**야.",
+                ephemeral=True,
+            )
+            return
+
+        draft[self.material_id] = already + amount
+        profile["theme_points"], profile["budget"] = calculate_relic_draft_theme_points(draft)
+        save_data()
+        embed, _ = build_relic_craft_embed(interaction.user, self.user_id, self.item_id, self.page)
+        await interaction.response.edit_message(
+            embed=embed,
+            view=RelicCraftView(self.user_id, interaction.user, self.item_id, self.page),
+        )
+
+
+class RelicCraftMaterialSelect(discord.ui.Select):
+    def __init__(self, user_id, item_id, page):
+        self.user_id = str(user_id)
+        self.item_id = item_id
+        self.page = max(0, int(page))
+        entries = get_relic_craft_material_entries(self.user_id)
+        start = self.page * RELIC_CREATION_MATERIAL_PAGE_SIZE
+        page_entries = entries[start:start + RELIC_CREATION_MATERIAL_PAGE_SIZE]
+        options = []
+        for material_id, amount in page_entries:
+            item = ADVENTURE_ITEM_CATALOG[material_id]
+            rarity = ADVENTURE_RARITIES[item["rarity"]]
+            affinity = get_material_relic_affinity(material_id)
+            options.append(
+                discord.SelectOption(
+                    label=get_adventure_item_name(material_id)[:100],
+                    value=material_id,
+                    description=(
+                        f"보유 {amount} · 개당 {get_relic_material_cost(material_id)}코스트 · "
+                        f"{RELIC_MATERIAL_THEMES[affinity]['display']} · {rarity['name']}"
+                    )[:100],
+                    emoji=rarity["emoji"],
+                )
+            )
+        if not options:
+            options = [discord.SelectOption(label="사용 가능한 재료 없음", value="__none__")]
+        super().__init__(
+            placeholder="성능에 넣을 재료 선택",
+            min_values=1,
+            max_values=1,
+            options=options,
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        material_id = self.values[0]
+        if material_id == "__none__":
+            await interaction.response.send_message("❌ 가방에 사용할 재료가 없어.", ephemeral=True)
+            return
+        await interaction.response.send_modal(
+            RelicCraftAmountModal(self.user_id, self.item_id, material_id, self.page)
+        )
+
+
+class RelicCraftView(discord.ui.View):
+    def __init__(self, user_id, member, item_id, page=0):
+        super().__init__(timeout=600)
+        self.user_id = str(user_id)
+        self.member = member
+        self.item_id = item_id
+        _, total_pages = build_relic_craft_embed(member, self.user_id, self.item_id, page)
+        self.page = max(0, min(int(page), total_pages - 1))
+        self.add_item(RelicCraftMaterialSelect(self.user_id, self.item_id, self.page))
+        self.previous_page.disabled = self.page <= 0
+        self.next_page.disabled = self.page >= total_pages - 1
+
+    @discord.ui.button(label="◀ 재료", style=discord.ButtonStyle.secondary, row=1)
+    async def previous_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        page = max(0, self.page - 1)
+        embed, _ = build_relic_craft_embed(interaction.user, self.user_id, self.item_id, page)
+        await interaction.response.edit_message(
+            embed=embed, view=RelicCraftView(self.user_id, interaction.user, self.item_id, page)
+        )
+
+    @discord.ui.button(label="재료 ▶", style=discord.ButtonStyle.secondary, row=1)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        page = self.page + 1
+        embed, total_pages = build_relic_craft_embed(interaction.user, self.user_id, self.item_id, page)
+        page = min(page, total_pages - 1)
+        await interaction.response.edit_message(
+            embed=embed, view=RelicCraftView(self.user_id, interaction.user, self.item_id, page)
+        )
+
+    @discord.ui.button(label="🗑️ 선택 초기화", style=discord.ButtonStyle.danger, row=1)
+    async def reset_draft(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        if not can_manage_relic_profile(self.user_id, self.item_id):
+            await interaction.response.send_message("❌ 이미 완성된 유물이야.", ephemeral=True)
+            return
+        profile = get_relic_profile(self.item_id, create_legacy=False)
+        profile["materials"] = {}
+        profile["theme_points"] = {}
+        profile["budget"] = 0
+        save_data()
+        embed, _ = build_relic_craft_embed(interaction.user, self.user_id, self.item_id, 0)
+        await interaction.response.edit_message(
+            embed=embed, view=RelicCraftView(self.user_id, interaction.user, self.item_id, 0)
+        )
+
+    @discord.ui.button(label="✅ 성능 완성", style=discord.ButtonStyle.success, row=1)
+    async def finalize(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 네 유물 설정이 아니야.", ephemeral=True)
+            return
+        if not can_manage_relic_profile(self.user_id, self.item_id):
+            await interaction.response.send_message("❌ 이미 완성됐거나 설정 권한이 없어.", ephemeral=True)
+            return
+        profile = get_relic_profile(self.item_id, create_legacy=False)
+        draft = dict(profile.get("materials", {}))
+        theme_points, budget = calculate_relic_draft_theme_points(draft)
+        if budget <= 0:
+            await interaction.response.send_message("❌ 재료를 하나 이상 넣어야 해.", ephemeral=True)
+            return
+        if budget > RELIC_CREATION_MAX_COST:
+            await interaction.response.send_message("❌ 코스트가 100을 넘었어. 선택을 초기화해줘.", ephemeral=True)
+            return
+
+        inventory = get_adventure_inventory(self.user_id)
+        for material_id, amount in draft.items():
+            if int(inventory.get(material_id, 0)) < int(amount):
+                await interaction.response.send_message(
+                    f"❌ **{get_adventure_item_name(material_id)}** 수량이 부족해졌어.", ephemeral=True
+                )
+                return
+        for material_id, amount in draft.items():
+            inventory[material_id] = int(inventory.get(material_id, 0)) - int(amount)
+            if inventory[material_id] <= 0:
+                inventory.pop(material_id, None)
+
+        profile["theme_points"] = theme_points
+        profile["budget"] = budget
+        profile["finalized"] = True
+        profile["created_at"] = datetime.now(KST).isoformat()
+        save_data()
+
+        embed = discord.Embed(
+            title="🌟 유물 성능 완성!",
+            description=(
+                f"**{get_adventure_item_name(self.item_id)}**의 성능이 서버 전체에 확정됐어.\n\n"
+                f"📊 사용 코스트: **{budget}/{RELIC_CREATION_MAX_COST}**\n"
+                f"🌈 속성: **{get_relic_affinity_text(self.item_id)}**\n"
+                f"⚙️ 기본 효과: **{format_relic_effects(self.user_id, self.item_id)}**\n\n"
+                "이 유물을 가진 모든 유저가 같은 속성과 기본 성능을 사용하게 돼."
+            ),
+            color=discord.Color.gold(),
+        )
+        await interaction.response.edit_message(embed=embed, view=None)
+
+
 class OwnedRelicView(discord.ui.View):
     def __init__(self, user_id, member, page=0):
         super().__init__(timeout=180)
@@ -10825,13 +11446,17 @@ class RelicUpgradeView(discord.ui.View):
         state = get_relic_upgrade_state(self.user_id, self.item_id)
         target_level = min(RELIC_MAX_ENHANCEMENT, state["level"] + 1)
         self.upgrade_button.label = f"🔨 +{target_level} 강화 도전"
+        profile = get_relic_profile(self.item_id, create_legacy=True)
+        profile_ready = bool(profile and profile.get("finalized"))
         self.upgrade_button.disabled = (
             state["level"] >= RELIC_MAX_ENHANCEMENT
             or self.item_id not in discovered_items
+            or not profile_ready
         )
         equipped = self.item_id in get_equipped_relic_ids(self.user_id)
         self.equip_button.label = "💠 유물 해제" if equipped else "💠 유물 장착"
         self.equip_button.style = discord.ButtonStyle.secondary if equipped else discord.ButtonStyle.success
+        self.equip_button.disabled = not profile_ready
 
     @discord.ui.button(label="🔨 강화 도전", style=discord.ButtonStyle.danger)
     async def upgrade_button(self, interaction: discord.Interaction, button: discord.ui.Button):
@@ -10846,6 +11471,13 @@ class RelicUpgradeView(discord.ui.View):
 
             if self.item_id not in discovered_items:
                 await interaction.response.send_message("❌ 이름이 등록된 뒤에 강화할 수 있어.", ephemeral=True)
+                return
+            profile = get_relic_profile(self.item_id, create_legacy=True)
+            if not profile or not profile.get("finalized"):
+                await interaction.response.send_message(
+                    "❌ 최초 발견자가 재료로 유물 성능을 완성한 뒤 강화할 수 있어.",
+                    ephemeral=True,
+                )
                 return
 
             state = get_relic_upgrade_state(self.user_id, self.item_id)
@@ -10914,6 +11546,12 @@ class RelicUpgradeView(discord.ui.View):
         owned_ids = {item_id for item_id, _ in get_owned_relic_entries(self.user_id)}
         if self.item_id not in owned_ids:
             await interaction.response.send_message("❌ 그 유물을 가지고 있지 않아.", ephemeral=True)
+            return
+        profile = get_relic_profile(self.item_id, create_legacy=True)
+        if not profile or not profile.get("finalized"):
+            await interaction.response.send_message(
+                "❌ 최초 발견자가 성능을 완성하기 전에는 장착할 수 없어.", ephemeral=True
+            )
             return
 
         adventure = get_adventure(self.user_id)
@@ -11639,6 +12277,20 @@ def get_route_relic_destinations(item_id, adventure):
 def queue_terrain_choice(adventure, destinations, reason, detail=None):
     current = adventure.get("terrain") or "grassland"
     destinations = valid_terrain_destinations(current, destinations)
+    cave_heaven_shortcut = False
+
+    # 갈림길이 이미 생기기로 결정된 그 순간에만 20%를 판정한다.
+    # 모험 도중 별도 확률로 갑자기 갈림길을 생성하지 않는다.
+    if current == "cave" and random.random() * 100 < ADVENTURE_CAVE_HEAVEN_SHORTCUT_RATE:
+        cave_heaven_shortcut = True
+        if "heaven" not in destinations:
+            destinations.append("heaven")
+
+    destinations = valid_terrain_destinations(
+        current,
+        destinations,
+        allow_cave_heaven_shortcut=cave_heaven_shortcut,
+    )
     if not destinations:
         return False
 
@@ -11648,6 +12300,7 @@ def queue_terrain_choice(adventure, destinations, reason, detail=None):
         "destinations": destinations,
         "reason": reason,
         "detail": detail,
+        "cave_heaven_shortcut": cave_heaven_shortcut,
     }
     return True
 
@@ -11655,7 +12308,12 @@ def queue_terrain_choice(adventure, destinations, reason, detail=None):
 def build_terrain_choice_embed(adventure):
     pending = adventure.get("pending_event") or {}
     source = pending.get("source") or adventure.get("terrain") or "grassland"
-    destinations = valid_terrain_destinations(source, pending.get("destinations", []))
+    cave_heaven_shortcut = bool(pending.get("cave_heaven_shortcut"))
+    destinations = valid_terrain_destinations(
+        source,
+        pending.get("destinations", []),
+        allow_cave_heaven_shortcut=cave_heaven_shortcut,
+    )
     reason = pending.get("reason")
 
     if reason == "boss":
@@ -11670,6 +12328,8 @@ def build_terrain_choice_embed(adventure):
         reason_text = "공간이 뒤틀리며 평소에는 보이지 않던 길들이 나타났어."
 
     route_lines = [f"• {get_terrain_name(key)}" for key in destinations]
+    if cave_heaven_shortcut and "heaven" in destinations:
+        route_lines.append("\n✨ 동굴의 숨겨진 승천 통로가 열려 **천계로 바로 갈 수 있어!**")
     terrain = get_terrain_info(source)
     return discord.Embed(
         title=title,
@@ -11689,6 +12349,7 @@ async def show_terrain_choice(message, member):
     destinations = valid_terrain_destinations(
         pending.get("source") or adventure.get("terrain"),
         pending.get("destinations", []),
+        allow_cave_heaven_shortcut=bool(pending.get("cave_heaven_shortcut")),
     )
 
     if not destinations:
@@ -12252,9 +12913,11 @@ async def roll_adventure_event(message, member):
             return
 
     hard_relic_bonus = ADVENTURE_HARD_RELIC_BONUS if adventure.get("hard_mode") else 0.0
+    terrain_modifiers = get_terrain_event_modifiers(terrain_key)
     relic_rate = min(
-        18.0 if adventure.get("hard_mode") else 12.0,
-        1.5 + boosts.get("relic", 0) + danger * 0.018 + hard_relic_bonus,
+        24.0 if adventure.get("hard_mode") else 18.0,
+        (1.5 + boosts.get("relic", 0) + danger * 0.018 + hard_relic_bonus)
+        * terrain_modifiers["relic"],
     )
     good_event_shift = min(12.0, boosts.get("luck", 0) * 0.6)
     roll = random.random() * 100
@@ -12304,10 +12967,13 @@ async def roll_adventure_event(message, member):
 
     # 기본 35%. 몬스터가 안 나온 턴마다 15%p씩 증가하고, 조우하면 다시 초기화된다.
     monster_border = get_adventure_monster_spawn_rate(adventure)
-    item_border = monster_border + 22 + good_event_shift * 0.55
-    money_border = item_border + 13 + good_event_shift * 0.25
+    material_span = ADVENTURE_BASE_MATERIAL_EVENT_SPAN * terrain_modifiers["material"] + good_event_shift * 0.55
+    money_span = ADVENTURE_BASE_MONEY_EVENT_SPAN + good_event_shift * 0.25
+    spring_span = ADVENTURE_BASE_SPRING_EVENT_SPAN * terrain_modifiers["spring"] + good_event_shift * 0.15
+    item_border = monster_border + material_span
+    money_border = item_border + money_span
     # 하드모드에서는 회복의 샘이 아예 등장하지 않는다.
-    heal_border = money_border if adventure.get("hard_mode") else money_border + 7 + good_event_shift * 0.15
+    heal_border = money_border if adventure.get("hard_mode") else money_border + spring_span
 
     if roll < relic_rate + monster_border:
         adventure["quiet_turns"] = 0
@@ -12328,9 +12994,8 @@ async def roll_adventure_event(message, member):
 
     if adjusted_roll < item_border:
         item_id = pick_world_loot(adventure)
-        amount = 1
-        if ADVENTURE_ITEM_CATALOG[item_id]["rarity"] in {"common", "uncommon"}:
-            amount = random.randint(1, 3)
+        # 필드에서 발견하는 모든 재료는 등급과 무관하게 한 번에 1~4개 나온다.
+        amount = random.randint(1, 4)
 
         add_adventure_item(uid, item_id, amount)
         save_data()
@@ -12455,10 +13120,8 @@ async def resolve_adventure_battle(message, member):
     if story_phase != "glitch_demon_king":
         loot_id = pick_monster_loot(monster["name"], adventure)
         if loot_id:
-            loot_amount = 1
-            if ADVENTURE_ITEM_CATALOG[loot_id]["rarity"] in {"common", "uncommon"}:
-                loot_amount = random.randint(1, 2)
-            loot_amount += tier_info["loot_bonus"]
+            # 몬스터 재료도 최종 획득량이 반드시 1~4개 범위에 머문다.
+            loot_amount = min(4, random.randint(1, 4) + int(tier_info["loot_bonus"]))
             add_adventure_item(uid, loot_id, loot_amount)
 
     # 전용 장비가 지정된 적은 오직 자신의 전용 장비 추첨만 사용한다.
@@ -12476,12 +13139,15 @@ async def resolve_adventure_battle(message, member):
     relic_is_new = False
     allow_relic_drop = not story_phase and terrain_key not in ADVENTURE_STORY_LOCKED_TERRAINS
     if allow_relic_drop:
+        terrain_relic_mul = get_terrain_event_modifiers(terrain_key)["relic"]
         relic_chance = min(
-            20.0 if adventure.get("hard_mode") else 14.0,
-            1.2
-            + adventure.get("boosts", {}).get("relic", 0)
-            + adventure_danger(adventure) * 0.012
-            + (ADVENTURE_HARD_RELIC_BONUS if adventure.get("hard_mode") else 0.0),
+            26.0 if adventure.get("hard_mode") else 20.0,
+            (
+                1.2
+                + adventure.get("boosts", {}).get("relic", 0)
+                + adventure_danger(adventure) * 0.012
+                + (ADVENTURE_HARD_RELIC_BONUS if adventure.get("hard_mode") else 0.0)
+            ) * terrain_relic_mul,
         )
 
         if random.random() * 100 < relic_chance:
@@ -12854,7 +13520,13 @@ class AdventureTerrainChoiceView(discord.ui.View):
         self.user_id = str(user_id)
         adventure = get_adventure(self.user_id)
         source = adventure.get("terrain") or "grassland"
-        self.destinations = valid_terrain_destinations(source, destinations)
+        pending = adventure.get("pending_event") or {}
+        self.cave_heaven_shortcut = bool(pending.get("cave_heaven_shortcut"))
+        self.destinations = valid_terrain_destinations(
+            source,
+            destinations,
+            allow_cave_heaven_shortcut=self.cave_heaven_shortcut,
+        )
 
         for destination in self.destinations:
             terrain = get_terrain_info(destination)
@@ -12871,7 +13543,11 @@ class AdventureTerrainChoiceView(discord.ui.View):
                 adventure = get_adventure(self.user_id)
                 pending = adventure.get("pending_event") or {}
                 source_key = adventure.get("terrain") or "grassland"
-                allowed = valid_terrain_destinations(source_key, pending.get("destinations", self.destinations))
+                allowed = valid_terrain_destinations(
+                    source_key,
+                    pending.get("destinations", self.destinations),
+                    allow_cave_heaven_shortcut=bool(pending.get("cave_heaven_shortcut")),
+                )
                 if selected not in allowed:
                     await interaction.response.send_message("그 길은 이미 닫혔어.", ephemeral=True)
                     return
@@ -14088,7 +14764,8 @@ class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
             "discoverer_id": uid,
             "discoverer_name": interaction.user.display_name,
             "discovered_at": datetime.now(KST).isoformat(),
-            "upgrade_recipe_version": 1,
+            "upgrade_recipe_version": 3,
+            "relic_profile": new_pending_relic_profile(uid),
         }
         adventure["pending_name_item_id"] = None
         save_data()
@@ -14100,7 +14777,9 @@ class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
                 f"{rarity['emoji']} 이름: **{clean_name}**\n"
                 f"등급: **{rarity['name']}**\n"
                 f"최초 발견자: {interaction.user.mention}\n\n"
-                "이제 모든 유저에게 이 이름으로 보여."
+                "이제 모든 유저에게 이 이름으로 보여.\n\n"
+                "🧪 아직 성능은 비어 있어. `/유물성능설정`에서 가진 재료를 넣어 "
+                "최대 100코스트까지 속성과 성능을 확정해줘."
             ),
             color=discord.Color.gold(),
         )
@@ -14112,8 +14791,40 @@ class RelicNameModal(discord.ui.Modal, title="새 유물 이름 짓기"):
             view = AdventureTerrainChoiceView(uid, pending.get("destinations", []))
             embed.description += "\n\n🔮 이름을 얻은 유물이 반응하며 지형을 바꿀 수 있는 길이 열렸어!"
         else:
-            view = AdventureTravelView(uid)
+            view = RelicPostNamingView(uid, item_id)
         await interaction.response.edit_message(embed=embed, view=view)
+
+
+class RelicPostNamingView(discord.ui.View):
+    def __init__(self, user_id, item_id):
+        super().__init__(timeout=600)
+        self.user_id = str(user_id)
+        self.item_id = item_id
+
+    @discord.ui.button(label="🧪 성능 설정", style=discord.ButtonStyle.success)
+    async def configure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if str(interaction.user.id) != self.user_id:
+            await interaction.response.send_message("❌ 최초 발견자만 설정할 수 있어.", ephemeral=True)
+            return
+        if not can_manage_relic_profile(self.user_id, self.item_id):
+            await interaction.response.send_message("❌ 이미 완성됐거나 설정할 수 없는 유물이야.", ephemeral=True)
+            return
+        embed, _ = build_relic_craft_embed(interaction.user, self.user_id, self.item_id, 0)
+        await interaction.response.send_message(
+            embed=embed,
+            view=RelicCraftView(self.user_id, interaction.user, self.item_id, 0),
+            ephemeral=True,
+        )
+
+    @discord.ui.button(label="➡️ 모험 계속", style=discord.ButtonStyle.primary)
+    async def continue_adventure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not await check_adventure_owner(interaction, self.user_id):
+            return
+        adventure = get_adventure(self.user_id)
+        await interaction.response.edit_message(
+            embed=build_adventure_status_embed(interaction.user, adventure, title="🧭 유물을 챙기고 모험을 계속한다"),
+            view=AdventureTravelView(self.user_id),
+        )
 
 
 class RelicNamingView(discord.ui.View):
@@ -14227,9 +14938,12 @@ def build_adventure_inventory_embed(member, uid, page=0):
         for item_id, count in page_entries:
             item = ADVENTURE_ITEM_CATALOG[item_id]
             rarity = ADVENTURE_RARITIES[item["rarity"]]
+            affinity = get_material_relic_affinity(item_id)
             lines.append(
                 f"{rarity['emoji']} **{get_adventure_item_name(item_id)}** ×{count}\n"
-                f"└ {rarity['name']} · 기준 가치 {item['value']:,}모라"
+                f"└ {rarity['name']} · 기준 가치 {item['value']:,}모라 · "
+                f"유물 코스트 {get_relic_material_cost(item_id)} · "
+                f"{RELIC_MATERIAL_THEMES[affinity]['display']} 속성"
             )
         embed.description = "\n\n".join(lines)
 
@@ -14293,9 +15007,16 @@ def build_relic_dex_embed(page=0):
             item = ADVENTURE_ITEM_CATALOG[item_id]
             rarity = ADVENTURE_RARITIES[item["rarity"]]
             discoverer = info.get("discoverer_name", "알 수 없음")
+            profile = get_relic_profile(item_id, create_legacy=True)
+            profile_state = (
+                f"{int(profile.get('budget', 0))}/{RELIC_CREATION_MAX_COST}코스트 · {get_relic_affinity_text(item_id)}"
+                if profile and profile.get("finalized")
+                else "성능 설정 대기"
+            )
             lines.append(
                 f"{rarity['emoji']} **{info.get('name', '이름 없음')}**\n"
-                f"└ {rarity['name']} · 최초 발견자: {discoverer}"
+                f"└ {rarity['name']} · 최초 발견자: {discoverer}\n"
+                f"└ {profile_state}"
             )
         embed.description = "\n\n".join(lines)
 
@@ -14638,6 +15359,58 @@ async def owned_relic_autocomplete(interaction: discord.Interaction, current: st
     return choices
 
 
+@bot.tree.command(name="유물성능설정", description="최초 발견한 유물에 재료를 넣어 최대 100코스트의 성능을 확정한다", guild=GUILD)
+@app_commands.describe(유물="아직 성능을 완성하지 않은 최초 발견 유물")
+async def relic_performance_setup_command(interaction: discord.Interaction, 유물: str):
+    uid = str(interaction.user.id)
+    item_id = 유물 if 유물 in ADVENTURE_ITEM_CATALOG else resolve_owned_relic_id(uid, 유물)
+    if not item_id or ADVENTURE_ITEM_CATALOG.get(item_id, {}).get("kind") != "relic":
+        await interaction.response.send_message("❌ 유물을 찾지 못했어.", ephemeral=True)
+        return
+    info = discovered_items.get(item_id, {})
+    if str(info.get("discoverer_id")) != uid:
+        await interaction.response.send_message("❌ 최초 발견자만 이 유물의 성능을 정할 수 있어.", ephemeral=True)
+        return
+    profile = get_relic_profile(item_id, create_legacy=False)
+    if not profile or profile.get("mode") != "crafted":
+        await interaction.response.send_message("❌ 기존 자동 성능이 적용된 유물이라 다시 설정할 수 없어.", ephemeral=True)
+        return
+    if profile.get("finalized"):
+        await interaction.response.send_message(
+            f"✅ 이미 성능이 완성됐어.\n속성: **{get_relic_affinity_text(item_id)}**\n"
+            f"효과: **{format_relic_effects(uid, item_id)}**",
+            ephemeral=True,
+        )
+        return
+    embed, _ = build_relic_craft_embed(interaction.user, uid, item_id, 0)
+    await interaction.response.send_message(
+        embed=embed,
+        view=RelicCraftView(uid, interaction.user, item_id, 0),
+        ephemeral=True,
+    )
+
+
+@relic_performance_setup_command.autocomplete("유물")
+async def relic_performance_setup_autocomplete(interaction: discord.Interaction, current: str):
+    uid = str(interaction.user.id)
+    normalized = normalize_item_name_for_filter(current)
+    choices = []
+    for item_id, info in discovered_items.items():
+        if str(info.get("discoverer_id")) != uid:
+            continue
+        profile = get_relic_profile(item_id, create_legacy=False)
+        if not profile or profile.get("mode") != "crafted" or profile.get("finalized"):
+            continue
+        name = get_adventure_item_name(item_id)
+        if normalized and normalized not in normalize_item_name_for_filter(name):
+            continue
+        budget = int(profile.get("budget", 0))
+        choices.append(app_commands.Choice(name=f"{name} · {budget}/100코스트"[:100], value=item_id))
+        if len(choices) >= 25:
+            break
+    return choices
+
+
 @bot.tree.command(name="초월합성", description="서로 다른 +7 신화 유물 3개와 모라로 초월 유물을 합성한다", guild=GUILD)
 @app_commands.describe(이름="초월 유물이 아직 발견되지 않았다면 등록할 이름(1~6자)")
 async def transcend_relic_synthesis(interaction: discord.Interaction, 이름: str = None):
@@ -14707,8 +15480,9 @@ async def transcend_relic_synthesis(interaction: discord.Interaction, 이름: st
             "discoverer_id": uid,
             "discoverer_name": interaction.user.display_name,
             "discovered_at": datetime.now(KST).isoformat(),
-            "upgrade_recipe_version": 2,
+            "upgrade_recipe_version": 3,
             "discovery_method": "mythic_synthesis",
+            "relic_profile": new_pending_relic_profile(uid),
         }
     get_relic_discovery_stats()["attempts_since_transcendent"] = 0
     save_data()
@@ -14718,7 +15492,8 @@ async def transcend_relic_synthesis(interaction: discord.Interaction, 이름: st
         f"🌌 **초월 합성 성공!**\n"
         f"획득: **{clean_name}**\n"
         f"소모 신화 유물: {consumed_names}\n"
-        f"소모 모라: **{TRANSCENDENT_SYNTHESIS_COST:,}모라**"
+        f"소모 모라: **{TRANSCENDENT_SYNTHESIS_COST:,}모라**\n"
+        "🧪 서버 최초 성능은 아직 비어 있어. `/유물성능설정`에서 재료를 넣어 완성해줘."
     )
 
 
@@ -19342,8 +20117,11 @@ async def game_profile_command(interaction: discord.Interaction):
 
 @bot.event
 async def on_ready():
+    migrate_relic_profiles_changed = migrate_existing_relic_profiles()
     migrate_party_battle_balance()
     restore_party_persistent_views()
+    if migrate_relic_profiles_changed:
+        print("기존 발견 유물에 자동 속성/성능 프로필을 부여했어.")
 
     for uid in list(warehouses.keys()):
         apply_warehouse_daily_tax(uid)
