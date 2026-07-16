@@ -5219,10 +5219,11 @@ WEAPONS = {
     "AK12": {"price": 0, "bonus": 1000, "obtain_only": True},
     "MINIGUN": {"price": 0, "bonus": 2500, "obtain_only": True},
 
-    # 외곽 / !@$*!& 전용 장비. 지정된 적 외에는 절대 드롭하지 않는다.
-    "홍련의 신검": {"price": 5400000, "bonus": 310, "obtain_only": True},
-    "폭풍의 신검": {"price": 6000000, "bonus": 370, "obtain_only": True},
-    "종말의 마검": {"price": 10000000, "bonus": 520, "obtain_only": True},
+    # 외곽 / !@$*!& 스토리 무기. 사냥 상점에서는 구매할 수 있지만 모험에서는 획득할 수 없다.
+    # adventure_obtainable을 생략하면 기본값은 True다.
+    "홍련의 신검": {"price": 5400000, "bonus": 310, "adventure_obtainable": False},
+    "폭풍의 신검": {"price": 6000000, "bonus": 370, "adventure_obtainable": False},
+    "종말의 마검": {"price": 10000000, "bonus": 520, "adventure_obtainable": False},
 }
 
 ARMORS = {
@@ -5239,10 +5240,10 @@ ARMORS = {
     "화려한 꿈의 껍데기": {"price": 100000, "bonus": 80},
     "용사의 갑옷": {"price": 4000000, "bonus": 200},
 
-    # 외곽 신 전용 방어구. 일반 장비 추첨에서는 제외된다.
-    "심해신의 예복": {"price": 5700000, "bonus": 360, "obtain_only": True},
-    "대지신의 갑주": {"price": 7000000, "bonus": 480, "obtain_only": True},
-    "종말의 왕관": {"price": 11000000, "bonus": 600, "obtain_only": True},
+    # 외곽 / !@$*!& 스토리 방어구. 사냥 상점에서는 구매할 수 있지만 모험에서는 획득할 수 없다.
+    "심해신의 예복": {"price": 5700000, "bonus": 360, "adventure_obtainable": False},
+    "대지신의 갑주": {"price": 7000000, "bonus": 480, "adventure_obtainable": False},
+    "종말의 왕관": {"price": 11000000, "bonus": 600, "adventure_obtainable": False},
 }
 
 
@@ -8768,7 +8769,7 @@ ADVENTURE_BOSS_LEVEL_BONUS = 4
 ADVENTURE_LEVEL_WIN_BONUS = 0.7
 ADVENTURE_LEVEL_WIN_BONUS_CAP = 35.0
 
-# 전투 승리 시 모험 장비 발견 확률. 장비는 돈으로 구매할 수 없다.
+# 전투 승리 시 모험 장비 발견 확률. adventure_obtainable=False인 장비는 모험에서 제외된다.
 ADVENTURE_EQUIPMENT_DROP_RATES = {
     "normal": 7.0,
     "elite": 22.0,
@@ -9020,11 +9021,10 @@ ADVENTURE_ENDING_CHANNEL_ID = 1523946840310157323
 ADVENTURE_ENDING_ROLE_ID = 0
 ADVENTURE_ENDING_ROLE_NAME = "THE END"
 
-# 지정 몬스터 전용 장비. 일반 장비 드롭에서는 제외되며
-# 아래 몬스터를 직접 쓰러뜨렸을 때만 각 확률로 획득할 수 있다.
+# 총기류는 상점 구매가 막힌 모험 전용 무기이며 일반 장비 드롭에서도 제외된다.
+# 다른 스토리 장비는 adventure_obtainable=False로 모험 전체 획득을 막고 사냥 상점에서만 판매한다.
 ADVENTURE_RESTRICTED_WEAPONS = {
     "P90", "AK12", "MINIGUN",
-    "홍련의 신검", "폭풍의 신검", "종말의 마검",
 }
 ADVENTURE_EXCLUSIVE_EQUIPMENT_DROPS = {
     # 17번 연구소
@@ -9951,6 +9951,7 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
             name != "무인검"
             and name not in ADVENTURE_RESTRICTED_WEAPONS
             and not info.get("obtain_only")
+            and info.get("adventure_obtainable", True)
             and name not in owned_weapons
             and info.get("bonus", 0) <= allowed_bonus
         )
@@ -9960,6 +9961,7 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
         if (
             name != "모험가 세트"
             and not info.get("obtain_only")
+            and info.get("adventure_obtainable", True)
             and name not in owned_armors
             and info.get("bonus", 0) <= allowed_bonus
         )
@@ -9972,12 +9974,18 @@ def roll_adventure_equipment_drop(adventure, monster_tier="normal", is_boss=Fals
                 name != "무인검"
                 and name not in ADVENTURE_RESTRICTED_WEAPONS
                 and not info.get("obtain_only")
+                and info.get("adventure_obtainable", True)
                 and name not in owned_weapons
             )
         ]
         armor_candidates = [
             name for name, info in ARMORS.items()
-            if name != "모험가 세트" and not info.get("obtain_only") and name not in owned_armors
+            if (
+                name != "모험가 세트"
+                and not info.get("obtain_only")
+                and info.get("adventure_obtainable", True)
+                and name not in owned_armors
+            )
         ]
 
     kinds = []
@@ -12422,28 +12430,34 @@ def roll_adventure_exclusive_equipment_drop(adventure, monster_name):
 
     for kind, equipment_name, chance in drops:
         if kind == "weapon":
-            if equipment_name in owned_weapons or equipment_name not in WEAPONS:
+            equipment_info = WEAPONS.get(equipment_name)
+            if not equipment_info or not equipment_info.get("adventure_obtainable", True):
+                continue
+            if equipment_name in owned_weapons:
                 continue
             if random.random() * 100 < chance:
                 adventure.setdefault("owned_weapons", ["무인검"]).append(equipment_name)
                 return {
                     "kind": "weapon",
                     "name": equipment_name,
-                    "bonus": WEAPONS[equipment_name]["bonus"],
+                    "bonus": equipment_info["bonus"],
                     "special": True,
                     "chance": chance,
                     "source_monster": monster_name,
                 }
 
         elif kind == "armor":
-            if equipment_name in owned_armors or equipment_name not in ARMORS:
+            equipment_info = ARMORS.get(equipment_name)
+            if not equipment_info or not equipment_info.get("adventure_obtainable", True):
+                continue
+            if equipment_name in owned_armors:
                 continue
             if random.random() * 100 < chance:
                 adventure.setdefault("owned_armors", ["모험가 세트"]).append(equipment_name)
                 return {
                     "kind": "armor",
                     "name": equipment_name,
-                    "bonus": ARMORS[equipment_name]["bonus"],
+                    "bonus": equipment_info["bonus"],
                     "special": True,
                     "chance": chance,
                     "source_monster": monster_name,
@@ -17357,6 +17371,8 @@ def party_equipment_candidates(run, kind, low_tier=False, special_only=False):
     for name, info in catalog.items():
         if name == basic:
             continue
+        if not info.get("adventure_obtainable", True):
+            continue
         bonus = int(info.get("bonus", 0))
         is_special = bool(info.get("obtain_only")) or name in PARTY_SPECIAL_EQUIPMENT_DEPTH
         if special_only and not is_special:
@@ -17373,7 +17389,11 @@ def party_equipment_candidates(run, kind, low_tier=False, special_only=False):
     if not result and not special_only:
         fallback = []
         for name, info in catalog.items():
-            if name == basic or info.get("obtain_only"):
+            if (
+                name == basic
+                or info.get("obtain_only")
+                or not info.get("adventure_obtainable", True)
+            ):
                 continue
             if depth < ADVENTURE_TERRAIN_DEPTH.get("outskirts", 7) and int(info.get("bonus", 0)) > normal_cap:
                 continue
