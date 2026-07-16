@@ -5220,9 +5220,9 @@ WEAPONS = {
     "MINIGUN": {"price": 0, "bonus": 2500, "obtain_only": True},
 
     # 외곽 / !@$*!& 전용 장비. 지정된 적 외에는 절대 드롭하지 않는다.
-    "홍련의 신검": {"price": 5400000, "bonus": 310},
-    "폭풍의 신검": {"price": 6000000, "bonus": 370},
-    "종말의 마검": {"price": 10000000, "bonus": 520},
+    "홍련의 신검": {"price": 5400000, "bonus": 310, "obtain_only": True},
+    "폭풍의 신검": {"price": 6000000, "bonus": 370, "obtain_only": True},
+    "종말의 마검": {"price": 10000000, "bonus": 520, "obtain_only": True},
 }
 
 ARMORS = {
@@ -5240,9 +5240,9 @@ ARMORS = {
     "용사의 갑옷": {"price": 4000000, "bonus": 200},
 
     # 외곽 신 전용 방어구. 일반 장비 추첨에서는 제외된다.
-    "심해신의 예복": {"price": 5700000, "bonus": 360},
-    "대지신의 갑주": {"price": 7000000, "bonus": 480},
-    "종말의 왕관": {"price": 11000000, "bonus": 600},
+    "심해신의 예복": {"price": 5700000, "bonus": 360, "obtain_only": True},
+    "대지신의 갑주": {"price": 7000000, "bonus": 480, "obtain_only": True},
+    "종말의 왕관": {"price": 11000000, "bonus": 600, "obtain_only": True},
 }
 
 
