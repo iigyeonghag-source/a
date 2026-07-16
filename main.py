@@ -5212,17 +5212,17 @@ WEAPONS = {
     "안개를 가르는 회광": {"price": 18000, "bonus": 45},
     "고요히 샘솟는 빛": {"price": 25000, "bonus": 60},
     "서약의 자유": {"price": 100000, "bonus": 85},
-    "용사의 성검": {"price": 6500000, "bonus": 270},
+    "용사의 성검": {"price": 4500000, "bonus": 270},
 
     # 17번 연구소 전용 무기. 상점 구매 및 일반 장비 드롭으로는 절대 획득할 수 없다.
-    "P90": {"price": 0, "bonus": 95, "obtain_only": True},
-    "AK12": {"price": 0, "bonus": 145, "obtain_only": True},
-    "MINIGUN": {"price": 0, "bonus": 235, "obtain_only": True},
+    "P90": {"price": 0, "bonus": 650, "obtain_only": True},
+    "AK12": {"price": 0, "bonus": 1000, "obtain_only": True},
+    "MINIGUN": {"price": 0, "bonus": 2500, "obtain_only": True},
 
     # 외곽 / !@$*!& 전용 장비. 지정된 적 외에는 절대 드롭하지 않는다.
-    "홍련의 신검": {"price": 0, "bonus": 310, "obtain_only": True},
-    "폭풍의 신검": {"price": 0, "bonus": 320, "obtain_only": True},
-    "종말의 마검": {"price": 0, "bonus": 420, "obtain_only": True},
+    "홍련의 신검": {"price": 5400000, "bonus": 310},
+    "폭풍의 신검": {"price": 6000000, "bonus": 370},
+    "종말의 마검": {"price": 10000000, "bonus": 520},
 }
 
 ARMORS = {
@@ -5237,11 +5237,12 @@ ARMORS = {
     "그림자 사냥꾼": {"price": 15000, "bonus": 45},
     "황금 극단": {"price": 20000, "bonus": 60},
     "화려한 꿈의 껍데기": {"price": 100000, "bonus": 80},
-    "용사의 갑옷": {"price": 5000000, "bonus": 200},
+    "용사의 갑옷": {"price": 4000000, "bonus": 200},
 
     # 외곽 신 전용 방어구. 일반 장비 추첨에서는 제외된다.
-    "심해신의 예복": {"price": 0, "bonus": 260, "obtain_only": True},
-    "대지신의 갑주": {"price": 0, "bonus": 280, "obtain_only": True},
+    "심해신의 예복": {"price": 5700000, "bonus": 360},
+    "대지신의 갑주": {"price": 7000000, "bonus": 480},
+    "종말의 왕관": {"price": 11000000, "bonus": 600},
 }
 
 
