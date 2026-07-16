@@ -19054,6 +19054,173 @@ class PartyEventView(discord.ui.View):
         else:
             await party_complete_turn(interaction, party, f"🎭 **{choice.get('label')}** 선택 결과\n{text}")
 
+@bot.tree.command(
+    name="유물장착",
+    description="보유한 유물을 최대 3개까지 장착하거나 해제한다",
+    guild=GUILD
+)
+@app_commands.describe(
+    유물="장착하거나 해제할 유물"
+)
+async def relic_equip_command(
+    interaction: discord.Interaction,
+    유물: str
+):
+    uid = str(interaction.user.id)
+
+    # 자동완성에서는 item_id가 들어오며,
+    # 직접 이름을 입력했을 때도 찾을 수 있도록 처리
+    item_id = (
+        유물
+        if 유물 in ADVENTURE_ITEM_CATALOG
+        else resolve_owned_relic_id(uid, 유물)
+    )
+
+    if not item_id:
+        await interaction.response.send_message(
+            "❌ 그 유물을 가지고 있지 않아.",
+            ephemeral=True
+        )
+        return
+
+    item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
+
+    if item.get("kind") != "relic":
+        await interaction.response.send_message(
+            "❌ 해당 아이템은 유물이 아니야.",
+            ephemeral=True
+        )
+        return
+
+    inventory = get_adventure_inventory(uid)
+
+    if int(inventory.get(item_id, 0)) <= 0:
+        await interaction.response.send_message(
+            "❌ 그 유물을 가지고 있지 않아.",
+            ephemeral=True
+        )
+        return
+
+    profile = get_relic_profile(item_id, create_legacy=True)
+
+    if not profile or not profile.get("finalized"):
+        await interaction.response.send_message(
+            "❌ 최초 발견자가 성능을 완성하지 않은 유물은 장착할 수 없어.",
+            ephemeral=True
+        )
+        return
+
+    adventure = get_adventure(uid)
+    equipped = get_equipped_relic_ids(uid)
+
+    # 이미 장착 중이면 해제
+    if item_id in equipped:
+        adventure["equipped_relics"] = [
+            relic_id
+            for relic_id in equipped
+            if relic_id != item_id
+        ]
+
+        save_data()
+
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="💠 유물 장착 해제",
+                description=(
+                    f"**{format_relic_name(uid, item_id)}**을(를) 해제했어.\n\n"
+                    f"### 현재 장착 유물\n"
+                    f"{get_equipped_relic_summary(uid)}"
+                ),
+                color=discord.Color.orange()
+            )
+        )
+        return
+
+    # 최대 장착 개수 확인
+    if len(equipped) >= 3:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="❌ 유물 장착 칸 부족",
+                description=(
+                    "유물은 최대 **3개**까지 장착할 수 있어.\n"
+                    "장착 중인 유물을 다시 선택해서 먼저 해제해줘.\n\n"
+                    f"### 현재 장착 유물\n"
+                    f"{get_equipped_relic_summary(uid)}"
+                ),
+                color=discord.Color.red()
+            ),
+            ephemeral=True
+        )
+        return
+
+    # 유물 장착
+    adventure["equipped_relics"] = equipped + [item_id]
+    save_data()
+
+    await interaction.response.send_message(
+        embed=discord.Embed(
+            title="💠 유물 장착 완료",
+            description=(
+                f"**{format_relic_name(uid, item_id)}**을(를) 장착했어.\n"
+                f"효과: **{format_relic_effects(uid, item_id)}**\n\n"
+                f"### 현재 장착 유물 "
+                f"({len(adventure['equipped_relics'])}/3)\n"
+                f"{get_equipped_relic_summary(uid)}"
+            ),
+            color=discord.Color.green()
+        )
+    )
+
+
+@relic_equip_command.autocomplete("유물")
+async def relic_equip_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+):
+    uid = str(interaction.user.id)
+    normalized = normalize_item_name_for_filter(current)
+    equipped = get_equipped_relic_ids(uid)
+    choices = []
+
+    for item_id, count in get_owned_relic_entries(uid):
+        item = ADVENTURE_ITEM_CATALOG.get(item_id, {})
+
+        if item.get("kind") != "relic":
+            continue
+
+        name = get_adventure_item_name(item_id)
+
+        if normalized and normalized not in normalize_item_name_for_filter(name):
+            continue
+
+        profile = get_relic_profile(item_id, create_legacy=True)
+        finalized = bool(profile and profile.get("finalized"))
+
+        level = get_relic_upgrade_state(uid, item_id)["level"]
+        rarity = ADVENTURE_RARITIES[item["rarity"]]["name"]
+
+        if item_id in equipped:
+            status = "✅ 장착 중 · 선택 시 해제"
+        elif not finalized:
+            status = "⚠️ 성능 미완성"
+        else:
+            status = "장착 가능"
+
+        choices.append(
+            app_commands.Choice(
+                name=(
+                    f"{name} +{level} · {rarity} · "
+                    f"{status} · {count}개"
+                )[:100],
+                value=item_id
+            )
+        )
+
+        if len(choices) >= 25:
+            break
+
+    return choices
+    
 
 class PartyMerchantSelect(discord.ui.Select):
     def __init__(self, party_id):
