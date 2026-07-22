@@ -4837,6 +4837,9 @@ SLEEP_TIME = timedelta(hours=8)
 HEADSET_ON_TIME = timedelta(minutes=3)
 FINAL_WARNING_TIME = timedelta(minutes=10)
 
+# 숙면 모드 버튼을 누르면 자동으로 이동할 음성 채널
+SLEEP_VOICE_CHANNEL_ID = 1511001221073469500
+
 def get_voice_member(user_id):
     for guild in bot.guilds:
         member = guild.get_member(user_id)
@@ -4940,18 +4943,49 @@ class VoiceWarningView(discord.ui.View):
         member = await self.check_voice_state(interaction)
         if member is None:
             return
-        
+
         until = datetime.now(KST) + SLEEP_TIME
 
+        # 이동 이벤트가 발생해도 새 경고 DM이 오지 않도록 유예를 먼저 적용한다.
         voice_snooze[self.user_id] = until
         voice_warned.pop(self.user_id, None)
         voice_pending_on.pop(self.user_id, None)
+
+        target_channel = member.guild.get_channel(SLEEP_VOICE_CHANNEL_ID)
+
+        # 캐시에 채널이 없을 경우 Discord API에서 한 번 더 조회한다.
+        if target_channel is None:
+            try:
+                target_channel = await member.guild.fetch_channel(SLEEP_VOICE_CHANNEL_ID)
+            except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+                target_channel = None
+
+        if isinstance(target_channel, (discord.VoiceChannel, discord.StageChannel)):
+            try:
+                current_channel = member.voice.channel if member.voice else None
+
+                if current_channel is None:
+                    move_message = "\n⚠️ 이미 음성 채널에서 나가서 이동하지 못했어."
+                elif current_channel.id == target_channel.id:
+                    move_message = f"\n🔊 이미 <#{SLEEP_VOICE_CHANNEL_ID}> 채널에 있어."
+                else:
+                    await member.move_to(target_channel)
+                    move_message = f"\n🔊 <#{SLEEP_VOICE_CHANNEL_ID}> 채널로 이동했어."
+
+            except discord.Forbidden:
+                move_message = "\n⚠️ 채널 이동 실패: 봇에게 **멤버 이동** 권한이 없어."
+            except discord.HTTPException as e:
+                print(f"[VoiceKick] {member} 숙면 채널 이동 오류: {e}")
+                move_message = "\n⚠️ Discord 오류로 채널을 이동하지 못했어."
+        else:
+            move_message = "\n⚠️ 숙면용 음성 채널을 찾지 못했어."
 
         await interaction.response.edit_message(
             content=(
                 "😴 숙면 모드 켰어.\n"
                 "**8시간 동안** 경고/퇴장을 비활성화 할게.\n"
                 f"종료 시간: **{until.strftime('%H:%M')}**"
+                f"{move_message}"
             ),
             view=None
         )
