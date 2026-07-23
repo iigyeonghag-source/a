@@ -15,6 +15,9 @@ from io import BytesIO
 import google.generativeai as genai
 import math
 import hashlib
+import aiohttp
+import html
+import re
 
 load_dotenv()
 
