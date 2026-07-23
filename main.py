@@ -21357,6 +21357,34 @@ async def game_profile_command(interaction: discord.Interaction):
     embed.set_footer(text="서버 활동 / 사냥 / 개인 모험 / 파티 원정은 서로 다른 성장축이야.")
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(
+    name="난수생성",
+    description="지정한 범위에서 랜덤 숫자를 생성합니다.",
+    guild=GUILD
+)
+@app_commands.describe(
+    최소값="생성할 숫자의 최소값",
+    최대값="생성할 숫자의 최대값"
+)
+async def random_number(
+    interaction: discord.Interaction,
+    최소값: int,
+    최대값: int
+):
+    if 최소값 > 최대값:
+        await interaction.response.send_message(
+            "❌ 최소값은 최대값보다 클 수 없습니다.",
+            ephemeral=True
+        )
+        return
+    
+    result = random.randint(최소값, 최대값)
+
+    await interaction.response.send_message(
+        f"🎲 **{최소값} ~ {최대값}** 사이의 난수는 **{result}**입니다!"
+    )
+
+
 
 @bot.event
 async def on_ready():
