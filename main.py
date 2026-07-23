@@ -240,6 +240,8 @@ hunt_users = {}
 
 levels = {}
 
+RAWG_API_KEY = os.getenv("RAWG_API_KEY")
+
 RANKING_CHANNEL_ID = 1518922787828531312
 COMMAND_LOG_CHANNEL_ID = 1520309389364428830  
 LEVEL_LOG_CHANNEL_ID = 1518910263682662451
@@ -1721,6 +1723,580 @@ async def voice_xp_loop():
                 await add_xp(member, 3, "음성 채팅 1분")
                 
 
+    # =========================
+# 게임 추천 시스템
+# =========================
+
+RAWG_API_URL = "https://api.rawg.io/api"
+
+GAME_GENRE_NAMES = {
+    "Action": "액션",
+    "Indie": "인디",
+    "Adventure": "어드벤처",
+    "RPG": "RPG",
+    "Strategy": "전략",
+    "Shooter": "슈팅",
+    "Casual": "캐주얼",
+    "Simulation": "시뮬레이션",
+    "Puzzle": "퍼즐",
+    "Arcade": "아케이드",
+    "Platformer": "플랫포머",
+    "Racing": "레이싱",
+    "Massively Multiplayer": "MMORPG",
+    "Sports": "스포츠",
+    "Fighting": "격투",
+    "Family": "가족",
+    "Board Games": "보드게임",
+    "Card": "카드게임",
+    "Educational": "교육",
+}
+
+GAME_PLATFORM_NAMES = {
+    "PC": "PC",
+    "PlayStation 5": "PS5",
+    "PlayStation 4": "PS4",
+    "PlayStation 3": "PS3",
+    "PlayStation 2": "PS2",
+    "PlayStation": "PS1",
+    "Xbox Series S/X": "Xbox Series X|S",
+    "Xbox One": "Xbox One",
+    "Xbox 360": "Xbox 360",
+    "Xbox": "Xbox",
+    "Nintendo Switch": "Nintendo Switch",
+    "Wii U": "Wii U",
+    "Wii": "Wii",
+    "Nintendo 3DS": "Nintendo 3DS",
+    "Nintendo DS": "Nintendo DS",
+    "macOS": "macOS",
+    "Linux": "Linux",
+    "Android": "Android",
+    "iOS": "iOS",
+}
+
+
+def clean_game_description(description):
+    if not description:
+        return "등록된 게임 소개가 없습니다."
+
+    description = html.unescape(description)
+
+    description = re.sub(
+        r"<br\s*/?>",
+        "\n",
+        description,
+        flags=re.IGNORECASE
+    )
+
+    description = re.sub(r"</p>", "\n\n", description, flags=re.IGNORECASE)
+    description = re.sub(r"<[^>]+>", "", description)
+    description = re.sub(r"\n{3,}", "\n\n", description)
+
+    return description.strip()
+
+
+def translate_game_title(title):
+    """
+    영어 게임 제목을 한국에서 실제로 통용되는 제목으로 변경한다.
+    """
+
+    if not title or not GEMINI_API_KEY:
+        return title
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        prompt = f"""
+다음 게임 제목을 대한민국에서 실제로 사용되는 공식 한국어 제목으로 바꿔줘.
+
+규칙:
+- 결과 제목만 출력할 것
+- 설명하지 말 것
+- 따옴표를 붙이지 말 것
+- 공식 한국어 제목이 있으면 반드시 공식 제목을 사용할 것
+- 한국에서도 영어 제목을 그대로 사용하는 게임이면 억지로 번역하지 말 것
+- 숫자, 부제, 로마 숫자는 원작 표기를 최대한 유지할 것
+- 공식 제목을 확신할 수 없다면 원래 제목을 그대로 출력할 것
+
+게임 제목:
+{title}
+"""
+
+        response = model.generate_content(prompt)
+
+        if response and response.text:
+            translated = response.text.strip()
+
+            if translated:
+                return translated
+
+    except Exception as e:
+        print(f"게임 제목 번역 실패: {e}")
+
+    return title
+
+
+def translate_game_description(description):
+    """
+    RAWG의 영어 게임 소개를 한국어로 번역하고 간단히 요약한다.
+    """
+
+    if not description:
+        return "등록된 게임 소개가 없습니다."
+
+    if not GEMINI_API_KEY:
+        return description
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        prompt = f"""
+아래 게임 소개를 자연스러운 한국어로 번역하고 요약해줘.
+
+규칙:
+- 번역된 소개만 출력할 것
+- 없는 내용을 만들지 말 것
+- 최대 700자 이내로 작성할 것
+- 게임의 장르, 배경, 플레이 방식과 핵심 특징을 중심으로 설명할 것
+- 결말이나 중요한 반전은 밝히지 말 것
+- 광고 문구처럼 과장하지 말 것
+- 인물명과 지역명은 한국에서 통용되는 표기를 사용할 것
+
+게임 소개:
+{description}
+"""
+
+        response = model.generate_content(prompt)
+
+        if response and response.text:
+            translated = response.text.strip()
+
+            if translated:
+                return translated
+
+    except Exception as e:
+        print(f"게임 줄거리 번역 실패: {e}")
+
+    return description
+
+
+def get_game_genres(game):
+    genres = game.get("genres") or []
+
+    genre_names = []
+
+    for genre in genres:
+        original_name = genre.get("name")
+
+        if not original_name:
+            continue
+
+        korean_name = GAME_GENRE_NAMES.get(
+            original_name,
+            original_name
+        )
+
+        genre_names.append(korean_name)
+
+    return genre_names or ["장르 정보 없음"]
+
+
+def get_game_platforms(game):
+    platforms = game.get("platforms") or []
+    platform_names = []
+
+    for platform_data in platforms:
+        platform = platform_data.get("platform") or {}
+        original_name = platform.get("name")
+
+        if not original_name:
+            continue
+
+        korean_name = GAME_PLATFORM_NAMES.get(
+            original_name,
+            original_name
+        )
+
+        if korean_name not in platform_names:
+            platform_names.append(korean_name)
+
+    return platform_names or ["플랫폼 정보 없음"]
+
+
+def format_game_release_date(released):
+    if not released:
+        return "정보 없음"
+
+    try:
+        release_date = datetime.strptime(
+            released,
+            "%Y-%m-%d"
+        )
+
+        return release_date.strftime("%Y년 %m월 %d일")
+
+    except (TypeError, ValueError):
+        return released
+
+
+async def rawg_get(endpoint, params=None):
+    if not RAWG_API_KEY:
+        raise RuntimeError(
+            "RAWG_API_KEY가 설정되지 않았습니다."
+        )
+
+    request_params = dict(params or {})
+    request_params["key"] = RAWG_API_KEY
+
+    timeout = aiohttp.ClientTimeout(total=20)
+
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(
+            f"{RAWG_API_URL}{endpoint}",
+            params=request_params
+        ) as response:
+
+            if response.status != 200:
+                error_text = await response.text()
+
+                raise RuntimeError(
+                    f"RAWG API 오류: "
+                    f"{response.status} / {error_text[:300]}"
+                )
+
+            return await response.json()
+
+
+async def fetch_random_game():
+    """
+    RAWG 인기 게임 상위 300개에서 무작위로 하나를 선택한다.
+
+    added 값은 RAWG 이용자들의 라이브러리 등록량을 기반으로 하므로
+    대중적으로 알려진 게임을 고르는 인기 지표로 사용한다.
+    """
+
+    random_page = random.randint(1, 6)
+
+    game_list_data = await rawg_get(
+        "/games",
+        params={
+            "page": random_page,
+            "page_size": 50,
+            "ordering": "-added",
+            "exclude_additions": "true",
+            "metacritic": "60,100"
+        }
+    )
+
+    games = game_list_data.get("results") or []
+
+    # 이미지와 출시일이 없는 이상한 데이터는 가급적 제외
+    valid_games = [
+        game for game in games
+        if game.get("id")
+        and game.get("name")
+        and game.get("background_image")
+        and game.get("released")
+    ]
+
+    if not valid_games:
+        valid_games = games
+
+    if not valid_games:
+        raise RuntimeError(
+            "추천할 게임을 불러오지 못했습니다."
+        )
+
+    selected_game = random.choice(valid_games)
+
+    # 목록 API에는 상세 줄거리나 개발사가 없을 수 있으므로
+    # 선택된 게임의 상세 정보를 한 번 더 가져온다.
+    game_details = await rawg_get(
+        f"/games/{selected_game['id']}"
+    )
+
+    return game_details
+
+
+class GameInfoView(discord.ui.View):
+    def __init__(self, game, korean_title):
+        super().__init__(timeout=180)
+
+        self.game = game
+        self.korean_title = korean_title
+        self.translated_description = None
+
+    @discord.ui.button(
+        label="게임 정보 보기",
+        emoji="🎮",
+        style=discord.ButtonStyle.primary
+    )
+    async def show_game_info(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+        await interaction.response.defer(ephemeral=True)
+
+        game = self.game
+        title = self.korean_title
+
+        raw_description = (
+            game.get("description_raw")
+            or game.get("description")
+            or ""
+        )
+
+        raw_description = clean_game_description(
+            raw_description
+        )
+
+        # 동일한 추천 메시지에서 여러 명이 눌러도
+        # Gemini 번역은 최초 한 번만 수행한다.
+        if self.translated_description is None:
+            self.translated_description = await asyncio.to_thread(
+                translate_game_description,
+                raw_description
+            )
+
+        description = self.translated_description
+
+        if len(description) > 3500:
+            description = description[:3500] + "..."
+
+        genres = get_game_genres(game)
+        platforms = get_game_platforms(game)
+
+        developers = [
+            developer.get("name")
+            for developer in game.get("developers", [])
+            if developer.get("name")
+        ]
+
+        publishers = [
+            publisher.get("name")
+            for publisher in game.get("publishers", [])
+            if publisher.get("name")
+        ]
+
+        released = format_game_release_date(
+            game.get("released")
+        )
+
+        metacritic = game.get("metacritic")
+        rating = game.get("rating")
+        rating_top = game.get("rating_top") or 5
+        playtime = game.get("playtime")
+        esrb_data = game.get("esrb_rating") or {}
+        esrb_rating = esrb_data.get("name")
+
+        genre_text = ", ".join(genres)
+        platform_text = ", ".join(platforms)
+
+        if len(platform_text) > 900:
+            platform_text = platform_text[:900] + "..."
+
+        info_lines = [
+            f"🎭 **장르:** {genre_text}",
+            f"🖥️ **플랫폼:** {platform_text}",
+            f"🏢 **개발사:** "
+            f"{', '.join(developers) if developers else '정보 없음'}",
+            f"📦 **배급사:** "
+            f"{', '.join(publishers) if publishers else '정보 없음'}",
+            f"📅 **출시일:** {released}",
+            f"⭐ **RAWG 평점:** "
+            f"{f'{rating:.2f}/{rating_top}' if rating else '정보 없음'}",
+            f"📊 **Metacritic:** "
+            f"{f'{metacritic}/100' if metacritic else '정보 없음'}",
+            f"⏱️ **평균 플레이타임:** "
+            f"{f'약 {playtime}시간' if playtime else '정보 없음'}",
+            f"🔞 **연령 등급:** "
+            f"{esrb_rating if esrb_rating else '정보 없음'}"
+        ]
+
+        embed = discord.Embed(
+            title=f"🎮 {title}",
+            description=description,
+            color=discord.Color.blurple()
+        )
+
+        embed.add_field(
+            name="게임 정보",
+            value="\n".join(info_lines),
+            inline=False
+        )
+
+        background_image = game.get("background_image")
+
+        if background_image:
+            embed.set_thumbnail(url=background_image)
+
+        rawg_url = (
+            f"https://rawg.io/games/{game.get('slug')}"
+            if game.get("slug")
+            else "https://rawg.io"
+        )
+
+        website = game.get("website")
+
+        link_lines = [
+            f"[RAWG에서 보기]({rawg_url})"
+        ]
+
+        if website:
+            link_lines.append(
+                f"[공식 사이트]({website})"
+            )
+
+        embed.add_field(
+            name="관련 링크",
+            value=" · ".join(link_lines),
+            inline=False
+        )
+
+        embed.set_footer(
+            text="게임 정보 제공: RAWG"
+        )
+
+        await interaction.followup.send(
+            embed=embed,
+            ephemeral=True
+        )
+
+
+@bot.tree.command(
+    name="게임추천",
+    description="인기 게임 중 하나를 무작위로 추천합니다",
+    guild=GUILD
+)
+async def recommend_game(interaction: discord.Interaction):
+    await interaction.response.defer()
+
+    try:
+        game = await fetch_random_game()
+
+        original_title = (
+            game.get("name_original")
+            or game.get("name")
+            or "제목 없음"
+        )
+
+        korean_title = await asyncio.to_thread(
+            translate_game_title,
+            original_title
+        )
+
+    except asyncio.TimeoutError:
+        await interaction.followup.send(
+            "게임 정보를 불러오는 데 너무 오래 걸렸어. "
+            "잠시 후 다시 시도해줘!",
+            ephemeral=True
+        )
+        return
+
+    except Exception as e:
+        print(f"게임 추천 오류: {e}")
+
+        await interaction.followup.send(
+            "게임 추천 정보를 불러오지 못했어. "
+            "Railway 로그와 RAWG API 키를 확인해줘!",
+            ephemeral=True
+        )
+        return
+
+    original_title = (
+        game.get("name_original")
+        or game.get("name")
+    )
+
+    released = format_game_release_date(
+        game.get("released")
+    )
+
+    genres = get_game_genres(game)
+    platforms = get_game_platforms(game)
+
+    metacritic = game.get("metacritic")
+    rating = game.get("rating")
+    rating_top = game.get("rating_top") or 5
+
+    description_lines = [
+        f"## 🎮 오늘의 추천 게임은 **{korean_title}**!"
+    ]
+
+    if original_title and original_title != korean_title:
+        description_lines.append(
+            f"**원제:** {original_title}"
+        )
+
+    description_lines.extend([
+        "",
+        f"🎭 장르: **{', '.join(genres)}**",
+        f"📅 출시일: **{released}**"
+    ])
+
+    # 추천 화면은 플랫폼이 지나치게 길어지지 않게 앞 5개만 표시
+    short_platforms = platforms[:5]
+
+    platform_text = ", ".join(short_platforms)
+
+    if len(platforms) > 5:
+        platform_text += f" 외 {len(platforms) - 5}개"
+
+    description_lines.append(
+        f"🖥️ 플랫폼: **{platform_text}**"
+    )
+
+    if metacritic:
+        description_lines.append(
+            f"📊 Metacritic: **{metacritic}/100**"
+        )
+
+    if rating:
+        description_lines.append(
+            f"⭐ RAWG 평점: **{rating:.2f}/{rating_top}**"
+        )
+
+    description_lines.extend([
+        "",
+        "아래의 **게임 정보 보기** 버튼을 누르면 "
+        "개발사와 게임 소개를 볼 수 있어!"
+    ])
+
+    rawg_url = (
+        f"https://rawg.io/games/{game.get('slug')}"
+        if game.get("slug")
+        else "https://rawg.io"
+    )
+
+    embed = discord.Embed(
+        description="\n".join(description_lines),
+        color=discord.Color.gold(),
+        url=rawg_url
+    )
+
+    background_image = game.get("background_image")
+
+    if background_image:
+        embed.set_image(url=background_image)
+
+    embed.add_field(
+        name="데이터 출처",
+        value=f"[RAWG에서 작품 정보 보기]({rawg_url})",
+        inline=False
+    )
+
+    embed.set_footer(
+        text="RAWG 인기 게임 상위 300개 중 무작위 추천"
+    )
+
+    await interaction.followup.send(
+        embed=embed,
+        view=GameInfoView(
+            game=game,
+            korean_title=korean_title
+        )
+    )
+    
 # =========================
 # 애니 추천 시스템
 # =========================
