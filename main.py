@@ -21373,7 +21373,7 @@ async def random_number(
 ):
     if 최소값 > 최대값:
         await interaction.response.send_message(
-            "❌ 최소값은 최대값보다 클 수 없습니다.",
+            "❌ 최소값은 최대값보다 클 수 없어.",
             ephemeral=True
         )
         return
@@ -21381,7 +21381,7 @@ async def random_number(
     result = random.randint(최소값, 최대값)
 
     await interaction.response.send_message(
-        f"🎲 **{최소값} ~ {최대값}** 사이의 난수는 **{result}**입니다!"
+        f"🎲 **{최소값} ~ {최대값}** 사이의 난수는 **{result}**(이)야"
     )
 
 
