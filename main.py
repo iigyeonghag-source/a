@@ -1725,6 +1725,36 @@ async def voice_xp_loop():
 # 애니 추천 시스템
 # =========================
 
+def translate_anime_title(title):
+    if not title or not GEMINI_API_KEY:
+        return title
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        prompt = f"""
+다음 애니메이션 제목을 대한민국에서 일반적으로 사용되는 공식 한국어 제목으로 바꿔줘.
+
+규칙:
+- 한국 정식 제목만 출력
+- 설명하지 말 것
+- 정식 한국어 제목을 확신할 수 없으면 자연스럽게 음역할 것
+- 따옴표를 붙이지 말 것
+
+애니메이션 제목:
+{title}
+"""
+
+        response = model.generate_content(prompt)
+
+        if response and response.text:
+            return response.text.strip()
+
+    except Exception as e:
+        print(f"애니 제목 번역 실패: {e}")
+
+    return title
+    
 ANILIST_API_URL = "https://graphql.anilist.co"
 
 ANIME_RECOMMEND_QUERY = """
@@ -1890,7 +1920,12 @@ class AnimeInfoView(discord.ui.View):
 
         anime = self.anime
 
-        title = get_anime_title(anime)
+        original_title = get_anime_title(anime)
+
+        title = await asyncio.to_thread(
+            translate_anime_title,
+            original_title
+        )
         genres = anime.get("genres") or ["장르 정보 없음"]
 
         raw_description = clean_anime_description(
@@ -2018,7 +2053,7 @@ async def recommend_anime(interaction: discord.Interaction):
         )
         return
 
-    title = get_anime_title(anime)
+    title = self.korean_title
 
     native_title = (
         anime.get("title", {}).get("native")
@@ -2071,7 +2106,7 @@ async def recommend_anime(interaction: discord.Interaction):
 
     await interaction.followup.send(
         embed=embed,
-        view=AnimeInfoView(anime)
+        view=AnimeInfoView(anime, title)
     )
     
 GENSHIN_CHARACTERS = ({
