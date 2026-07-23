@@ -1725,36 +1725,6 @@ async def voice_xp_loop():
 # 애니 추천 시스템
 # =========================
 
-def translate_anime_title(title):
-    if not title or not GEMINI_API_KEY:
-        return title
-
-    try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
-
-        prompt = f"""
-다음 애니메이션 제목을 대한민국에서 일반적으로 사용되는 공식 한국어 제목으로 바꿔줘.
-
-규칙:
-- 한국 정식 제목만 출력
-- 설명하지 말 것
-- 정식 한국어 제목을 확신할 수 없으면 자연스럽게 음역할 것
-- 따옴표를 붙이지 말 것
-
-애니메이션 제목:
-{title}
-"""
-
-        response = model.generate_content(prompt)
-
-        if response and response.text:
-            return response.text.strip()
-
-    except Exception as e:
-        print(f"애니 제목 번역 실패: {e}")
-
-    return title
-    
 ANILIST_API_URL = "https://graphql.anilist.co"
 
 ANIME_RECOMMEND_QUERY = """
@@ -1792,12 +1762,53 @@ query ($page: Int) {
 """
 
 
+def translate_anime_title(title):
+    if not title or not GEMINI_API_KEY:
+        return title
+
+    try:
+        model = genai.GenerativeModel("gemini-2.5-flash")
+
+        prompt = f"""
+다음 애니메이션 제목을 대한민국에서 일반적으로 사용하는 공식 한국어 제목으로 바꿔줘.
+
+규칙:
+- 한국어 제목만 출력할 것
+- 설명하지 말 것
+- 따옴표를 붙이지 말 것
+- 대한민국 정식 방영명이 알려진 작품이면 반드시 그 제목을 사용할 것
+- 정식 한국어 제목을 확신할 수 없으면 일본어 발음을 자연스럽게 한글로 음역할 것
+- 영어식 번역 제목보다는 한국에서 실제로 통용되는 제목을 우선할 것
+
+애니메이션 제목:
+{title}
+"""
+
+        response = model.generate_content(prompt)
+
+        if response and response.text:
+            translated = response.text.strip()
+
+            if translated:
+                return translated
+
+    except Exception as e:
+        print(f"애니 제목 번역 실패: {e}")
+
+    return title
+
+
 def clean_anime_description(description):
     if not description:
         return "등록된 줄거리가 없습니다."
 
     description = html.unescape(description)
-    description = re.sub(r"<br\s*/?>", "\n", description, flags=re.IGNORECASE)
+    description = re.sub(
+        r"<br\s*/?>",
+        "\n",
+        description,
+        flags=re.IGNORECASE
+    )
     description = re.sub(r"<[^>]+>", "", description)
     description = re.sub(r"\n{3,}", "\n\n", description)
 
@@ -1805,11 +1816,16 @@ def clean_anime_description(description):
 
 
 def get_anime_title(anime):
-    titles = anime.get("title", {})
+    """
+    Gemini에 넘길 원본 제목.
+    영어 번역 제목보다는 일본어 로마자 제목을 우선한다.
+    """
+
+    titles = anime.get("title") or {}
 
     return (
-        titles.get("english")
-        or titles.get("romaji")
+        titles.get("romaji")
+        or titles.get("english")
         or titles.get("native")
         or "제목 없음"
     )
@@ -1817,8 +1833,8 @@ def get_anime_title(anime):
 
 def translate_anime_description(description):
     """
-    AniList 줄거리가 영어인 경우 Gemini로 자연스럽게 한국어 번역.
-    Gemini 키가 없거나 오류가 발생하면 원문을 반환한다.
+    AniList 영어 줄거리를 Gemini로 한국어 번역 및 간단히 요약한다.
+    Gemini 키가 없거나 오류가 나면 원문을 반환한다.
     """
 
     if not description:
@@ -1831,14 +1847,15 @@ def translate_anime_description(description):
         model = genai.GenerativeModel("gemini-2.5-flash")
 
         prompt = f"""
-아래 애니메이션 줄거리를 자연스러운 한국어로 번역해줘.
+아래 애니메이션 줄거리를 자연스러운 한국어로 번역하고 적당히 요약해줘.
 
 규칙:
-- 번역문만 출력할 것
+- 결과물만 출력할 것
 - 없는 내용을 추가하지 말 것
 - 등장인물 이름은 자연스럽게 음역할 것
-- 최대 700자 정도로 적당히 요약할 것
-- 스포일러가 심한 후반 내용은 줄일 것
+- 최대 700자 이내로 작성할 것
+- 후반부의 중대한 반전이나 결말은 밝히지 말 것
+- 원문의 핵심 설정과 도입부는 유지할 것
 
 줄거리:
 {description}
@@ -1847,7 +1864,10 @@ def translate_anime_description(description):
         response = model.generate_content(prompt)
 
         if response and response.text:
-            return response.text.strip()
+            translated = response.text.strip()
+
+            if translated:
+                return translated
 
     except Exception as e:
         print(f"애니 줄거리 번역 실패: {e}")
@@ -1857,9 +1877,8 @@ def translate_anime_description(description):
 
 async def fetch_random_anime():
     """
-    AniList 인기순 상위 300개:
-    50개씩 총 6페이지 중 한 페이지를 무작위 선택한 뒤
-    그 페이지에서 애니 하나를 무작위로 선택한다.
+    AniList 인기순 상위 300개를 대상으로 한다.
+    50개씩 6페이지 중 하나를 뽑고, 해당 페이지에서 다시 무작위 선택한다.
     """
 
     random_page = random.randint(1, 6)
@@ -1881,11 +1900,18 @@ async def fetch_random_anime():
 
             if response.status != 200:
                 error_text = await response.text()
+
                 raise RuntimeError(
-                    f"AniList API 오류: {response.status} / {error_text[:200]}"
+                    f"AniList API 오류: "
+                    f"{response.status} / {error_text[:200]}"
                 )
 
             result = await response.json()
+
+    if result.get("errors"):
+        raise RuntimeError(
+            f"AniList GraphQL 오류: {result['errors']}"
+        )
 
     anime_list = (
         result.get("data", {})
@@ -1894,16 +1920,19 @@ async def fetch_random_anime():
     )
 
     if not anime_list:
-        raise RuntimeError("추천할 애니를 불러오지 못했습니다.")
+        raise RuntimeError(
+            "추천할 애니메이션을 불러오지 못했습니다."
+        )
 
     return random.choice(anime_list)
 
 
 class AnimeInfoView(discord.ui.View):
-    def __init__(self, anime):
+    def __init__(self, anime, korean_title):
         super().__init__(timeout=180)
 
         self.anime = anime
+        self.korean_title = korean_title
         self.translated_description = None
 
     @discord.ui.button(
@@ -1919,20 +1948,16 @@ class AnimeInfoView(discord.ui.View):
         await interaction.response.defer(ephemeral=True)
 
         anime = self.anime
+        title = self.korean_title
 
-        original_title = get_anime_title(anime)
-
-        title = await asyncio.to_thread(
-            translate_anime_title,
-            original_title
-        )
         genres = anime.get("genres") or ["장르 정보 없음"]
 
         raw_description = clean_anime_description(
             anime.get("description")
         )
 
-        # 같은 추천에서 버튼을 여러 번 눌러도 번역을 다시 호출하지 않음
+        # 한 추천에서 정보 보기 버튼을 여러 번 눌러도
+        # Gemini 번역은 한 번만 수행한다.
         if self.translated_description is None:
             self.translated_description = await asyncio.to_thread(
                 translate_anime_description,
@@ -1941,7 +1966,6 @@ class AnimeInfoView(discord.ui.View):
 
         description = self.translated_description
 
-        # 디스코드 Embed description 최대 길이 대비
         if len(description) > 3500:
             description = description[:3500] + "..."
 
@@ -1951,7 +1975,8 @@ class AnimeInfoView(discord.ui.View):
             "ONA": "웹 애니메이션",
             "OVA": "OVA",
             "TV_SHORT": "단편 TV 애니메이션",
-            "SPECIAL": "스페셜"
+            "SPECIAL": "스페셜",
+            "MUSIC": "뮤직비디오"
         }
 
         status_names = {
@@ -1959,7 +1984,7 @@ class AnimeInfoView(discord.ui.View):
             "RELEASING": "방영 중",
             "NOT_YET_RELEASED": "방영 예정",
             "CANCELLED": "취소됨",
-            "HIATUS": "중단됨"
+            "HIATUS": "방영 중단"
         }
 
         anime_format = format_names.get(
@@ -1980,11 +2005,15 @@ class AnimeInfoView(discord.ui.View):
         info_lines = [
             f"🎭 **장르:** {', '.join(genres)}",
             f"📺 **형식:** {anime_format}",
-            f"📅 **방영 연도:** {year if year else '정보 없음'}",
+            f"📅 **방영 연도:** "
+            f"{f'{year}년' if year else '정보 없음'}",
             f"📊 **상태:** {anime_status}",
-            f"🎞️ **화수:** {episodes if episodes else '정보 없음'}",
-            f"⏱️ **회당 길이:** {f'{duration}분' if duration else '정보 없음'}",
-            f"⭐ **AniList 평점:** {f'{score}/100' if score else '정보 없음'}"
+            f"🎞️ **화수:** "
+            f"{f'{episodes}화' if episodes else '정보 없음'}",
+            f"⏱️ **회당 길이:** "
+            f"{f'{duration}분' if duration else '정보 없음'}",
+            f"⭐ **AniList 평점:** "
+            f"{f'{score}/100' if score else '정보 없음'}"
         ]
 
         embed = discord.Embed(
@@ -1999,9 +2028,11 @@ class AnimeInfoView(discord.ui.View):
             inline=False
         )
 
+        cover_data = anime.get("coverImage") or {}
+
         cover_image = (
-            anime.get("coverImage", {}).get("extraLarge")
-            or anime.get("coverImage", {}).get("large")
+            cover_data.get("extraLarge")
+            or cover_data.get("large")
         )
 
         if cover_image:
@@ -2037,9 +2068,17 @@ async def recommend_anime(interaction: discord.Interaction):
     try:
         anime = await fetch_random_anime()
 
+        original_title = get_anime_title(anime)
+
+        korean_title = await asyncio.to_thread(
+            translate_anime_title,
+            original_title
+        )
+
     except asyncio.TimeoutError:
         await interaction.followup.send(
-            "애니 정보를 불러오는 데 너무 오래 걸렸어. 잠시 후 다시 시도해줘!",
+            "애니 정보를 불러오는 데 너무 오래 걸렸어. "
+            "잠시 후 다시 시도해줘!",
             ephemeral=True
         )
         return
@@ -2048,16 +2087,17 @@ async def recommend_anime(interaction: discord.Interaction):
         print(f"애니 추천 오류: {e}")
 
         await interaction.followup.send(
-            "애니 추천 정보를 불러오지 못했어. 잠시 후 다시 시도해줘!",
+            "애니 추천 정보를 불러오지 못했어. "
+            "잠시 후 다시 시도해줘!",
             ephemeral=True
         )
         return
 
-    title = self.korean_title
+    title_data = anime.get("title") or {}
 
     native_title = (
-        anime.get("title", {}).get("native")
-        or anime.get("title", {}).get("romaji")
+        title_data.get("native")
+        or title_data.get("romaji")
     )
 
     score = anime.get("averageScore")
@@ -2065,26 +2105,35 @@ async def recommend_anime(interaction: discord.Interaction):
     episodes = anime.get("episodes")
 
     description_lines = [
-        f"## 🎬 오늘의 추천 애니는 **{title}**!"
+        f"## 🎬 오늘의 추천 애니는 **{korean_title}**!"
     ]
 
-    if native_title and native_title != title:
-        description_lines.append(f"**원제:** {native_title}")
+    if native_title and native_title != korean_title:
+        description_lines.append(
+            f"**원제:** {native_title}"
+        )
 
     description_lines.append("")
 
     if year:
-        description_lines.append(f"📅 방영 연도: **{year}년**")
+        description_lines.append(
+            f"📅 방영 연도: **{year}년**"
+        )
 
     if episodes:
-        description_lines.append(f"🎞️ 분량: **{episodes}화**")
+        description_lines.append(
+            f"🎞️ 분량: **{episodes}화**"
+        )
 
     if score:
-        description_lines.append(f"⭐ AniList 평점: **{score}/100**")
+        description_lines.append(
+            f"⭐ AniList 평점: **{score}/100**"
+        )
 
     description_lines.append("")
     description_lines.append(
-        "아래의 **정보 보기** 버튼을 누르면 장르와 줄거리를 볼 수 있어!"
+        "아래의 **정보 보기** 버튼을 누르면 "
+        "장르와 줄거리를 볼 수 있어!"
     )
 
     embed = discord.Embed(
@@ -2092,9 +2141,11 @@ async def recommend_anime(interaction: discord.Interaction):
         color=discord.Color.gold()
     )
 
+    cover_data = anime.get("coverImage") or {}
+
     cover_image = (
-        anime.get("coverImage", {}).get("extraLarge")
-        or anime.get("coverImage", {}).get("large")
+        cover_data.get("extraLarge")
+        or cover_data.get("large")
     )
 
     if cover_image:
@@ -2106,7 +2157,10 @@ async def recommend_anime(interaction: discord.Interaction):
 
     await interaction.followup.send(
         embed=embed,
-        view=AnimeInfoView(anime, title)
+        view=AnimeInfoView(
+            anime=anime,
+            korean_title=korean_title
+        )
     )
     
 GENSHIN_CHARACTERS = ({
