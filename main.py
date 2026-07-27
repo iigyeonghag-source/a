@@ -79,6 +79,7 @@ data = {
     "shop_items": {},
     "party_profiles": {},
     "relic_discovery_stats": {},
+    "time_notice_sent": {},
     "fever_multiplier": 1.0
 }
 
@@ -99,6 +100,7 @@ relic_upgrades = {}
 shop_items = {}
 party_profiles = {}
 relic_discovery_stats = {}
+time_notice_sent = {}
 
 def remove_poker_money(user_id, amount):
     uid = str(user_id)
@@ -111,7 +113,7 @@ def remove_poker_money(user_id, amount):
     save_data()
     
 def load_data():
-    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, discovered_foods, relic_upgrades, shop_items, party_profiles, relic_discovery_stats
+    global data, poker_money, poker_last_claim, favor, user_memory, characters, hunt_users, weapons, primogems, quests, achievements, character_pity, levels, checkin, warnings, warehouses, warehouse_last_tax, adventures, inventories, discovered_items, discovered_foods, relic_upgrades, shop_items, party_profiles, relic_discovery_stats, time_notice_sent
     
     os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -129,6 +131,7 @@ def load_data():
         data["shop_items"] = loaded.get("shop_items", {})
         data["party_profiles"] = loaded.get("party_profiles", {})
         data["relic_discovery_stats"] = loaded.get("relic_discovery_stats", {})
+        data["time_notice_sent"] = loaded.get("time_notice_sent", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
@@ -174,12 +177,16 @@ def load_data():
     shop_items = data["shop_items"]
     party_profiles = data.get("party_profiles", {})
     relic_discovery_stats = data.get("relic_discovery_stats", {})
+    time_notice_sent = data.get("time_notice_sent", {})
     if not isinstance(party_profiles, dict):
         party_profiles = {}
     if not isinstance(relic_discovery_stats, dict):
         relic_discovery_stats = {}
+    if not isinstance(time_notice_sent, dict):
+        time_notice_sent = {}
     data["party_profiles"] = party_profiles
     data["relic_discovery_stats"] = relic_discovery_stats
+    data["time_notice_sent"] = time_notice_sent
     
     warehouses = data["warehouses"]
 
@@ -207,6 +214,7 @@ def save_data():
     data["shop_items"] = shop_items
     data["party_profiles"] = party_profiles
     data["relic_discovery_stats"] = relic_discovery_stats
+    data["time_notice_sent"] = time_notice_sent
     data["fever_multiplier"] = get_fever_multiplier()
     data["warnings"] = warnings
     data["ranking_message_id"] = data.get("ranking_message_id")
@@ -237,6 +245,7 @@ user_memory = {}
 favor = {}
 characters = {}
 hunt_users = {}
+time_notice_sent = {}
 
 levels = {}
 
@@ -417,6 +426,13 @@ def get_user_memory(user_id, key, default=None):
 
 TIME_NOTICE_CHANNEL_ID = 1510681615528103988
 
+# 각 인사의 기준 시각. 실제 전송 시각은 매일 -15분 ~ +60분 사이에서 정해진다.
+TIME_NOTICE_BASE_TIMES = {
+    "아침": (6, 0),
+    "점심": (12, 0),
+    "저녁": (18, 0)
+}
+
 TIME_MESSAGES = {
     "아침": [
         "좋은 아침이야! 흠흠, 오늘도 이 푸리나님이 하루의 시작을 알려주도록 하지! 잠은 푹 잤어?",
@@ -436,30 +452,171 @@ TIME_MESSAGES = {
         "오늘도 정말 수고 많았어. 나도 하루 종일 바빴지만... 이렇게 다시 만났으니 그걸로 됐어. 후후!"
     ]
 }
-last_period = None
 
-@tasks.loop(minutes=1)
+# 기준 시각보다 일찍 도착했을 때 사용한다.
+TIME_EARLY_MESSAGES = {
+    "아침": [
+        "좋은 아침! 후후, 놀랐어? 오늘은 이 푸리나님이 무려 {minutes}분이나 먼저 와줬다고! 이 정도 성의라면 박수 정도는 쳐줘도 괜찮아.",
+        "짜잔! 아직 정각도 안 됐는데 내가 먼저 등장했어. 설마 내가 매일 늦잠만 잔다고 생각했던 건 아니겠지?",
+        "흠흠, 오늘의 푸리나는 한발 빨랐어! 특별히 일찍 깨워주러 왔으니 감사히 좋은 아침을 맞이하라고?"
+    ],
+    "점심": [
+        "점심 인사를 조금 미리 하러 왔어! 후후, 내가 {minutes}분이나 먼저 챙겨주는 날은 흔치 않다고?",
+        "아직 점심 정각 전이지만 미리 알려주도록 하지! 맛있는 걸 고를 시간도 필요하잖아? 역시 세심한 푸리나님이야.",
+        "흠흠, 오늘은 내가 먼저 왔네! 점심을 거르지 않도록 미리 감시하러 온 거니까 딴생각은 하지 말라고?"
+    ],
+    "저녁": [
+        "좋은 저녁! 조금 이르다고? 후후, 오늘은 내가 {minutes}분 먼저 찾아와 준 거야. 기뻐해도 좋아!",
+        "아직 저녁 정각 전이지만 무대의 주인공은 원래 조금 일찍 등장하는 법이야! 오늘 하루는 어땠어?",
+        "짜잔! 오늘은 평소보다 먼저 왔어. 저녁 메뉴를 고민할 시간을 특별히 더 준 거라고 생각해!"
+    ]
+}
+
+# 기준 시각보다 늦게 도착했을 때 사용한다.
+TIME_LATE_MESSAGES = {
+    "아침": [
+        "으앗, 미안! 오늘은 준비가 조금 길어져서 {minutes}분 늦었네... 그래도 좋은 아침이야! 설마 나 없이 먼저 하루를 시작한 건 아니겠지?",
+        "자, 잠깐! 늦잠 잔 건 아니야! 완벽한 아침 인사를 준비하다 보니 {minutes}분쯤 늦어진 것뿐이라고!",
+        "미안, 조금 늦었어! 하지만 이 푸리나님이 직접 아침을 알려주러 왔으니 이번만은 너그럽게 넘어가 줘."
+    ],
+    "점심": [
+        "미안, 점심 인사가 {minutes}분 늦었네! 무대 준비가 예상보다 길어졌거든... 너, 설마 아직 밥 안 먹고 기다린 건 아니지?",
+        "으음... 조금 늦어버렸어. 그래도 점심은 꼭 챙겨 먹어! 이건 물의 신의 뒤늦은 명령이야!",
+        "자, 잠깐만! 시계를 잘못 본 게 아니라 일이 좀 있었던 거야! 아무튼 늦었지만 맛있는 점심 먹으라고?"
+    ],
+    "저녁": [
+        "앗, 미안! 오늘 저녁 인사는 {minutes}분 늦어버렸네. 기다렸다면... 크흠, 특별히 사과해 주도록 하지!",
+        "조금 늦었지? 오늘의 마지막 무대를 멋지게 장식하려다 보니 시간이 이렇게 됐네... 그래도 좋은 저녁이야!",
+        "으으, 늦어버렸어! 하지만 오늘 하루 수고했다는 말만큼은 꼭 해주고 싶었단 말이야. 정말 고생 많았어!"
+    ]
+}
+
+# 오늘의 랜덤 전송 시각을 메모리에 보관한다.
+time_notice_schedule = {}
+time_notice_schedule_date = None
+
+
+def choose_time_notice_offset():
+    """기준 시각에서 얼마나 앞뒤로 보낼지 분 단위로 뽑는다.
+
+    - 15%: 15분 전 ~ 1분 전
+    - 65%: 정각 ~ 5분 후
+    - 20%: 6분 후 ~ 60분 후
+    """
+    timing_group = random.choices(
+        population=("early", "near", "late"),
+        weights=(15, 65, 20),
+        k=1
+    )[0]
+
+    if timing_group == "early":
+        return random.randint(-15, -1)
+    if timing_group == "near":
+        return random.randint(0, 5)
+    return random.randint(6, 60)
+
+
+def create_daily_time_notice_schedule(now):
+    """해당 날짜의 아침/점심/저녁 인사 시각을 새로 만든다."""
+    schedule = {}
+
+    for period, (hour, minute) in TIME_NOTICE_BASE_TIMES.items():
+        base_time = now.replace(
+            hour=hour,
+            minute=minute,
+            second=0,
+            microsecond=0
+        )
+        offset_minutes = choose_time_notice_offset()
+        scheduled_time = base_time + timedelta(minutes=offset_minutes)
+
+        schedule[period] = {
+            "base_time": base_time,
+            "scheduled_time": scheduled_time,
+            "offset_minutes": offset_minutes
+        }
+
+        print(
+            f"[시간 인사] {period}: "
+            f"{scheduled_time.strftime('%Y-%m-%d %H:%M')} "
+            f"({offset_minutes:+d}분)"
+        )
+
+    return schedule
+
+
+def get_time_notice_message(period, offset_minutes):
+    """도착 시각에 맞는 푸리나 인사 대사를 고른다."""
+    if offset_minutes < 0:
+        template = random.choice(TIME_EARLY_MESSAGES[period])
+        return template.format(minutes=abs(offset_minutes))
+
+    if offset_minutes > 0:
+        template = random.choice(TIME_LATE_MESSAGES[period])
+        return template.format(minutes=offset_minutes)
+
+    return random.choice(TIME_MESSAGES[period])
+
+
+@tasks.loop(seconds=20)
 async def time_notice_loop():
-    global last_period
+    global time_notice_schedule, time_notice_schedule_date
 
     now = datetime.now(ZoneInfo("Asia/Seoul"))
+    today = now.date()
+    today_key = today.isoformat()
 
-    if 6 <= now.hour < 12:
-        period = "아침"
-    elif 12 <= now.hour < 18:
-        period = "점심"
-    else:
-        period = "저녁"
+    # 날짜가 바뀌면 그날 사용할 세 개의 인사 시각을 새로 뽑는다.
+    if time_notice_schedule_date != today:
+        time_notice_schedule = create_daily_time_notice_schedule(now)
+        time_notice_schedule_date = today
 
-    if period != last_period:
-        last_period = period
+    channel = bot.get_channel(TIME_NOTICE_CHANNEL_ID)
+    if channel is None:
+        return
 
-        channel = bot.get_channel(TIME_NOTICE_CHANNEL_ID)
-        if channel:
-            await channel.send(
-                random.choice(TIME_MESSAGES[period])
-            )
-            
+    for period, notice_info in time_notice_schedule.items():
+        # 이미 오늘 보낸 인사는 다시 보내지 않는다.
+        if time_notice_sent.get(period) == today_key:
+            continue
+
+        base_time = notice_info["base_time"]
+        scheduled_time = notice_info["scheduled_time"]
+        latest_allowed_time = base_time + timedelta(minutes=60)
+
+        # 봇이 너무 늦게 켜졌다면 지난 인사를 갑자기 보내지 않고 건너뛴다.
+        if now > latest_allowed_time:
+            time_notice_sent[period] = today_key
+            save_data()
+            continue
+
+        if now < scheduled_time:
+            continue
+
+        # 재시작 등으로 예정 시각보다 조금 늦게 실행돼도 실제 도착 시각에 맞춰 말한다.
+        actual_offset_minutes = int(
+            (now - base_time).total_seconds() // 60
+        )
+        message = get_time_notice_message(
+            period,
+            actual_offset_minutes
+        )
+
+        try:
+            await channel.send(message)
+        except discord.HTTPException as e:
+            print(f"{period} 시간 인사 전송 실패: {e}")
+            continue
+
+        # Railway 재시작 뒤에도 같은 인사를 중복 전송하지 않도록 저장한다.
+        time_notice_sent[period] = today_key
+        save_data()
+
+
+@time_notice_loop.before_loop
+async def before_time_notice_loop():
+    await bot.wait_until_ready()
+
 # =========================
 # 메뉴 추천 시스템
 # =========================
