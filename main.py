@@ -495,14 +495,28 @@ TIME_LATE_MESSAGES = {
 time_notice_schedule = {}
 time_notice_schedule_date = None
 
+def choose_time_notice_offset():
+    """기준 시각에서 랜덤 전송 시각을 정한다.
+
+    - 15%: 15분 전 ~ 5분 전
+    - 65%: 4분 전 ~ 9분 후
+    - 20%: 10분 후 ~ 60분 후
+    """
+    timing_group = random.choices(
+        population=("early", "near", "late"),
+        weights=(15, 65, 20),
+        k=1
+    )[0]
+
+    if timing_group == "early":
+        return random.randint(-15, -5)
+
+    if timing_group == "near":
+        return random.randint(-4, 9)
+
+    return random.randint(10, 60)
 
 def get_time_notice_message(period, offset_minutes):
-    """실제 도착 시각에 맞는 푸리나 인사 대사를 고른다.
-
-    - 기준 시각보다 5분 이상 빠름: 빠른 인사
-    - 기준 시각 4분 전 ~ 9분 후: 일반 인사
-    - 기준 시각보다 10분 이상 늦음: 늦은 인사
-    """
     if offset_minutes <= -5:
         template = random.choice(TIME_EARLY_MESSAGES[period])
         return template.format(minutes=abs(offset_minutes))
