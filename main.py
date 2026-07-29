@@ -629,6 +629,21 @@ async def time_notice_loop():
 async def before_time_notice_loop():
     await bot.wait_until_ready()
 
+
+NIGHT_CHAT_CHANNEL_ID = 1510681615528103988
+
+NIGHT_CHAT_MESSAGES = [
+    "너희들, 새벽인데 아직도 안 자니?",
+    "잠깐... 지금 시간이 몇 시인지는 알고 떠드는 거야?",
+    "이 시간까지 깨어 있다니! 설마 밤을 새울 생각은 아니겠지?",
+    "새벽부터 무슨 이야기를 그렇게 즐겁게 하는 거야? 나도 좀 끼워줘!",
+    "으음... 다들 잠은 안 자고 뭐 하는 거야? 내일 후회해도 모른다고?"
+]
+
+night_chat_date = None
+night_chat_count = 0
+night_chat_sent = False
+
 # =========================
 # 메뉴 추천 시스템
 # =========================
@@ -1704,8 +1719,34 @@ async def generate_furina_ai_response(user_id, user_text):
         
 @bot.event
 async def on_message(message):
+    global night_chat_date, night_chat_count, night_chat_sent
 
-    now = datetime.now(KST)
+    if message.author.bot:
+        return
+
+    now = datetime.now(ZoneInfo("Asia/Seoul"))
+
+    # 새벽 1시부터 오전 6시 전까지
+    if (
+        message.channel.id == NIGHT_CHAT_CHANNEL_ID
+        and 1 <= now.hour < 6
+    ):
+        today = now.date()
+
+        # 날짜가 바뀌면 다시 초기화
+        if night_chat_date != today:
+            night_chat_date = today
+            night_chat_count = 0
+            night_chat_sent = False
+
+        night_chat_count += 1
+
+        # 해당 새벽의 세 번째 채팅에서 한 번만 전송
+        if night_chat_count >= 3 and not night_chat_sent:
+            await message.channel.send(random.choice(NIGHT_CHAT_MESSAGES))
+            night_chat_sent = True
+
+    # 아래부터 기존 on_message 코드 그대로
     uid = str(message.author.id)
 
     if uid not in last_chat_xp or now - last_chat_xp[uid] >= CHAT_XP_COOLDOWN:
@@ -21552,8 +21593,6 @@ async def random_number(
     await interaction.response.send_message(
         f"🎲 **{최소값} ~ {최대값}** 사이의 난수는 **{result}**(이)야"
     )
-
-
 
 @bot.event
 async def on_ready():
