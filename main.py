@@ -830,9 +830,16 @@ def check_furina_repeat_or_spam(user_id, text):
 
         return random.choice(SPAM_ANNOYED_RESPONSES)
 
-    # 최근 말과 비슷한지 검사
-    recent_history = history[-3:]
-    if any(is_similar_text(clean, old) for old in recent_history):
+    # 최근 말 중 현재 말과 비슷한 문장이 몇 개 있는지 검사
+    recent_history = history[-5:]
+    similar_count = sum(
+        1 for old in recent_history
+        if is_similar_text(clean, old)
+    )
+
+    # 이전에 비슷한 말을 이미 2번 했다면,
+    # 현재 발언이 세 번째이므로 반복 반응
+    if similar_count >= 2:
         if can_penalize:
             add_favor(user_id, -2)
             spam["last_penalty"] = now
