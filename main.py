@@ -8888,6 +8888,70 @@ async def fever_time_command(
     await interaction.response.send_message(embed=embed)
 
 
+KST = ZoneInfo("Asia/Seoul")
+
+
+def get_weekend_fever_multiplier(now: datetime | None = None) -> float:
+    """
+    토요일 00:00 ~ 일요일 12:00 이전: 1.2배
+    일요일 12:00 ~ 월요일 00:00 이전: 1.5배
+    나머지 시간: 1배
+    """
+    if now is None:
+        now = datetime.now(KST)
+
+    weekday = now.weekday()
+    # 월요일=0, 화요일=1, ..., 토요일=5, 일요일=6
+
+    if weekday == 5:
+        # 토요일 전체
+        return 1.2
+
+    if weekday == 6:
+        # 일요일
+        if now.hour < 12:
+            return 1.2
+        else:
+            return 1.5
+
+    return 1.0
+
+
+@tasks.loop(minutes=1)
+async def weekend_fever_scheduler():
+    target_multiplier = get_weekend_fever_multiplier()
+    current_multiplier = get_fever_multiplier()
+
+    # 이미 올바른 배율이라면 저장하지 않음
+    if math.isclose(
+        current_multiplier,
+        target_multiplier,
+        rel_tol=1e-9,
+        abs_tol=1e-9
+    ):
+        return
+
+    data["fever_multiplier"] = target_multiplier
+    save_data()
+
+    now = datetime.now(KST)
+
+    print(
+        f"[피버타임 자동 변경] "
+        f"{now:%Y-%m-%d %H:%M:%S} | "
+        f"{current_multiplier:g}배 → {target_multiplier:g}배"
+    )
+
+
+@weekend_fever_scheduler.before_loop
+async def before_weekend_fever_scheduler():
+    await bot.wait_until_ready()
+
+@bot.event
+async def setup_hook():
+    if not weekend_fever_scheduler.is_running():
+        weekend_fever_scheduler.start()
+
 @bot.tree.command(name="레벨", description="내 레벨과 경험치를 확인합니다.", guild=GUILD)
 async def level_check(interaction: discord.Interaction, member: discord.Member = None):
     member = member or interaction.user
