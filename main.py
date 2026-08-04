@@ -8952,6 +8952,44 @@ async def setup_hook():
     if not weekend_fever_scheduler.is_running():
         weekend_fever_scheduler.start()
 
+FEVER_NOTICE_CHANNEL_ID = 1510686602567876789
+
+channel = bot.get_channel(FEVER_NOTICE_CHANNEL_ID)
+
+if channel is not None:
+    if target_multiplier == 1.0:
+        title = "✅ 주말 피버타임 종료"
+        description = "주말 피버타임이 종료되어 경험치 배수가 **1배**로 돌아왔어."
+        color = discord.Color.green()
+
+    elif target_multiplier == 1.2:
+        title = "🔥 주말 피버타임 시작"
+        description = "주말 피버타임이 시작됐어!\n현재 모든 경험치가 **1.2배**로 적용돼."
+        color = discord.Color.gold()
+
+    elif target_multiplier == 1.5:
+        title = "🔥 피버타임 강화"
+        description = "일요일 오후 피버타임이 시작됐어!\n현재 모든 경험치가 **1.5배**로 적용돼."
+        color = discord.Color.orange()
+
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color
+    )
+
+    embed.add_field(
+        name="배수 변경",
+        value=f"`{current_multiplier:g}배` → `{target_multiplier:g}배`",
+        inline=False
+    )
+
+    embed.set_footer(
+        text="채팅 · 음성 · 출석 · 사냥 · 모험 · 파티 모험 경험치에 적용"
+    )
+
+    await channel.send(embed=embed)
+    
 @bot.tree.command(name="레벨", description="내 레벨과 경험치를 확인합니다.", guild=GUILD)
 async def level_check(interaction: discord.Interaction, member: discord.Member = None):
     member = member or interaction.user
