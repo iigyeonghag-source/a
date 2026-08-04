@@ -8891,38 +8891,41 @@ async def fever_time_command(
 KST = ZoneInfo("Asia/Seoul")
 
 
+FEVER_NOTICE_CHANNEL_ID = 1510686602567876789
+# ↑ 실제 공지 채널 ID로 변경
+
+
 def get_weekend_fever_multiplier(now: datetime | None = None) -> float:
-    """
-    토요일 00:00 ~ 일요일 12:00 이전: 1.2배
-    일요일 12:00 ~ 월요일 00:00 이전: 1.5배
-    나머지 시간: 1배
-    """
     if now is None:
         now = datetime.now(KST)
 
     weekday = now.weekday()
-    # 월요일=0, 화요일=1, ..., 토요일=5, 일요일=6
+    # 월요일=0, 토요일=5, 일요일=6
 
     if weekday == 5:
-        # 토요일 전체
+        # 토요일 00:00 ~ 24:00
         return 1.2
 
     if weekday == 6:
-        # 일요일
+        # 일요일 00:00 ~ 12:00
         if now.hour < 12:
             return 1.2
-        else:
-            return 1.5
 
+        # 일요일 12:00 ~ 24:00
+        return 1.5
+
+    # 월~금
     return 1.0
 
 
 @tasks.loop(minutes=1)
 async def weekend_fever_scheduler():
-    target_multiplier = get_weekend_fever_multiplier()
+    now = datetime.now(KST)
+
+    target_multiplier = get_weekend_fever_multiplier(now)
     current_multiplier = get_fever_multiplier()
 
-    # 이미 올바른 배율이라면 저장하지 않음
+    # 이미 현재 시간대에 맞는 배수라면 아무것도 하지 않음
     if math.isclose(
         current_multiplier,
         target_multiplier,
@@ -8931,10 +8934,9 @@ async def weekend_fever_scheduler():
     ):
         return
 
+    # 배수 변경 및 저장
     data["fever_multiplier"] = target_multiplier
     save_data()
-
-    now = datetime.now(KST)
 
     print(
         f"[피버타임 자동 변경] "
@@ -8942,40 +8944,47 @@ async def weekend_fever_scheduler():
         f"{current_multiplier:g}배 → {target_multiplier:g}배"
     )
 
+    # 공지 채널 가져오기
+    channel = bot.get_channel(FEVER_NOTICE_CHANNEL_ID)
 
-@weekend_fever_scheduler.before_loop
-async def before_weekend_fever_scheduler():
-    await bot.wait_until_ready()
+    # 캐시에 채널이 없을 경우 API로 다시 가져오기
+    if channel is None:
+        try:
+            channel = await bot.fetch_channel(FEVER_NOTICE_CHANNEL_ID)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+            print(f"[피버타임 공지 실패] 채널을 가져올 수 없음: {error}")
+            return
 
-@bot.event
-async def setup_hook():
-    if not weekend_fever_scheduler.is_running():
-        weekend_fever_scheduler.start()
-
-FEVER_NOTICE_CHANNEL_ID = 1510686602567876789
-
-channel = bot.get_channel(FEVER_NOTICE_CHANNEL_ID)
-
-if channel is not None:
+    # 변경된 배수에 따른 공지 내용
     if target_multiplier == 1.0:
         title = "✅ 주말 피버타임 종료"
-        description = "주말 피버타임이 종료되어 경험치 배수가 **1배**로 돌아왔어."
+        description = (
+            "주말 피버타임이 종료됐어!\n"
+            "서버 전체 경험치 배수가 **1배**로 돌아왔어."
+        )
         color = discord.Color.green()
 
     elif target_multiplier == 1.2:
         title = "🔥 주말 피버타임 시작"
-        description = "주말 피버타임이 시작됐어!\n현재 모든 경험치가 **1.2배**로 적용돼."
+        description = (
+            "주말 피버타임이 시작됐어!\n"
+            "현재 서버에서 얻는 모든 경험치가 **1.2배**로 적용돼!"
+        )
         color = discord.Color.gold()
 
-    elif target_multiplier == 1.5:
-        title = "🔥 피버타임 강화"
-        description = "일요일 오후 피버타임이 시작됐어!\n현재 모든 경험치가 **1.5배**로 적용돼."
+    else:
+        title = "🔥 일요일 피버타임 강화"
+        description = (
+            "일요일 오후 피버타임이 시작됐어!\n"
+            "현재 서버에서 얻는 모든 경험치가 **1.5배**로 적용돼!"
+        )
         color = discord.Color.orange()
 
     embed = discord.Embed(
         title=title,
         description=description,
-        color=color
+        color=color,
+        timestamp=now
     )
 
     embed.add_field(
@@ -8988,7 +8997,23 @@ if channel is not None:
         text="채팅 · 음성 · 출석 · 사냥 · 모험 · 파티 모험 경험치에 적용"
     )
 
-    await channel.send(embed=embed)
+    try:
+        await channel.send(embed=embed)
+    except discord.Forbidden:
+        print("[피버타임 공지 실패] 봇에게 메시지 전송 권한이 없음")
+    except discord.HTTPException as error:
+        print(f"[피버타임 공지 실패] 메시지 전송 오류: {error}")
+
+
+@weekend_fever_scheduler.before_loop
+async def before_weekend_fever_scheduler():
+    await bot.wait_until_ready()
+    
+@bot.event
+async def setup_hook():
+    if not weekend_fever_scheduler.is_running():
+        weekend_fever_scheduler.start()
+
     
 @bot.tree.command(name="레벨", description="내 레벨과 경험치를 확인합니다.", guild=GUILD)
 async def level_check(interaction: discord.Interaction, member: discord.Member = None):
