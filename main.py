@@ -25,15 +25,13 @@ GUILD_ID = 1510681614919794868
 GUILD = discord.Object(id=GUILD_ID)
 
 TOKEN = os.getenv("TOKEN")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
-
-response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=prompt
+gemini_client = (
+    genai.Client(api_key=GEMINI_API_KEY)
+    if GEMINI_API_KEY
+    else None
 )
-
-print(response.text)
 
 if TOKEN is None:
     raise RuntimeError("TOKEN이 없음. Railway Variables에 TOKEN 넣어야 함.")
