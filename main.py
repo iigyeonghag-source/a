@@ -9203,6 +9203,55 @@ def build_ranking_embed(guild):
         description=text,
         color=discord.Color.gold())
 
+async def cleanup_old_ranking_messages(channel, keep_message_id):
+    """
+    랭킹 채널에 남아있는 예전 랭킹표들을 삭제한다.
+    keep_message_id에 해당하는 현재 랭킹표만 남긴다.
+    """
+
+    try:
+        async for message in channel.history(limit=100):
+
+            # 현재 사용 중인 랭킹표는 보존
+            if message.id == keep_message_id:
+                continue
+
+            # 봇이 보낸 메시지만 검사
+            if not bot.user or message.author.id != bot.user.id:
+                continue
+
+            # 임베드가 아니면 무시
+            if not message.embeds:
+                continue
+
+            embed = message.embeds[0]
+
+            # 우리 랭킹표인지 확인
+            if embed.title != "🏆 실시간 레벨 랭킹 TOP 50":
+                continue
+
+            try:
+                await message.delete()
+                print(f"기존 랭킹 메시지 삭제됨: {message.id}")
+
+            except discord.NotFound:
+                pass
+
+            except discord.Forbidden:
+                print(
+                    f"기존 랭킹 메시지 삭제 권한 없음: "
+                    f"{message.id}"
+                )
+
+            except discord.HTTPException as e:
+                print(
+                    f"기존 랭킹 메시지 삭제 실패 "
+                    f"{message.id}: {e}"
+                )
+
+    except discord.HTTPException as e:
+        print(f"랭킹 채널 기록 확인 실패: {e}")
+        
 async def update_ranking_message(guild):
     channel = guild.get_channel(RANKING_CHANNEL_ID)
     if not channel:
