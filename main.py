@@ -2155,7 +2155,7 @@ def format_game_release_date(released):
         return released
 
 
-async def rawg_get(endpoint, params=None):
+async def rawg_get(endpoint, params=None, retries=3):
     if not RAWG_API_KEY:
         raise RuntimeError(
             "RAWG_API_KEY가 설정되지 않았습니다."
@@ -2166,21 +2166,58 @@ async def rawg_get(endpoint, params=None):
 
     timeout = aiohttp.ClientTimeout(total=20)
 
+    # 일시적인 서버 장애일 가능성이 높은 상태 코드
+    retry_statuses = {502, 503, 504, 520, 522, 524}
+
     async with aiohttp.ClientSession(timeout=timeout) as session:
-        async with session.get(
-            f"{RAWG_API_URL}{endpoint}",
-            params=request_params
-        ) as response:
+        for attempt in range(retries):
+            try:
+                async with session.get(
+                    f"{RAWG_API_URL}{endpoint}",
+                    params=request_params
+                ) as response:
 
-            if response.status != 200:
-                error_text = await response.text()
+                    if response.status == 200:
+                        return await response.json()
 
-                raise RuntimeError(
-                    f"RAWG API 오류: "
-                    f"{response.status} / {error_text[:300]}"
+                    # RAWG / Cloudflare 일시 장애면 재시도
+                    if response.status in retry_statuses:
+                        error_text = await response.text()
+
+                        print(
+                            f"RAWG API 일시 오류: "
+                            f"{response.status} "
+                            f"(시도 {attempt + 1}/{retries}) / "
+                            f"{error_text[:200]}"
+                        )
+
+                        if attempt < retries - 1:
+                            await asyncio.sleep(2 ** attempt)
+                            continue
+
+                    # 재시도 대상이 아닌 오류
+                    error_text = await response.text()
+
+                    raise RuntimeError(
+                        f"RAWG API 오류: "
+                        f"{response.status} / {error_text[:300]}"
+                    )
+
+            except (aiohttp.ClientError, asyncio.TimeoutError) as e:
+                print(
+                    f"RAWG 연결 오류 "
+                    f"(시도 {attempt + 1}/{retries}): {e}"
                 )
 
-            return await response.json()
+                if attempt < retries - 1:
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+
+                raise
+
+    raise RuntimeError(
+        f"RAWG API 요청이 {retries}회 모두 실패했습니다."
+    )
 
 
 async def fetch_random_game():
@@ -9118,12 +9155,26 @@ async def give_level_roles(member):
         if channel:
             roles_text = ", ".join(role.mention for role in given_roles)
 
+ranking_message_lock = asyncio.Lock()
+
 @tasks.loop(seconds=15)
 async def ranking_update_loop():
     guild = bot.get_guild(GUILD_ID)
 
-    if guild:
+    if not guild:
+        return
+
+    try:
         await update_ranking_message(guild)
+
+    except discord.HTTPException as e:
+        # Discord 503 같은 일시적인 서버 오류 때문에
+        # ranking_update_loop 자체가 죽는 것을 방지
+        print(f"랭킹 업데이트 Discord 오류: {e}")
+
+    except Exception as e:
+        # 예상 못 한 오류가 나도 루프 자체는 계속 살아있게 함
+        print(f"랭킹 업데이트 오류: {e}")
         
 def build_ranking_embed(guild):
     ranking = sorted(
