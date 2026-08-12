@@ -9256,31 +9256,46 @@ async def cleanup_old_ranking_messages(channel, keep_message_id):
         
 async def update_ranking_message(guild):
     channel = guild.get_channel(RANKING_CHANNEL_ID)
+
     if not channel:
         print("랭킹 채널을 못 찾음")
         return
 
-    embed = build_ranking_embed(guild)
+    async with ranking_message_lock:
+        embed = build_ranking_embed(guild)
 
-    message_id = data.get("ranking_message_id")
+        message_id = data.get("ranking_message_id")
 
-    if message_id:
-        try:
-            msg = await channel.fetch_message(int(message_id))
-            await msg.edit(embed=embed)
-            return
-        except discord.NotFound:
-            print("기존 랭킹 메시지를 못 찾음. 새로 생성함.")
-        except discord.Forbidden:
-            print("랭킹 메시지 수정 권한 없음")
-            return
-        except discord.HTTPException as e:
-            print(f"랭킹 메시지 수정 실패: {e}")
+        if message_id:
+            try:
+                msg = await channel.fetch_message(int(message_id))
+                await msg.edit(embed=embed)
+                return
 
-    msg = await channel.send(embed=embed)
-    data["ranking_message_id"] = msg.id
-    save_data()
-    print(f"랭킹 메시지 생성됨: {msg.id}")
+            except discord.NotFound:
+                print("기존 랭킹 메시지를 못 찾음. 새로 생성함.")
+
+            except discord.Forbidden:
+                print("랭킹 메시지 수정 권한 없음")
+                return
+
+            except discord.HTTPException as e:
+                print(f"랭킹 메시지 수정 실패: {e}")
+
+        # 기존 메시지 수정에 실패했으면 새 랭킹표 생성
+        msg = await channel.send(embed=embed)
+
+        # 새 메시지를 현재 랭킹 메시지로 지정
+        data["ranking_message_id"] = msg.id
+        save_data()
+
+        print(f"랭킹 메시지 생성됨: {msg.id}")
+
+        # 새 랭킹표를 제외한 과거 랭킹표 전부 삭제
+        await cleanup_old_ranking_messages(
+            channel,
+            keep_message_id=msg.id
+        )
 
 @bot.tree.command(
     name="레벨증가",
