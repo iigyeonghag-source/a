@@ -5132,7 +5132,6 @@ async def blackjack_command(
 # =========================
 
 ROULETTE_MIN_BET = 500
-ROULETTE_GAUGE_MAX = 100
 
 ROULETTE_SYMBOLS = [
     "🍒",
@@ -5143,6 +5142,7 @@ ROULETTE_SYMBOLS = [
     "7️⃣"
 ]
 
+# 심볼 등장 가중치
 ROULETTE_WEIGHTS = {
     "🍒": 35,
     "🍋": 25,
@@ -5152,8 +5152,7 @@ ROULETTE_WEIGHTS = {
     "7️⃣": 3
 }
 
-# 3개 일치 시 "총 지급 배수"
-# 예: 1000모라 베팅 + 🍒🍒🍒 = 2000모라 지급
+# 3개 일치 시 총 지급 배수
 ROULETTE_JACKPOT_MULTIPLIER = {
     "🍒": 2,
     "🍋": 3,
@@ -5163,14 +5162,19 @@ ROULETTE_JACKPOT_MULTIPLIER = {
     "7️⃣": 10
 }
 
+# 같은 심볼 2개 = 베팅금 절반 반환
 ROULETTE_PAIR_MULTIPLIER = 0.5
 
+
+# 현재 슬롯을 돌리고 있는 유저
 active_roulette_users = set()
+
+# 동시에 명령이 들어올 때 돈 중복 차감 방지
 roulette_start_lock = asyncio.Lock()
 
 
 # =========================
-# 데이터
+# 룰렛 기록
 # =========================
 
 def get_roulette_log(user_id):
@@ -5190,7 +5194,6 @@ def get_roulette_log(user_id):
             "spent": 0,
             "earned": 0,
             "plays": 0,
-            "gauge": 0,
             "jackpots": 0,
             "best_win": 0
         }
@@ -5201,10 +5204,12 @@ def get_roulette_log(user_id):
     log.setdefault("spent", 0)
     log.setdefault("earned", 0)
     log.setdefault("plays", 0)
-    log.setdefault("gauge", 0)
     log.setdefault("jackpots", 0)
     log.setdefault("best_win", 0)
     log.setdefault("symbols", {})
+
+    # 예전에 gauge가 저장돼 있었다면 제거
+    log.pop("gauge", None)
 
     for symbol in ROULETTE_SYMBOLS:
         log["symbols"].setdefault(
@@ -5219,52 +5224,15 @@ def get_roulette_log(user_id):
 # 확률
 # =========================
 
-def get_roulette_luck(user_id):
-    """
-    현재는 행운 보정 없음.
-
-    나중에 펜던트나 장비 시스템을 붙이고 싶으면
-    여기서 숫자를 반환하면 됨.
-
-    예:
-        return get_pendant_luck(user_id)
-    """
-    return 0
-
-
-def get_weighted_roulette_symbol(
-    luck_bonus=0
-):
+def get_weighted_roulette_symbol():
     symbols = list(
         ROULETTE_WEIGHTS.keys()
     )
 
-    weights = []
-
-    for symbol in symbols:
-        weight = float(
-            ROULETTE_WEIGHTS[symbol]
-        )
-
-        # 희귀 심볼 증가
-        if symbol in ("💎", "7️⃣"):
-            weight *= (
-                1 + luck_bonus / 120
-            )
-
-        elif symbol == "⭐":
-            weight *= (
-                1 + luck_bonus / 180
-            )
-
-        # 흔한 심볼 감소
-        elif symbol in ("🍒", "🍋"):
-            weight *= max(
-                0.35,
-                1 - luck_bonus / 350
-            )
-
-        weights.append(weight)
+    weights = [
+        ROULETTE_WEIGHTS[symbol]
+        for symbol in symbols
+    ]
 
     return random.choices(
         symbols,
@@ -5273,66 +5241,41 @@ def get_weighted_roulette_symbol(
     )[0]
 
 
-def make_random_roulette_slots(
-    luck=0
-):
+def make_random_roulette_slots():
     return [
-        get_weighted_roulette_symbol(luck),
-        get_weighted_roulette_symbol(luck),
-        get_weighted_roulette_symbol(luck)
+        get_weighted_roulette_symbol(),
+        get_weighted_roulette_symbol(),
+        get_weighted_roulette_symbol()
     ]
 
 
 # =========================
-# UI 유틸
+# 슬롯 표시
 # =========================
 
-def make_roulette_gauge_bar(
-    gauge,
-    length=10
-):
-    gauge = max(
-        0,
-        min(
-            ROULETTE_GAUGE_MAX,
-            int(gauge)
-        )
-    )
-
-    filled = round(
-        gauge
-        / ROULETTE_GAUGE_MAX
-        * length
-    )
-
-    return (
-        "▰" * filled
-        + "▱" * (length - filled)
-    )
-
-
 def format_roulette_slots(slots):
+    # 이모지 폭 때문에 ASCII 테두리는 사용하지 않음
     return (
-        "╔═════════════════╗\n"
-        f"║  {slots[0]}  │  {slots[1]}  │  {slots[2]}  ║\n"
-        "╚═════════════════╝"
+        f"{slots[0]}　│　"
+        f"{slots[1]}　│　"
+        f"{slots[2]}"
     )
 
+
+# =========================
+# 회전 중 임베드
+# =========================
 
 def build_roulette_spin_embed(
     member,
     bet,
     slots,
-    gauge,
     status="릴이 회전하고 있어..."
 ):
     embed = discord.Embed(
         title="🎰 슬롯머신",
         description=(
-            "## 🎲 ROLLING...\n\n"
-            f"```text\n"
-            f"{format_roulette_slots(slots)}\n"
-            f"```\n"
+            f"\n# {format_roulette_slots(slots)}\n\n"
             f"*{status}*"
         ),
         color=discord.Color.blurple()
@@ -5345,46 +5288,29 @@ def build_roulette_spin_embed(
     )
 
     embed.add_field(
-        name="👛 지갑",
+        name="👛 현재 잔액",
         value=(
-            f"**{get_poker_money(member.id):,}"
-            f"모라**"
+            f"**{get_poker_money(member.id):,}모라**"
         ),
         inline=True
     )
 
-    embed.add_field(
-        name="🔥 확정 당첨 게이지",
-        value=(
-            f"`{make_roulette_gauge_bar(gauge)}`\n"
-            f"**{gauge}/100**"
-        ),
-        inline=False
-    )
-
-    if gauge >= 100:
-        embed.add_field(
-            name="⚡ BONUS READY",
-            value=(
-                "**이번 판은 심볼 "
-                "3개 일치가 확정이야!**"
-            ),
-            inline=False
-        )
-
     embed.set_footer(
-        text="100 게이지 도달 시 다음 판 3개 일치 확정"
+        text="행운을 빌어!"
     )
 
     return embed
 
+
+# =========================
+# 결과 임베드
+# =========================
 
 def build_roulette_result_embed(
     member,
     bet,
     slots,
     result_text,
-    gauge,
     *,
     result_type="lose"
 ):
@@ -5400,9 +5326,7 @@ def build_roulette_result_embed(
     embed = discord.Embed(
         title="🎰 슬롯머신 결과",
         description=(
-            f"```text\n"
-            f"{format_roulette_slots(slots)}\n"
-            f"```\n"
+            f"\n# {format_roulette_slots(slots)}\n\n"
             f"{result_text}"
         ),
         color=color
@@ -5417,37 +5341,21 @@ def build_roulette_result_embed(
     embed.add_field(
         name="👛 현재 잔액",
         value=(
-            f"**{get_poker_money(member.id):,}"
-            f"모라**"
+            f"**{get_poker_money(member.id):,}모라**"
         ),
         inline=True
     )
 
-    embed.add_field(
-        name="🔥 확정 당첨 게이지",
-        value=(
-            f"`{make_roulette_gauge_bar(gauge)}`\n"
-            f"**{gauge}/100**"
-        ),
-        inline=False
-    )
-
-    if gauge >= 100:
-        embed.add_field(
-            name="⚡ BONUS READY",
-            value=(
-                "다음 룰렛은 **무조건 "
-                "심볼 3개 일치!**"
-            ),
-            inline=False
-        )
-
     embed.set_footer(
-        text="아래 버튼으로 같은 금액을 다시 베팅할 수 있어."
+        text="아래 버튼으로 다시 플레이할 수 있어."
     )
 
     return embed
 
+
+# =========================
+# 배당표
+# =========================
 
 def build_roulette_paytable_embed():
     lines = []
@@ -5459,14 +5367,9 @@ def build_roulette_paytable_embed():
             ]
         )
 
-        weight = ROULETTE_WEIGHTS[
-            symbol
-        ]
-
         lines.append(
-            f"{symbol}{symbol}{symbol} "
-            f"→ **×{multiplier}** "
-            f"· 기본 가중치 `{weight}`"
+            f"{symbol} {symbol} {symbol}"
+            f"　→　**×{multiplier}**"
         )
 
     embed = discord.Embed(
@@ -5474,19 +5377,23 @@ def build_roulette_paytable_embed():
         description=(
             "\n".join(lines)
             + "\n\n"
-            + "✨ **같은 심볼 2개** "
-            + f"→ ×{ROULETTE_PAIR_MULTIPLIER:g} 지급\n"
-            + "☠️ **전부 다름** → 꽝\n\n"
-            + "🔥 꽝이 나오면 게이지가 "
-            + "**5~20** 증가하고,\n"
-            + "게이지가 **100**이면 다음 판은 "
-            + "**3개 일치 확정**!"
+            + "✨ 같은 심볼 **2개 일치**"
+            + " → 베팅금 **50% 반환**\n"
+            + "☠️ 전부 다름 → **꽝**"
         ),
         color=discord.Color.gold()
     )
 
+    embed.set_footer(
+        text="배당은 베팅 금액을 기준으로 계산됩니다."
+    )
+
     return embed
 
+
+# =========================
+# 기록 임베드
+# =========================
 
 def build_roulette_log_embed(member):
     log = get_roulette_log(
@@ -5498,14 +5405,6 @@ def build_roulette_log_embed(member):
         - log["spent"]
     )
 
-    symbol_text = "\n".join(
-        (
-            f"{symbol} "
-            f"**{log['symbols'].get(symbol, 0):,}개**"
-        )
-        for symbol in ROULETTE_SYMBOLS
-    )
-
     if net > 0:
         net_text = f"+{net:,}모라"
 
@@ -5514,6 +5413,14 @@ def build_roulette_log_embed(member):
 
     else:
         net_text = "0모라"
+
+    symbol_text = "\n".join(
+        (
+            f"{symbol} "
+            f"**{log['symbols'].get(symbol, 0):,}개**"
+        )
+        for symbol in ROULETTE_SYMBOLS
+    )
 
     embed = discord.Embed(
         title=(
@@ -5524,29 +5431,14 @@ def build_roulette_log_embed(member):
     )
 
     embed.add_field(
-        name="🎰 플레이",
-        value=(
-            f"총 **{log['plays']:,}회**\n"
-            f"잭팟 **{log['jackpots']:,}회**"
-        ),
+        name="🎰 플레이 횟수",
+        value=f"**{log['plays']:,}회**",
         inline=True
     )
 
     embed.add_field(
-        name="💸 사용",
-        value=f"**{log['spent']:,}모라**",
-        inline=True
-    )
-
-    embed.add_field(
-        name="💰 지급",
-        value=f"**{log['earned']:,}모라**",
-        inline=True
-    )
-
-    embed.add_field(
-        name="📈 누적 손익",
-        value=f"**{net_text}**",
+        name="🔥 잭팟",
+        value=f"**{log['jackpots']:,}회**",
         inline=True
     )
 
@@ -5559,16 +5451,25 @@ def build_roulette_log_embed(member):
     )
 
     embed.add_field(
-        name="🔥 게이지",
-        value=(
-            f"`{make_roulette_gauge_bar(log['gauge'])}`\n"
-            f"**{log['gauge']}/100**"
-        ),
-        inline=False
+        name="💸 총 베팅",
+        value=f"**{log['spent']:,}모라**",
+        inline=True
     )
 
     embed.add_field(
-        name="🎲 누적 심볼",
+        name="💰 총 지급",
+        value=f"**{log['earned']:,}모라**",
+        inline=True
+    )
+
+    embed.add_field(
+        name="📈 누적 손익",
+        value=f"**{net_text}**",
+        inline=True
+    )
+
+    embed.add_field(
+        name="🎲 나온 심볼",
         value=symbol_text,
         inline=False
     )
@@ -5577,7 +5478,7 @@ def build_roulette_log_embed(member):
 
 
 # =========================
-# 메시지 유틸
+# 에러 / 안내 메시지
 # =========================
 
 async def send_roulette_notice(
@@ -5589,6 +5490,7 @@ async def send_roulette_notice(
             text,
             ephemeral=True
         )
+
     else:
         await interaction.response.send_message(
             text,
@@ -5597,7 +5499,7 @@ async def send_roulette_notice(
 
 
 # =========================
-# 결과 버튼
+# 결과 버튼 UI
 # =========================
 
 class RouletteResultView(
@@ -5616,6 +5518,8 @@ class RouletteResultView(
         self.bet = int(bet)
         self.message = None
 
+        # 같은 금액을 다시 걸 돈이 없으면
+        # 다시 돌리기 버튼 비활성화
         if (
             get_poker_money(self.user_id)
             < self.bet
@@ -5632,13 +5536,18 @@ class RouletteResultView(
             != self.user_id
         ):
             await interaction.response.send_message(
-                "❌ 이 슬롯머신은 네 게임이 아니야!",
+                "❌ 다른 사람의 슬롯머신이야!",
                 ephemeral=True
             )
+
             return False
 
         return True
 
+
+    # -------------------------
+    # 같은 금액 다시
+    # -------------------------
 
     @discord.ui.button(
         label="같은 금액 다시",
@@ -5652,12 +5561,20 @@ class RouletteResultView(
     ):
         await interaction.response.defer()
 
+        # 이전 View가 나중에 timeout 되면서
+        # 새 View를 덮어쓰지 못하게 종료
+        self.stop()
+
         await run_roulette_spin(
             interaction,
             self.bet,
             message=interaction.message
         )
 
+
+    # -------------------------
+    # 내 기록
+    # -------------------------
 
     @discord.ui.button(
         label="내 기록",
@@ -5676,6 +5593,10 @@ class RouletteResultView(
             ephemeral=True
         )
 
+
+    # -------------------------
+    # 배당표
+    # -------------------------
 
     @discord.ui.button(
         label="배당표",
@@ -5702,6 +5623,7 @@ class RouletteResultView(
                 await self.message.edit(
                     view=self
                 )
+
             except discord.HTTPException:
                 pass
 
@@ -5723,14 +5645,14 @@ async def run_roulette_spin(
     bet = int(bet)
 
     charged = False
-    settled = False
+    economically_settled = False
     play_logged = False
 
     log = get_roulette_log(uid)
 
-    # -------------------------
-    # 베팅 검증
-    # -------------------------
+    # =========================
+    # 베팅 검사
+    # =========================
 
     if bet < ROULETTE_MIN_BET:
         await send_roulette_notice(
@@ -5740,19 +5662,24 @@ async def run_roulette_spin(
                 f"**{ROULETTE_MIN_BET:,}모라**야."
             )
         )
+
         return
+
 
     async with roulette_start_lock:
 
+        # 이미 돌리는 중
         if uid in active_roulette_users:
             await send_roulette_notice(
                 interaction,
                 "❌ 이미 슬롯머신이 돌아가고 있어!"
             )
+
             return
 
         money = get_poker_money(uid)
 
+        # 돈 부족
         if money < bet:
             await send_roulette_notice(
                 interaction,
@@ -5762,11 +5689,12 @@ async def run_roulette_spin(
                     f"필요 금액: **{bet:,}모라**"
                 )
             )
+
             return
 
         active_roulette_users.add(uid)
 
-        # 선차감
+        # 베팅금 선차감
         add_poker_money(
             uid,
             -bet
@@ -5774,6 +5702,7 @@ async def run_roulette_spin(
 
         charged = True
 
+        # 통계 기록
         log["spent"] += bet
         log["plays"] += 1
 
@@ -5781,59 +5710,33 @@ async def run_roulette_spin(
 
         save_data()
 
+
     try:
-        luck = get_roulette_luck(uid)
+        # =========================
+        # 최종 결과 결정
+        # =========================
 
-        gauge_before = int(
-            log.get("gauge", 0)
+        final_slots = (
+            make_random_roulette_slots()
         )
 
-        pity_activated = (
-            gauge_before
-            >= ROULETTE_GAUGE_MAX
-        )
+        # =========================
+        # 최초 화면
+        # =========================
 
-        # -------------------------
-        # 최종 결과 미리 결정
-        # -------------------------
-
-        if pity_activated:
-            jackpot_symbol = (
-                get_weighted_roulette_symbol(
-                    luck
-                )
-            )
-
-            final_slots = [
-                jackpot_symbol,
-                jackpot_symbol,
-                jackpot_symbol
-            ]
-
-        else:
-            final_slots = (
-                make_random_roulette_slots(
-                    luck
-                )
-            )
-
-        # -------------------------
-        # 첫 화면
-        # -------------------------
-
-        spinning_embed = (
+        start_embed = (
             build_roulette_spin_embed(
                 interaction.user,
                 bet,
                 ["❔", "❔", "❔"],
-                gauge_before,
                 "레버를 당겼다!"
             )
         )
 
         if message is None:
+
             await interaction.response.send_message(
-                embed=spinning_embed
+                embed=start_embed
             )
 
             message = (
@@ -5841,88 +5744,91 @@ async def run_roulette_spin(
             )
 
         else:
+
             await message.edit(
-                embed=spinning_embed,
+                embed=start_embed,
                 view=None
             )
 
-        # -------------------------
-        # 빠른 회전 연출
-        # -------------------------
 
-        for i in range(5):
+        await asyncio.sleep(0.35)
+
+
+        # =========================
+        # 빠르게 회전
+        # =========================
+
+        for i in range(4):
+
             fake_slots = (
-                make_random_roulette_slots(
-                    luck
-                )
-            )
-
-            embed = (
-                build_roulette_spin_embed(
-                    interaction.user,
-                    bet,
-                    fake_slots,
-                    gauge_before,
-                    "🎰 릴이 빠르게 회전한다!"
-                )
+                make_random_roulette_slots()
             )
 
             await message.edit(
-                embed=embed,
+                embed=build_roulette_spin_embed(
+                    interaction.user,
+                    bet,
+                    fake_slots,
+                    "🎰 릴이 빠르게 회전한다!"
+                ),
                 view=None
             )
 
             await asyncio.sleep(
-                0.25 + i * 0.04
+                0.22 + i * 0.06
             )
 
-        # -------------------------
-        # 1번 릴 정지
-        # -------------------------
 
-        slots_1 = [
+        # =========================
+        # 첫 번째 릴 정지
+        # =========================
+
+        first_stop = [
             final_slots[0],
-            get_weighted_roulette_symbol(luck),
-            get_weighted_roulette_symbol(luck)
+            get_weighted_roulette_symbol(),
+            get_weighted_roulette_symbol()
         ]
 
         await message.edit(
             embed=build_roulette_spin_embed(
                 interaction.user,
                 bet,
-                slots_1,
-                gauge_before,
-                "첫 번째 릴이 멈췄다...!"
+                first_stop,
+                "첫 번째 릴이 멈췄다!"
             ),
             view=None
         )
 
         await asyncio.sleep(0.55)
 
-        # -------------------------
-        # 2번 릴 정지
-        # -------------------------
 
-        slots_2 = [
+        # =========================
+        # 두 번째 릴 정지
+        # =========================
+
+        second_stop = [
             final_slots[0],
             final_slots[1],
-            get_weighted_roulette_symbol(luck)
+            get_weighted_roulette_symbol()
         ]
 
         await message.edit(
             embed=build_roulette_spin_embed(
                 interaction.user,
                 bet,
-                slots_2,
-                gauge_before,
-                "두 번째 릴까지 정지!"
+                second_stop,
+                "두 번째 릴까지 멈췄다..."
             ),
             view=None
         )
 
-        await asyncio.sleep(0.75)
+        await asyncio.sleep(0.7)
 
-        # 마지막 릴 직전
+
+        # =========================
+        # 마지막 릴 대기
+        # =========================
+
         await message.edit(
             embed=build_roulette_spin_embed(
                 interaction.user,
@@ -5932,7 +5838,6 @@ async def run_roulette_spin(
                     final_slots[1],
                     "❔"
                 ],
-                gauge_before,
                 "마지막 릴이 천천히 멈춘다..."
             ),
             view=None
@@ -5940,15 +5845,18 @@ async def run_roulette_spin(
 
         await asyncio.sleep(0.85)
 
-        # -------------------------
-        # 결과 기록
-        # -------------------------
+
+        # =========================
+        # 심볼 통계
+        # =========================
 
         for symbol in final_slots:
             log["symbols"][symbol] += 1
 
+
         result_type = "lose"
         payout = 0
+
 
         # =========================
         # 3개 일치
@@ -5984,35 +5892,32 @@ async def run_roulette_spin(
                 payout
             )
 
-            if pity_activated:
-                log["gauge"] = 0
-
-            profit = payout - bet
+            profit = (
+                payout - bet
+            )
 
             if symbol == "7️⃣":
+
                 result_text = (
-                    "# 🎉 JACKPOT!!! 🎉\n"
-                    "## 7️⃣ 7️⃣ 7️⃣\n\n"
+                    "## 🎉 JACKPOT!!! 🎉\n"
+                    "### 7️⃣ 7️⃣ 7️⃣\n\n"
                     f"🔥 **×{multiplier} 배당!**\n"
                     f"💰 지급금: **{payout:,}모라**\n"
                     f"📈 순이익: **+{profit:,}모라**"
                 )
 
             else:
+
                 result_text = (
-                    f"## 🔥 JACKPOT!\n"
+                    "## 🔥 JACKPOT!\n"
                     f"{symbol} **3개 일치!**\n\n"
                     f"배당: **×{multiplier}**\n"
                     f"💰 지급금: **{payout:,}모라**\n"
                     f"📈 순이익: **+{profit:,}모라**"
                 )
 
-            if pity_activated:
-                result_text += (
-                    "\n\n⚡ **확정 당첨 게이지가 발동했다!**"
-                )
-
             result_type = "jackpot"
+
 
         # =========================
         # 2개 일치
@@ -6026,6 +5931,7 @@ async def run_roulette_spin(
             or final_slots[0]
             == final_slots[2]
         ):
+
             payout = int(
                 bet
                 * ROULETTE_PAIR_MULTIPLIER
@@ -6038,61 +5944,45 @@ async def run_roulette_spin(
 
             log["earned"] += payout
 
-            net_loss = bet - payout
+            actual_loss = (
+                bet - payout
+            )
 
             result_text = (
                 "## ✨ 2개 일치!\n\n"
-                f"베팅금의 "
-                f"**{ROULETTE_PAIR_MULTIPLIER * 100:.0f}%** 반환!\n"
+                "베팅금의 **50% 반환!**\n"
                 f"💰 반환금: **{payout:,}모라**\n"
-                f"📉 실제 손실: **-{net_loss:,}모라**"
+                f"📉 실제 손실: **-{actual_loss:,}모라**"
             )
 
             result_type = "pair"
+
 
         # =========================
         # 꽝
         # =========================
 
         else:
-            gauge_add = random.randint(
-                5,
-                20
-            )
-
-            old_gauge = int(
-                log.get("gauge", 0)
-            )
-
-            log["gauge"] = min(
-                ROULETTE_GAUGE_MAX,
-                old_gauge + gauge_add
-            )
 
             result_text = (
-                "## ☠️ MISS...\n\n"
-                f"💸 **-{bet:,}모라**\n\n"
-                f"🔥 확정 당첨 게이지 "
-                f"**+{gauge_add}**"
+                "## ☠️ 실패...\n\n"
+                f"💸 **-{bet:,}모라**"
             )
 
-            if (
-                log["gauge"]
-                >= ROULETTE_GAUGE_MAX
-            ):
-                result_text += (
-                    "\n\n⚡ **게이지 MAX!**\n"
-                    "다음 판은 **무조건 3개 일치!**"
-                )
+            result_type = "lose"
 
+
+        # 돈 / 로그 정산 완료
         save_data()
 
-        # 여기부터는 이미 정산 완료
-        settled = True
+        # 여기 이후 Discord 메시지 수정이 실패해도
+        # 베팅금을 다시 환불하면 안 됨
+        economically_settled = True
 
-        # -------------------------
-        # 최종 화면
-        # -------------------------
+
+        # =========================
+        # 결과 UI
+        # =========================
 
         result_embed = (
             build_roulette_result_embed(
@@ -6100,7 +5990,6 @@ async def run_roulette_spin(
                 bet,
                 final_slots,
                 result_text,
-                log["gauge"],
                 result_type=result_type
             )
         )
@@ -6117,22 +6006,29 @@ async def run_roulette_spin(
             view=view
         )
 
+
     except Exception as e:
+
         print(
             f"[룰렛 오류] "
             f"user={uid} "
             f"bet={bet}: {e}"
         )
 
-        # 결과가 확정되기 전에 오류가 났다면 환불
-        if charged and not settled:
+        # 정산 전에 오류가 났을 경우만 환불
+        if (
+            charged
+            and not economically_settled
+        ):
 
             add_poker_money(
                 uid,
                 bet
             )
 
+            # 실패한 판은 통계에서도 제거
             if play_logged:
+
                 log["spent"] = max(
                     0,
                     log["spent"] - bet
@@ -6146,6 +6042,7 @@ async def run_roulette_spin(
                 save_data()
 
             try:
+
                 await send_roulette_notice(
                     interaction,
                     (
@@ -6153,17 +6050,20 @@ async def run_roulette_spin(
                         f"**{bet:,}모라를 전액 환불했어.**"
                     )
                 )
+
             except discord.HTTPException:
                 pass
 
+
     finally:
+
         active_roulette_users.discard(
             uid
         )
 
 
 # =========================
-# 슬롯기
+# /룰렛
 # =========================
 
 @bot.tree.command(
@@ -6183,6 +6083,10 @@ async def roulette_command(
         베팅
     )
 
+
+# =========================
+# /로그
+# =========================
 
 @bot.tree.command(
     name="로그",
