@@ -4371,6 +4371,763 @@ async def poker_all_in(interaction: discord.Interaction):
 
     await after_action(ctx, room)
 
+# =========================
+# 블랙잭 시스템
+# =========================
+
+BLACKJACK_MIN_BET = 100
+
+BLACKJACK_SUITS = ["♠", "♥", "♦", "♣"]
+BLACKJACK_RANKS = [
+    "A", "2", "3", "4", "5", "6", "7",
+    "8", "9", "10", "J", "Q", "K"
+]
+
+active_blackjack = {}
+blackjack_start_lock = asyncio.Lock()
+
+
+def make_blackjack_deck():
+    deck = [
+        (rank, suit)
+        for suit in BLACKJACK_SUITS
+        for rank in BLACKJACK_RANKS
+    ]
+
+    random.shuffle(deck)
+    return deck
+
+
+def blackjack_card_text(card):
+    rank, suit = card
+    return f"{rank}{suit}"
+
+
+def blackjack_hand_text(cards):
+    return "  ".join(
+        blackjack_card_text(card)
+        for card in cards
+    )
+
+
+def blackjack_hand_value(cards):
+    value = 0
+    aces = 0
+
+    for rank, _ in cards:
+
+        if rank == "A":
+            value += 11
+            aces += 1
+
+        elif rank in ("J", "Q", "K"):
+            value += 10
+
+        else:
+            value += int(rank)
+
+    # A를 11로 계산해서 21을 넘으면 1로 변경
+    while value > 21 and aces > 0:
+        value -= 10
+        aces -= 1
+
+    return value
+
+
+def blackjack_is_natural(cards):
+    return (
+        len(cards) == 2
+        and blackjack_hand_value(cards) == 21
+    )
+
+
+class BlackjackView(discord.ui.View):
+
+    def __init__(self, member, bet):
+        super().__init__(timeout=120)
+
+        self.member = member
+        self.user_id = str(member.id)
+
+        self.original_bet = int(bet)
+        self.bet = int(bet)
+
+        self.deck = make_blackjack_deck()
+
+        self.player_hand = [
+            self.deck.pop(),
+            self.deck.pop()
+        ]
+
+        self.dealer_hand = [
+            self.deck.pop(),
+            self.deck.pop()
+        ]
+
+        self.finished = False
+        self.result_text = None
+
+        self.message = None
+
+        self.action_lock = asyncio.Lock()
+
+        # 시작부터 더블다운 돈이 없으면 버튼 비활성화
+        if get_poker_money(self.user_id) < self.original_bet:
+            self.double_down.disabled = True
+
+
+    async def interaction_check(
+        self,
+        interaction: discord.Interaction
+    ):
+
+        if str(interaction.user.id) != self.user_id:
+
+            await interaction.response.send_message(
+                "❌ 다른 사람의 블랙잭 판에는 손댈 수 없어!",
+                ephemeral=True
+            )
+
+            return False
+
+        return True
+
+
+    def disable_buttons(self):
+
+        for item in self.children:
+            item.disabled = True
+
+
+    def build_embed(self, reveal_dealer=False):
+
+        player_value = blackjack_hand_value(
+            self.player_hand
+        )
+
+        if reveal_dealer:
+
+            dealer_cards = blackjack_hand_text(
+                self.dealer_hand
+            )
+
+            dealer_value = blackjack_hand_value(
+                self.dealer_hand
+            )
+
+        else:
+
+            dealer_cards = (
+                f"{blackjack_card_text(self.dealer_hand[0])}"
+                f"  🂠"
+            )
+
+            dealer_value = blackjack_hand_value(
+                [self.dealer_hand[0]]
+            )
+
+
+        embed = discord.Embed(
+            title="🃏 블랙잭",
+            color=discord.Color.gold()
+        )
+
+
+        embed.add_field(
+            name=f"🎩 딜러 ({dealer_value})",
+            value=dealer_cards,
+            inline=False
+        )
+
+
+        embed.add_field(
+            name=f"👤 {self.member.display_name} ({player_value})",
+            value=blackjack_hand_text(
+                self.player_hand
+            ),
+            inline=False
+        )
+
+
+        embed.add_field(
+            name="💰 베팅",
+            value=f"**{self.bet:,}모라**",
+            inline=True
+        )
+
+
+        embed.add_field(
+            name="👛 현재 지갑",
+            value=(
+                f"**{get_poker_money(self.user_id):,}모라**"
+            ),
+            inline=True
+        )
+
+
+        if self.result_text:
+
+            embed.add_field(
+                name="🎲 결과",
+                value=self.result_text,
+                inline=False
+            )
+
+
+        if not self.finished:
+
+            embed.set_footer(
+                text=(
+                    "히트: 카드 한 장 추가 · "
+                    "스탠드: 현재 점수로 승부 · "
+                    "더블다운: 베팅 2배 + 카드 한 장"
+                )
+            )
+
+
+        return embed
+
+
+    def initial_result(self):
+
+        player_blackjack = blackjack_is_natural(
+            self.player_hand
+        )
+
+        dealer_blackjack = blackjack_is_natural(
+            self.dealer_hand
+        )
+
+
+        # 둘 다 블랙잭
+        if player_blackjack and dealer_blackjack:
+
+            return (
+                "🤝 둘 다 **블랙잭!** 무승부야.\n"
+                "베팅금을 돌려받았어.",
+                self.bet
+            )
+
+
+        # 플레이어 블랙잭
+        if player_blackjack:
+
+            profit = math.floor(
+                self.bet * 1.5
+            )
+
+            payout = self.bet + profit
+
+            return (
+                "✨ **BLACKJACK!**\n"
+                f"3:2 승리!\n"
+                f"순이익: **+{profit:,}모라**",
+                payout
+            )
+
+
+        # 딜러 블랙잭
+        if dealer_blackjack:
+
+            return (
+                "💀 딜러가 **블랙잭!**\n"
+                "패배!",
+                0
+            )
+
+
+        return None
+
+
+    async def finish(
+        self,
+        interaction,
+        result,
+        payout=0
+    ):
+
+        if self.finished:
+            return
+
+        self.finished = True
+        self.result_text = result
+
+
+        if payout > 0:
+            add_poker_money(
+                self.user_id,
+                payout
+            )
+
+
+        active_blackjack.pop(
+            self.user_id,
+            None
+        )
+
+
+        self.disable_buttons()
+        self.stop()
+
+
+        await interaction.response.edit_message(
+            embed=self.build_embed(
+                reveal_dealer=True
+            ),
+            view=self
+        )
+
+
+    async def dealer_play(
+        self,
+        interaction
+    ):
+
+        # 딜러는 17 미만이면 계속 히트
+        while (
+            blackjack_hand_value(
+                self.dealer_hand
+            ) < 17
+        ):
+
+            self.dealer_hand.append(
+                self.deck.pop()
+            )
+
+
+        player_value = blackjack_hand_value(
+            self.player_hand
+        )
+
+        dealer_value = blackjack_hand_value(
+            self.dealer_hand
+        )
+
+
+        # 딜러 버스트
+        if dealer_value > 21:
+
+            await self.finish(
+                interaction,
+                (
+                    f"🎉 딜러 **버스트({dealer_value})!**\n"
+                    "승리!\n"
+                    f"순이익: **+{self.bet:,}모라**"
+                ),
+                self.bet * 2
+            )
+
+            return
+
+
+        # 플레이어 승
+        if player_value > dealer_value:
+
+            await self.finish(
+                interaction,
+                (
+                    f"🎉 **{player_value} : {dealer_value}**\n"
+                    "승리!\n"
+                    f"순이익: **+{self.bet:,}모라**"
+                ),
+                self.bet * 2
+            )
+
+
+        # 딜러 승
+        elif player_value < dealer_value:
+
+            await self.finish(
+                interaction,
+                (
+                    f"💀 **{player_value} : {dealer_value}**\n"
+                    "패배!"
+                ),
+                0
+            )
+
+
+        # 무승부
+        else:
+
+            await self.finish(
+                interaction,
+                (
+                    f"🤝 **{player_value} : {dealer_value}**\n"
+                    "무승부!\n"
+                    "베팅금을 돌려받았어."
+                ),
+                self.bet
+            )
+
+
+    @discord.ui.button(
+        label="🃏 히트",
+        style=discord.ButtonStyle.primary
+    )
+    async def hit(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        async with self.action_lock:
+
+            if self.finished:
+
+                await interaction.response.send_message(
+                    "이미 끝난 판이야.",
+                    ephemeral=True
+                )
+
+                return
+
+
+            self.player_hand.append(
+                self.deck.pop()
+            )
+
+            # 한 번이라도 히트하면 더블다운 불가
+            self.double_down.disabled = True
+
+
+            value = blackjack_hand_value(
+                self.player_hand
+            )
+
+
+            if value > 21:
+
+                await self.finish(
+                    interaction,
+                    f"💥 **버스트({value})!** 패배!",
+                    0
+                )
+
+                return
+
+
+            # 정확히 21이면 자동 스탠드
+            if value == 21:
+
+                await self.dealer_play(
+                    interaction
+                )
+
+                return
+
+
+            await interaction.response.edit_message(
+                embed=self.build_embed(
+                    reveal_dealer=False
+                ),
+                view=self
+            )
+
+
+    @discord.ui.button(
+        label="✋ 스탠드",
+        style=discord.ButtonStyle.success
+    )
+    async def stand(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        async with self.action_lock:
+
+            if self.finished:
+
+                await interaction.response.send_message(
+                    "이미 끝난 판이야.",
+                    ephemeral=True
+                )
+
+                return
+
+
+            await self.dealer_play(
+                interaction
+            )
+
+
+    @discord.ui.button(
+        label="💰 더블다운",
+        style=discord.ButtonStyle.danger
+    )
+    async def double_down(
+        self,
+        interaction: discord.Interaction,
+        button: discord.ui.Button
+    ):
+
+        async with self.action_lock:
+
+            if self.finished:
+
+                await interaction.response.send_message(
+                    "이미 끝난 판이야.",
+                    ephemeral=True
+                )
+
+                return
+
+
+            if len(self.player_hand) != 2:
+
+                await interaction.response.send_message(
+                    "❌ 더블다운은 처음 두 장일 때만 가능해!",
+                    ephemeral=True
+                )
+
+                return
+
+
+            money = get_poker_money(
+                self.user_id
+            )
+
+
+            if money < self.original_bet:
+
+                await interaction.response.send_message(
+                    (
+                        "❌ 더블다운할 돈이 부족해!\n"
+                        f"필요: **{self.original_bet:,}모라**"
+                    ),
+                    ephemeral=True
+                )
+
+                return
+
+
+            # 원래 베팅금만큼 추가 베팅
+            add_poker_money(
+                self.user_id,
+                -self.original_bet
+            )
+
+            self.bet += self.original_bet
+
+
+            # 카드 딱 한 장
+            self.player_hand.append(
+                self.deck.pop()
+            )
+
+
+            value = blackjack_hand_value(
+                self.player_hand
+            )
+
+
+            if value > 21:
+
+                await self.finish(
+                    interaction,
+                    (
+                        f"💥 더블다운 후 "
+                        f"**버스트({value})!** 패배!"
+                    ),
+                    0
+                )
+
+                return
+
+
+            # 더블다운은 카드 한 장 받고 자동 스탠드
+            await self.dealer_play(
+                interaction
+            )
+
+
+    async def on_timeout(self):
+
+        if self.finished:
+            return
+
+
+        self.finished = True
+
+        self.result_text = (
+            "⌛ 제한 시간 초과!\n"
+            "베팅금을 잃었어."
+        )
+
+
+        active_blackjack.pop(
+            self.user_id,
+            None
+        )
+
+
+        self.disable_buttons()
+        self.stop()
+
+
+        if self.message:
+
+            try:
+
+                await self.message.edit(
+                    embed=self.build_embed(
+                        reveal_dealer=True
+                    ),
+                    view=self
+                )
+
+            except discord.HTTPException:
+                pass
+
+
+
+@bot.tree.command(
+    name="블랙잭",
+    description="딜러와 블랙잭을 합니다.",
+    guild=GUILD
+)
+@app_commands.describe(
+    베팅="베팅할 모라"
+)
+async def blackjack_command(
+    interaction: discord.Interaction,
+    베팅: int
+):
+
+    uid = str(
+        interaction.user.id
+    )
+
+
+    if 베팅 < BLACKJACK_MIN_BET:
+
+        await interaction.response.send_message(
+            (
+                "❌ 최소 베팅은 "
+                f"**{BLACKJACK_MIN_BET:,}모라**야."
+            ),
+            ephemeral=True
+        )
+
+        return
+
+
+    async with blackjack_start_lock:
+
+        if uid in active_blackjack:
+
+            await interaction.response.send_message(
+                "❌ 이미 진행 중인 블랙잭 판이 있어!",
+                ephemeral=True
+            )
+
+            return
+
+
+        money = get_poker_money(uid)
+
+
+        if money < 베팅:
+
+            await interaction.response.send_message(
+                (
+                    "❌ 모라가 부족해!\n"
+                    f"보유: **{money:,}모라**\n"
+                    f"필요: **{베팅:,}모라**"
+                ),
+                ephemeral=True
+            )
+
+            return
+
+
+        # 판 시작 전에 돈부터 빼기
+        # 강제 종료/버튼 악용으로 돈 복사되는 것 방지
+        add_poker_money(
+            uid,
+            -베팅
+        )
+
+
+        view = BlackjackView(
+            interaction.user,
+            베팅
+        )
+
+
+        active_blackjack[uid] = view
+
+
+    # 시작부터 블랙잭인지 확인
+    initial = view.initial_result()
+
+
+    if initial:
+
+        result, payout = initial
+
+        view.finished = True
+        view.result_text = result
+
+
+        if payout > 0:
+
+            add_poker_money(
+                uid,
+                payout
+            )
+
+
+        active_blackjack.pop(
+            uid,
+            None
+        )
+
+
+        view.stop()
+
+
+        await interaction.response.send_message(
+            embed=view.build_embed(
+                reveal_dealer=True
+            )
+        )
+
+        return
+
+
+    try:
+
+        await interaction.response.send_message(
+            embed=view.build_embed(
+                reveal_dealer=False
+            ),
+            view=view
+        )
+
+
+        view.message = (
+            await interaction.original_response()
+        )
+
+
+    except Exception:
+
+        # 메시지 생성 실패하면 베팅금 환불
+        active_blackjack.pop(
+            uid,
+            None
+        )
+
+        add_poker_money(
+            uid,
+            베팅
+        )
+
+        raise
+
+
 @bot.command(name="기억")
 async def memory_check(ctx):
     mem = user_memory.get(str(ctx.author.id), {})
