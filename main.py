@@ -55,6 +55,7 @@ DATA_DIR = "/data"
 DATA_FILE = "/data/data.json"
 
 data = {
+    "weekend_fever_enabled": True,
     "warehouses": {},
     "warehouse_last_tax": {},
     "sticky_message_id": None,
@@ -151,6 +152,7 @@ def load_data():
         data["quests"] = loaded.get("quests", {})
         data["achievements"] = loaded.get("achievements", {})
         data["fever_multiplier"] = loaded.get("fever_multiplier", 1.0)
+        data["weekend_fever_enabled"] = loaded.get("weekend_fever_enabled", True)
 
     try:
         data["fever_multiplier"] = max(0.0, float(data.get("fever_multiplier", 1.0)))
@@ -9988,6 +9990,10 @@ async def remove_stat(
         f"현재 수치: **{user[stat_key]}**"
     )
 
+# =========================
+# 피버타임 시스템
+# =========================
+
 @bot.tree.command(
     name="피버타임",
     description="서버 전체 경험치 배수를 설정한다 (서버장 전용)",
@@ -10015,6 +10021,7 @@ async def fever_time_command(
         return
 
     old_multiplier = get_fever_multiplier()
+
     data["fever_multiplier"] = float(배수)
     save_data()
 
@@ -10022,13 +10029,18 @@ async def fever_time_command(
         title = "✅ 피버타임 종료"
         description = "서버 전체 경험치 배수가 **1배(기본값)**로 돌아왔어."
         color = discord.Color.green()
+
     elif 배수 == 0:
         title = "⛔ 경험치 획득 중지"
         description = "서버 전체 경험치 배수가 **0배**로 설정됐어."
         color = discord.Color.red()
+
     else:
         title = "🔥 피버타임 설정"
-        description = f"이 서버에서 얻는 모든 경험치가 이제 **{배수:g}배**로 적용돼!"
+        description = (
+            f"이 서버에서 얻는 모든 경험치가 이제 "
+            f"**{배수:g}배**로 적용돼!"
+        )
         color = discord.Color.gold()
 
     embed = discord.Embed(
@@ -10036,21 +10048,69 @@ async def fever_time_command(
         description=description,
         color=color
     )
+
     embed.add_field(
         name="배수 변경",
         value=f"`{old_multiplier:g}배` → `{배수:g}배`",
         inline=False
     )
-    embed.set_footer(text="채팅 · 음성 · 출석 · 사냥 · 모험 · 파티 모험 경험치에 적용")
+
+    embed.set_footer(
+        text="채팅 · 음성 · 출석 · 사냥 · 모험 · 파티 모험 경험치에 적용"
+    )
 
     await interaction.response.send_message(embed=embed)
 
 
+# =========================
+# 주말 피버타임 자동화 ON / OFF
+# =========================
+
+@bot.tree.command(
+    name="주말피버자동화",
+    description="주말 피버타임 자동화를 켜거나 끈다 (서버장 전용)",
+    guild=GUILD
+)
+@app_commands.describe(
+    상태="주말 피버타임 자동화 ON/OFF"
+)
+@app_commands.choices(
+    상태=[
+        app_commands.Choice(name="ON", value="on"),
+        app_commands.Choice(name="OFF", value="off")
+    ]
+)
+async def weekend_fever_toggle(
+    interaction: discord.Interaction,
+    상태: app_commands.Choice[str]
+):
+    if interaction.guild is None or interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message(
+            "❌ 이 명령어는 서버장만 사용할 수 있어.",
+            ephemeral=True
+        )
+        return
+
+    enabled = 상태.value == "on"
+
+    data["weekend_fever_enabled"] = enabled
+    save_data()
+
+    if enabled:
+        await interaction.response.send_message(
+            "✅ **주말 피버타임 자동화 ON**\n"
+            "이제 주말 시간표에 따라 경험치 배수가 자동으로 변경돼."
+        )
+    else:
+        await interaction.response.send_message(
+            "⛔ **주말 피버타임 자동화 OFF**\n"
+            "현재 경험치 배수는 그대로 유지되며 자동으로 변경되지 않아."
+        )
+
+
 KST = ZoneInfo("Asia/Seoul")
 
-
 FEVER_NOTICE_CHANNEL_ID = 1510686602567876789
-# ↑ 실제 공지 채널 ID로 변경
 
 
 def get_weekend_fever_multiplier(now: datetime | None = None) -> float:
@@ -10058,18 +10118,16 @@ def get_weekend_fever_multiplier(now: datetime | None = None) -> float:
         now = datetime.now(KST)
 
     weekday = now.weekday()
-    # 월요일=0, 토요일=5, 일요일=6
 
+    # 토요일
     if weekday == 5:
-        # 토요일 00:00 ~ 24:00
         return 1.2
 
+    # 일요일
     if weekday == 6:
-        # 일요일 00:00 ~ 12:00
         if now.hour < 12:
             return 1.2
 
-        # 일요일 12:00 ~ 24:00
         return 1.5
 
     # 월~금
@@ -10078,12 +10136,16 @@ def get_weekend_fever_multiplier(now: datetime | None = None) -> float:
 
 @tasks.loop(minutes=1)
 async def weekend_fever_scheduler():
+
+    # 자동화 OFF면 아무것도 건드리지 않음
+    if not data.get("weekend_fever_enabled", True):
+        return
+
     now = datetime.now(KST)
 
     target_multiplier = get_weekend_fever_multiplier(now)
     current_multiplier = get_fever_multiplier()
 
-    # 이미 현재 시간대에 맞는 배수라면 아무것도 하지 않음
     if math.isclose(
         current_multiplier,
         target_multiplier,
@@ -10092,7 +10154,6 @@ async def weekend_fever_scheduler():
     ):
         return
 
-    # 배수 변경 및 저장
     data["fever_multiplier"] = target_multiplier
     save_data()
 
@@ -10102,18 +10163,23 @@ async def weekend_fever_scheduler():
         f"{current_multiplier:g}배 → {target_multiplier:g}배"
     )
 
-    # 공지 채널 가져오기
     channel = bot.get_channel(FEVER_NOTICE_CHANNEL_ID)
 
-    # 캐시에 채널이 없을 경우 API로 다시 가져오기
     if channel is None:
         try:
             channel = await bot.fetch_channel(FEVER_NOTICE_CHANNEL_ID)
-        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
-            print(f"[피버타임 공지 실패] 채널을 가져올 수 없음: {error}")
+
+        except (
+            discord.NotFound,
+            discord.Forbidden,
+            discord.HTTPException
+        ) as error:
+            print(
+                f"[피버타임 공지 실패] "
+                f"채널을 가져올 수 없음: {error}"
+            )
             return
 
-    # 변경된 배수에 따른 공지 내용
     if target_multiplier == 1.0:
         title = "✅ 주말 피버타임 종료"
         description = (
@@ -10157,8 +10223,10 @@ async def weekend_fever_scheduler():
 
     try:
         await channel.send(embed=embed)
+
     except discord.Forbidden:
         print("[피버타임 공지 실패] 봇에게 메시지 전송 권한이 없음")
+
     except discord.HTTPException as error:
         print(f"[피버타임 공지 실패] 메시지 전송 오류: {error}")
 
@@ -10166,7 +10234,8 @@ async def weekend_fever_scheduler():
 @weekend_fever_scheduler.before_loop
 async def before_weekend_fever_scheduler():
     await bot.wait_until_ready()
-    
+
+
 @bot.event
 async def setup_hook():
     if not weekend_fever_scheduler.is_running():
