@@ -1723,9 +1723,10 @@ async def generate_furina_ai_response(user_id, user_text):
 {user_text}
 """
 
-        model = genai.GenerativeModel("gemini-2.5-flash")
-
-        response = model.generate_content(prompt)
+        response = await gemini_client.aio.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
 
         if not response.text:
             return random.choice(DEFAULT_RESPONSES)
@@ -2015,7 +2016,10 @@ def translate_anime_title(title):
 {title}
 """
 
-        response = model.generate_content(prompt)
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
 
         if response and response.text:
             translated = response.text.strip()
