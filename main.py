@@ -1999,7 +1999,7 @@ def translate_anime_title(title):
         return title
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+        
 
         prompt = f"""
 다음 애니메이션 제목을 대한민국에서 일반적으로 사용하는 공식 한국어 제목으로 바꿔줘.
@@ -2079,7 +2079,7 @@ def translate_anime_description(description):
         return description
 
     try:
-        model = genai.GenerativeModel("gemini-2.5-flash")
+
 
         prompt = f"""
 아래 애니메이션 줄거리를 자연스러운 한국어로 번역하고 적당히 요약해줘.
@@ -2096,7 +2096,10 @@ def translate_anime_description(description):
 {description}
 """
 
-        response = model.generate_content(prompt)
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt
+        )
 
         if response and response.text:
             translated = response.text.strip()
