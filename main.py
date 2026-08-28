@@ -83,7 +83,13 @@ data = {
     "party_profiles": {},
     "relic_discovery_stats": {},
     "time_notice_sent": {},
-    "fever_multiplier": 1.0
+    "fever_multiplier": 1.0,
+    "forum_voting": {
+        "next_post_number": 1,
+        "posts": {},
+        "users": {},
+        "totals": {}
+    }
 }
 
 warehouses = {}
@@ -153,6 +159,15 @@ def load_data():
         data["achievements"] = loaded.get("achievements", {})
         data["fever_multiplier"] = loaded.get("fever_multiplier", 1.0)
         data["weekend_fever_enabled"] = loaded.get("weekend_fever_enabled", True)
+        data["forum_voting"] = loaded.get(
+            "forum_voting",
+            {
+                "next_post_number": 1,
+                "posts": {},
+                "users": {},
+                "totals": {}
+            }
+        )
 
     try:
         data["fever_multiplier"] = max(0.0, float(data.get("fever_multiplier", 1.0)))
@@ -23050,6 +23065,288 @@ async def random_number(
         f"🎲 **{최소값} ~ {최대값}** 사이의 난수는 **{result}**(이)야"
     )
 
+
+# =========================
+# 포럼 게시글 번호 / 투표 시스템
+# =========================
+
+FORUM_CHANNEL_ID = 1542891364788736080
+VOTE_CHANNEL_ID = 1542895898969907230
+MAX_VOTES_PER_USER = 4
+
+forum_vote_lock = asyncio.Lock()
+
+
+def get_forum_voting_data():
+    """포럼 투표 저장 데이터를 안전한 형태로 보정해서 반환한다."""
+    voting = data.setdefault("forum_voting", {})
+
+    if not isinstance(voting, dict):
+        voting = {}
+        data["forum_voting"] = voting
+
+    voting.setdefault("next_post_number", 1)
+    voting.setdefault("posts", {})
+    voting.setdefault("users", {})
+    voting.setdefault("totals", {})
+
+    if not isinstance(voting["posts"], dict):
+        voting["posts"] = {}
+    if not isinstance(voting["users"], dict):
+        voting["users"] = {}
+    if not isinstance(voting["totals"], dict):
+        voting["totals"] = {}
+
+    try:
+        voting["next_post_number"] = max(1, int(voting["next_post_number"]))
+    except (TypeError, ValueError):
+        voting["next_post_number"] = 1
+
+    return voting
+
+
+def find_forum_post_by_number(post_number):
+    """게시글 번호로 저장된 게시글 정보를 찾는다."""
+    voting = get_forum_voting_data()
+
+    for thread_id, info in voting["posts"].items():
+        try:
+            number = int(info.get("number", 0))
+        except (AttributeError, TypeError, ValueError):
+            continue
+
+        if number == int(post_number):
+            return thread_id, info
+
+    return None, None
+
+
+async def register_forum_post(thread):
+    """
+    포럼 게시글(Thread)에 번호를 하나 배정한다.
+    이미 번호가 있으면 기존 번호를 반환한다.
+    """
+    async with forum_vote_lock:
+        voting = get_forum_voting_data()
+        thread_key = str(thread.id)
+
+        existing = voting["posts"].get(thread_key)
+        if isinstance(existing, dict) and existing.get("number") is not None:
+            try:
+                return int(existing["number"]), False
+            except (TypeError, ValueError):
+                pass
+
+        # 혹시 데이터가 꼬였더라도 이미 사용 중인 번호보다 뒤에서 시작
+        used_numbers = []
+        for info in voting["posts"].values():
+            if not isinstance(info, dict):
+                continue
+            try:
+                used_numbers.append(int(info.get("number", 0)))
+            except (TypeError, ValueError):
+                pass
+
+        next_number = max(
+            int(voting.get("next_post_number", 1)),
+            (max(used_numbers) + 1) if used_numbers else 1
+        )
+
+        voting["posts"][thread_key] = {
+            "number": next_number,
+            "title": thread.name,
+            "created_at": (
+                thread.created_at.isoformat()
+                if getattr(thread, "created_at", None)
+                else None
+            )
+        }
+
+        voting["totals"].setdefault(str(next_number), 0)
+        voting["next_post_number"] = next_number + 1
+        save_data()
+
+        return next_number, True
+
+
+async def announce_forum_post_number(thread):
+    """새 포럼 게시글에 번호를 배정하고 글 안에 안내 메시지를 남긴다."""
+    if thread.parent_id != FORUM_CHANNEL_ID:
+        return
+
+    number, created = await register_forum_post(thread)
+
+    if not created:
+        return
+
+    try:
+        await thread.send(
+            f"📌 이 게시글의 번호는 **{number}번**이야!\n"
+            f"투표할 때는 <#{VOTE_CHANNEL_ID}>에서 `/투표 {number} 투표갯수`를 사용하면 돼."
+        )
+    except discord.Forbidden:
+        print(
+            f"[포럼 번호 안내 실패] {thread.name} ({thread.id}) - "
+            "봇에게 '스레드에서 메시지 보내기' 권한이 필요함"
+        )
+    except discord.HTTPException as error:
+        print(f"[포럼 번호 안내 실패] {thread.name} ({thread.id}): {error}")
+
+
+async def sync_existing_forum_posts():
+    """
+    봇이 재시작됐을 때 현재 열려 있는 포럼 게시글 중
+    아직 번호가 없는 글을 오래된 순서대로 번호 매긴다.
+    """
+    forum = bot.get_channel(FORUM_CHANNEL_ID)
+
+    if forum is None:
+        try:
+            forum = await bot.fetch_channel(FORUM_CHANNEL_ID)
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException) as error:
+            print(f"[포럼 번호 동기화 실패] 포럼 채널을 가져올 수 없음: {error}")
+            return
+
+    if not isinstance(forum, discord.ForumChannel):
+        print(f"[포럼 번호 동기화 실패] {FORUM_CHANNEL_ID} 채널이 포럼 채널이 아님")
+        return
+
+    threads = list(forum.threads)
+    threads.sort(
+        key=lambda thread: (
+            getattr(thread, "created_at", None)
+            or discord.utils.snowflake_time(thread.id)
+        )
+    )
+
+    for thread in threads:
+        await announce_forum_post_number(thread)
+
+
+@bot.event
+async def on_thread_create(thread):
+    """지정 포럼에 새 게시글이 생기면 자동으로 번호를 붙인다."""
+    await announce_forum_post_number(thread)
+
+
+@bot.tree.command(
+    name="투표",
+    description="포럼 게시글에 투표합니다. 한 사람당 총 4표까지 사용할 수 있습니다.",
+    guild=GUILD
+)
+@app_commands.rename(
+    post_number="게시글번호",
+    vote_count="투표갯수"
+)
+@app_commands.describe(
+    post_number="투표할 게시글의 번호",
+    vote_count="이번에 사용할 투표권 수 (1~4)"
+)
+async def forum_vote_command(
+    interaction: discord.Interaction,
+    post_number: app_commands.Range[int, 1, None],
+    vote_count: app_commands.Range[int, 1, 4]
+):
+    # 무조건 본인만 볼 수 있는 응답
+    if interaction.channel_id != VOTE_CHANNEL_ID:
+        await interaction.response.send_message(
+            f"❌ `/투표`는 <#{VOTE_CHANNEL_ID}> 채널에서만 사용할 수 있어!",
+            ephemeral=True
+        )
+        return
+
+    voting = get_forum_voting_data()
+    thread_id, post_info = find_forum_post_by_number(post_number)
+
+    if thread_id is None or post_info is None:
+        await interaction.response.send_message(
+            f"❌ **{post_number}번** 게시글은 존재하지 않아.",
+            ephemeral=True
+        )
+        return
+
+    # 삭제된 게시글에는 투표할 수 없도록 실제 Discord 채널 존재 여부도 확인
+    thread = interaction.guild.get_thread(int(thread_id)) if interaction.guild else None
+
+    if thread is None:
+        try:
+            fetched = await bot.fetch_channel(int(thread_id))
+            if isinstance(fetched, discord.Thread):
+                thread = fetched
+        except (discord.NotFound, discord.Forbidden, discord.HTTPException):
+            thread = None
+
+    if thread is None:
+        await interaction.response.send_message(
+            f"❌ **{post_number}번** 게시글을 Discord에서 찾을 수 없어. "
+            "삭제됐거나 접근할 수 없는 글일 수 있어.",
+            ephemeral=True
+        )
+        return
+
+    uid = str(interaction.user.id)
+
+    async with forum_vote_lock:
+        # 락 안에서 다시 읽어서 동시에 투표할 때도 4표 제한이 정확히 유지되게 함
+        voting = get_forum_voting_data()
+
+        user_info = voting["users"].setdefault(
+            uid,
+            {
+                "used": 0,
+                "votes": {}
+            }
+        )
+
+        if not isinstance(user_info, dict):
+            user_info = {"used": 0, "votes": {}}
+            voting["users"][uid] = user_info
+
+        user_info.setdefault("used", 0)
+        user_info.setdefault("votes", {})
+
+        if not isinstance(user_info["votes"], dict):
+            user_info["votes"] = {}
+
+        try:
+            used_votes = max(0, int(user_info.get("used", 0)))
+        except (TypeError, ValueError):
+            used_votes = 0
+
+        remaining_votes = max(0, MAX_VOTES_PER_USER - used_votes)
+
+        if vote_count > remaining_votes:
+            await interaction.response.send_message(
+                f"❌ 투표권이 부족해!\n"
+                f"현재 남은 투표권은 **{remaining_votes}개**야.",
+                ephemeral=True
+            )
+            return
+
+        number_key = str(int(post_number))
+        previous_post_votes = int(user_info["votes"].get(number_key, 0))
+
+        user_info["votes"][number_key] = previous_post_votes + int(vote_count)
+        user_info["used"] = used_votes + int(vote_count)
+
+        voting["totals"][number_key] = (
+            int(voting["totals"].get(number_key, 0)) + int(vote_count)
+        )
+
+        save_data()
+
+        final_used = int(user_info["used"])
+        final_remaining = MAX_VOTES_PER_USER - final_used
+        my_votes_for_post = int(user_info["votes"][number_key])
+
+    await interaction.response.send_message(
+        f"✅ **{post_number}번** 게시글에 **{vote_count}표** 투표했어!\n"
+        f"이 게시글에 내가 넣은 표: **{my_votes_for_post}표**\n"
+        f"남은 투표권: **{final_remaining} / {MAX_VOTES_PER_USER}개**",
+        ephemeral=True
+    )
+
+
 @bot.event
 async def on_ready():
     migrate_relic_profiles_changed = migrate_existing_relic_profiles()
@@ -23073,6 +23370,9 @@ async def on_ready():
         voice_xp_loop.start()
 
     synced = await bot.tree.sync(guild=GUILD)
+
+    # 봇이 꺼져 있던 동안 생긴 활성 포럼 글도 번호를 붙인다.
+    await sync_existing_forum_posts()
 
     if not time_notice_loop.is_running():
         time_notice_loop.start()
