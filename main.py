@@ -23730,6 +23730,109 @@ async def before_forum_vote_message_watchdog():
     await bot.wait_until_ready()
 
 
+# =========================
+# 뉴비 자동 역할 / 환영 시스템
+# =========================
+NEWBIE_ROLE_ID = 1551912492991643730
+NEWBIE_CHAT_CHANNEL_ID = 1551915421534265446
+NEWBIE_WELCOME_ROLE_ID = 1551912978868346890
+NEWBIE_ROLE_DURATION = timedelta(days=30)
+
+NEWBIE_WELCOME_MESSAGES = [
+    "{welcome_role} 흠흠! 새로운 사람이 도착했어! {member}, 이 푸리나님이 특별히 환영해 주도록 하지. 다들 멋지게 맞아주라고?",
+    "짜잔! {member}의 등장이야! {welcome_role}, 가만히 있을 셈은 아니겠지? 어서 성대한 환영을 보여줘!",
+    "오? 새로운 얼굴이네! {welcome_role}, {member}이 길을 잃지 않게 잘 챙겨주도록 해. 이건 물의 신의 부탁... 아니, 명령이야!"
+]
+
+
+@bot.event
+async def on_member_join(member: discord.Member):
+    # 지정 서버에서만 작동하고 봇 계정은 제외한다.
+    if member.guild.id != GUILD_ID or member.bot:
+        return
+
+    newbie_role = member.guild.get_role(NEWBIE_ROLE_ID)
+
+    if newbie_role is None:
+        print(f"[뉴비 시스템] 뉴비 역할을 찾을 수 없음: {NEWBIE_ROLE_ID}")
+    else:
+        try:
+            await member.add_roles(newbie_role, reason="신규 서버 입장 - 뉴비 역할 자동 부여")
+        except discord.Forbidden:
+            print(f"[뉴비 시스템] 역할 부여 권한 없음: {member} ({member.id})")
+        except discord.HTTPException as e:
+            print(f"[뉴비 시스템] 역할 부여 실패: {member} ({member.id}) - {e}")
+
+    channel = member.guild.get_channel(NEWBIE_CHAT_CHANNEL_ID)
+    if channel is None:
+        print(f"[뉴비 시스템] 뉴비채팅 채널을 찾을 수 없음: {NEWBIE_CHAT_CHANNEL_ID}")
+        return
+
+    welcome_text = random.choice(NEWBIE_WELCOME_MESSAGES).format(
+        welcome_role=f"<@&{NEWBIE_WELCOME_ROLE_ID}>",
+        member=member.mention
+    )
+
+    try:
+        await channel.send(
+            welcome_text,
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False,
+                users=True,
+                roles=True,
+                replied_user=False
+            )
+        )
+    except discord.HTTPException as e:
+        print(f"[뉴비 시스템] 환영 메시지 전송 실패: {member} ({member.id}) - {e}")
+
+
+@tasks.loop(minutes=1)
+async def newbie_role_expiry_check():
+    # 한국 시간 기준 매일 00:00에만 실제 검사한다.
+    now_kst = datetime.now(ZoneInfo("Asia/Seoul"))
+    if now_kst.hour != 0 or now_kst.minute != 0:
+        return
+
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+
+    newbie_role = guild.get_role(NEWBIE_ROLE_ID)
+    if newbie_role is None:
+        print(f"[뉴비 시스템] 뉴비 역할을 찾을 수 없음: {NEWBIE_ROLE_ID}")
+        return
+
+    now_utc = datetime.now(timezone.utc)
+    removed_count = 0
+
+    for member in list(newbie_role.members):
+        if member.bot or member.joined_at is None:
+            continue
+
+        if now_utc - member.joined_at < NEWBIE_ROLE_DURATION:
+            continue
+
+        try:
+            await member.remove_roles(
+                newbie_role,
+                reason="서버 입장 후 30일 경과 - 뉴비 역할 자동 해제"
+            )
+            removed_count += 1
+        except discord.Forbidden:
+            print(f"[뉴비 시스템] 역할 제거 권한 없음: {member} ({member.id})")
+        except discord.HTTPException as e:
+            print(f"[뉴비 시스템] 역할 제거 실패: {member} ({member.id}) - {e}")
+
+    if removed_count:
+        print(f"[뉴비 시스템] 30일 경과 뉴비 역할 {removed_count}명 해제 완료")
+
+
+@newbie_role_expiry_check.before_loop
+async def before_newbie_role_expiry_check():
+    await bot.wait_until_ready()
+
+
 @bot.event
 async def on_ready():
     migrate_relic_profiles_changed = migrate_existing_relic_profiles()
@@ -23754,6 +23857,9 @@ async def on_ready():
 
     if not forum_vote_message_watchdog.is_running():
         forum_vote_message_watchdog.start()
+
+    if not newbie_role_expiry_check.is_running():
+        newbie_role_expiry_check.start()
 
     synced = await bot.tree.sync(guild=GUILD)
 
