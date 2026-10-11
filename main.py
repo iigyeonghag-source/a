@@ -18,6 +18,8 @@ import hashlib
 import aiohttp
 import html
 import re
+from pathlib import Path
+from typing import Literal
 
 load_dotenv()
 
@@ -83,6 +85,8 @@ data = {
     "party_profiles": {},
     "relic_discovery_stats": {},
     "time_notice_sent": {},
+    "ticket_channels": {},
+    "ticket_pending_logs": {},
     "fever_multiplier": 1.0,
     "forum_voting": {
         "next_post_number": 1,
@@ -141,6 +145,8 @@ def load_data():
         data["party_profiles"] = loaded.get("party_profiles", {})
         data["relic_discovery_stats"] = loaded.get("relic_discovery_stats", {})
         data["time_notice_sent"] = loaded.get("time_notice_sent", {})
+        data["ticket_channels"] = loaded.get("ticket_channels", {})
+        data["ticket_pending_logs"] = loaded.get("ticket_pending_logs", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
         data["warnings"] = loaded.get("warnings", {})
         data["checkin"] = loaded.get("checkin", {})
@@ -206,6 +212,10 @@ def load_data():
     data["party_profiles"] = party_profiles
     data["relic_discovery_stats"] = relic_discovery_stats
     data["time_notice_sent"] = time_notice_sent
+    if not isinstance(data.get("ticket_channels"), dict):
+        data["ticket_channels"] = {}
+    if not isinstance(data.get("ticket_pending_logs"), dict):
+        data["ticket_pending_logs"] = {}
     
     warehouses = data["warehouses"]
 
@@ -11145,7 +11155,8 @@ async def on_app_command_completion(
         "레벨감소",
         "스탯포인트",
         "스탯포인트차감",
-        "스탯차감"
+        "스탯차감",
+        "티켓기한늘리기"
     }
     
     is_admin_command = (
@@ -23833,6 +23844,536 @@ async def before_newbie_role_expiry_check():
     await bot.wait_until_ready()
 
 
+# ============================================================
+# 티켓 채널 자동 만료 / 관리자 연장 / HTML 대화 로그
+# 대상: 새로 생성된 텍스트 채널만 (기존 채널은 자동 등록하지 않음)
+# ============================================================
+TICKET_CATEGORY_ID = 1510700935494766723
+TICKET_LOG_CHANNEL_ID = 1512443178501013646
+TICKET_LIFETIME = timedelta(days=2)
+TICKET_HTML_DIR = Path(DATA_DIR) / "ticket_html"
+
+# on_ready 재호출 및 이벤트 경쟁 상황에서 자동 삭제/수동 삭제를 구분한다.
+ticket_auto_deleting = set()
+ticket_processing = set()
+
+
+def ticket_records():
+    return data.setdefault("ticket_channels", {})
+
+
+def ticket_pending_logs():
+    return data.setdefault("ticket_pending_logs", {})
+
+
+def ticket_get_expiry(record):
+    return datetime.fromisoformat(record["expires_at"]).astimezone(timezone.utc)
+
+
+def ticket_discord_time(dt):
+    return f"<t:{int(dt.timestamp())}:F> (<t:{int(dt.timestamp())}:R>)"
+
+
+def ticket_safe(value):
+    return html.escape(str(value) if value is not None else "", quote=True)
+
+
+def ticket_content_html(text):
+    """외부 콘텐츠는 HTML로 실행되지 않도록 전부 이스케이프한다."""
+    escaped = ticket_safe(text)
+
+    # http(s) 링크만 클릭 가능한 링크로 바꾼다.
+    def make_link(match):
+        url = match.group(0)
+        return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
+
+    return re.sub(r"https?://[^\s<>\"']+", make_link, escaped)
+
+
+def ticket_embed_html(embed):
+    title = ticket_content_html(embed.title or "")
+    description = ticket_content_html(embed.description or "")
+    pieces = ['<div class="embed">']
+
+    if embed.author and embed.author.name:
+        pieces.append(f'<div class="embed-author">{ticket_safe(embed.author.name)}</div>')
+    if title:
+        pieces.append(f'<div class="embed-title">{title}</div>')
+    if description:
+        pieces.append(f'<div class="embed-description">{description}</div>')
+
+    if embed.fields:
+        pieces.append('<div class="embed-fields">')
+        for field in embed.fields:
+            pieces.append(
+                f'<div class="embed-field"><b>{ticket_safe(field.name)}</b>'
+                f'<div>{ticket_content_html(field.value)}</div></div>'
+            )
+        pieces.append('</div>')
+
+    if embed.thumbnail and embed.thumbnail.url:
+        pieces.append(f'<div><img class="embed-thumbnail" src="{ticket_safe(embed.thumbnail.url)}" alt="썸네일" loading="lazy"></div>')
+    if embed.image and embed.image.url:
+        pieces.append(f'<div><img class="attachment-image" src="{ticket_safe(embed.image.url)}" alt="임베드 이미지" loading="lazy"></div>')
+    if embed.footer and embed.footer.text:
+        pieces.append(f'<div class="embed-footer">{ticket_safe(embed.footer.text)}</div>')
+
+    pieces.append('</div>')
+    return "".join(pieces)
+
+
+def ticket_message_html(message):
+    author = message.author
+    author_name = ticket_safe(getattr(author, "display_name", str(author)))
+    avatar = ticket_safe(author.display_avatar.url)
+    msg_time = message.created_at.astimezone(ZoneInfo("Asia/Seoul"))
+    timestamp = ticket_safe(msg_time.strftime("%Y-%m-%d %H:%M:%S KST"))
+    timestamp_iso = ticket_safe(message.created_at.isoformat())
+    bot_tag = '<span class="bot-tag">봇</span>' if author.bot else ""
+    content = message.content or ""
+    if message.type != discord.MessageType.default and not content:
+        content = message.system_content or ""
+
+    result = [
+        f'<article class="message" id="m-{message.id}">',
+        f'<img class="avatar" src="{avatar}" alt="" loading="lazy">',
+        '<div class="message-body">',
+        f'<header><strong>{author_name}</strong>{bot_tag}'
+        f'<time datetime="{timestamp_iso}">{timestamp}</time></header>'
+    ]
+
+    reference = message.reference
+    if reference and reference.message_id:
+        reply_id = int(reference.message_id)
+        result.append(
+            f'<div class="reply">↪ <a href="#m-{reply_id}">답장한 메시지로 이동</a></div>'
+        )
+
+    if content:
+        result.append(f'<div class="message-content">{ticket_content_html(content)}</div>')
+    if message.edited_at:
+        result.append('<span class="edited">(수정됨)</span>')
+
+    for embed in message.embeds:
+        result.append(ticket_embed_html(embed))
+
+    for attachment in message.attachments:
+        url = ticket_safe(attachment.url)
+        filename = ticket_safe(attachment.filename)
+        if attachment.content_type and attachment.content_type.startswith("image/"):
+            result.append(
+                f'<div class="attachment"><a href="{url}" target="_blank" rel="noopener noreferrer">'
+                f'<img class="attachment-image" src="{url}" alt="{filename}" loading="lazy"></a>'
+                f'<div><a href="{url}" target="_blank" rel="noopener noreferrer">{filename}</a></div></div>'
+            )
+        else:
+            result.append(
+                f'<div class="attachment">📎 '
+                f'<a href="{url}" target="_blank" rel="noopener noreferrer">{filename}</a></div>'
+            )
+
+    for sticker in message.stickers:
+        result.append(f'<div class="attachment">스티커: {ticket_safe(sticker.name)}</div>')
+
+    if message.reactions:
+        reactions = " ".join(
+            f'<span class="reaction">{ticket_safe(r.emoji)} {r.count}</span>'
+            for r in message.reactions
+        )
+        result.append(f'<div class="reactions">{reactions}</div>')
+
+    result.append('</div></article>')
+    return "".join(result)
+
+
+async def ticket_build_html(channel):
+    """티켓을 삭제하기 전에 모든 조회 가능한 메시지를 시간순으로 보관한다."""
+    guild = channel.guild
+    guild_name = ticket_safe(guild.name)
+    channel_name = ticket_safe(channel.name)
+    icon_url = ticket_safe(guild.icon.url) if guild.icon else ""
+    favicon = f'<link rel="icon" href="{icon_url}">' if icon_url else ""
+    message_parts = []
+    count = 0
+    async for message in channel.history(limit=None, oldest_first=True):
+        message_parts.append(ticket_message_html(message))
+        count += 1
+
+    # 모든 스타일을 파일에 포함하여, 별도 JS/스타일 라이브러리 없이 바로 열 수 있다.
+    style = """
+    :root{color-scheme:dark;font-family:Arial,'Malgun Gothic','맑은 고딕',sans-serif}
+    *{box-sizing:border-box}body{margin:0;background:#313338;color:#dbdee1}
+    .topbar{background:#232428;border-bottom:1px solid #1e1f22;padding:22px 30px}
+    .topbar h1{font-size:23px;margin:0 0 8px;color:white;overflow-wrap:anywhere}
+    .meta{font-size:13px;color:#aeb5bf}.container{max-width:1250px;margin:auto;padding:20px 24px 55px}
+    .message{display:flex;gap:16px;padding:12px 6px;border-radius:5px;scroll-margin-top:26px}
+    .message:hover,.message:target{background:#393c43}.avatar{height:40px;width:40px;border-radius:50%;object-fit:cover;flex-shrink:0}
+    .message-body{min-width:0;flex:1}header{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+    header strong{font-size:15px;color:#fff}header time{color:#949ba4;font-size:11px}
+    .bot-tag{background:#5865f2;color:white;border-radius:3px;font-size:10px;padding:2px 5px}
+    .message-content,.embed-description,.embed-field div{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.5;font-size:14px}
+    a{color:#61b8f6;text-decoration:none}a:hover{text-decoration:underline}
+    .reply{font-size:12px;color:#aeb5bf;margin:0 0 5px}.edited{font-size:10px;color:#aeb5bf}
+    .embed{border-left:4px solid #5865f2;background:#2b2d31;border-radius:4px;padding:12px 16px;margin:8px 0;max-width:650px}
+    .embed-author,.embed-title{font-weight:700;margin-bottom:6px}.embed-title{color:white}
+    .embed-fields{display:flex;flex-wrap:wrap;gap:12px;margin-top:12px}.embed-field{min-width:140px;max-width:100%}
+    .embed-field b{font-size:13px}.embed-footer{font-size:11px;color:#b5bac1;margin-top:10px}
+    .embed-thumbnail{max-width:85px;border-radius:4px;margin-top:8px}
+    .attachment{margin:8px 0;font-size:13px}.attachment-image{display:block;max-width:min(520px,100%);max-height:480px;object-fit:contain;border-radius:6px;margin-bottom:5px}
+    .reactions{margin:8px 0}.reaction{display:inline-block;background:#3c414c;color:#e4e7ee;padding:4px 8px;border-radius:7px;font-size:13px;margin:0 4px 4px 0}
+    .foot{border-top:1px solid #44474e;padding:15px;color:#949ba4;font-size:12px;text-align:center}
+    """
+
+    return (
+        '<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        f'{favicon}<title>{channel_name} - 티켓 기록</title>'
+        f'<style>{style}</style></head><body>'
+        f'<div class="topbar"><h1>#{channel_name}</h1>'
+        f'<div class="meta">{guild_name} · 티켓 대화 기록 · 채널 ID {channel.id}</div></div>'
+        f'<main class="container">{"".join(message_parts)}</main>'
+        f'<footer class="foot">총 {count}개의 메시지를 내보냈습니다. · 모든 시간은 한국 시간(KST) 기준입니다.</footer>'
+        '</body></html>'
+    )
+
+
+async def ticket_send_pending_logs():
+    """업로드 장애가 있더라도 삭제된 채널의 HTML을 /data에서 재전송할 수 있게 한다."""
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    log_channel = guild.get_channel(TICKET_LOG_CHANNEL_ID)
+    if not isinstance(log_channel, discord.TextChannel):
+        return
+
+    now = datetime.now(timezone.utc).timestamp()
+    for channel_id, record in list(ticket_pending_logs().items()):
+        if now - float(record.get("last_try", 0)) < 300:
+            continue
+        path = TICKET_HTML_DIR / f"{channel_id}.html"
+        if not path.is_file():
+            print(f"[티켓 HTML 로그 오류] 파일 유실: {path}")
+            continue
+
+        record["last_try"] = now
+        save_data()
+        try:
+            await log_channel.send(
+                f"📜 **자동 만료된 티켓 대화 기록**\n"
+                f"채널: `#{record['channel_name']}` (`{channel_id}`)\n"
+                f"삭제 시각: {ticket_discord_time(datetime.fromisoformat(record['deleted_at']))}\n"
+                "아래 HTML 파일을 다운로드하여 크롬 등 웹브라우저로 열면 돼!",
+                file=discord.File(str(path), filename=f"ticket-{channel_id}.html"),
+                allowed_mentions=discord.AllowedMentions.none()
+            )
+        except (discord.HTTPException, OSError) as error:
+            print(f"[티켓 HTML 로그 재전송 대기] #{record['channel_name']} ({channel_id}): {error}")
+            continue
+
+        ticket_pending_logs().pop(channel_id, None)
+        save_data()
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            print(f"[티켓 HTML 임시 파일 정리 실패] {path}: {error}")
+        print(f"[티켓 HTML 로그 업로드] #{record['channel_name']} ({channel_id})")
+
+
+async def ticket_expire_channel(channel, record):
+    key = str(channel.id)
+    if key in ticket_processing:
+        return
+    ticket_processing.add(key)
+    path = TICKET_HTML_DIR / f"{key}.html"
+    try:
+        # 조회 권한·기록 채널이 없는 상태에서 티켓을 삭제하면 로그가 유실된다.
+        log_channel = channel.guild.get_channel(TICKET_LOG_CHANNEL_ID)
+        if not isinstance(log_channel, discord.TextChannel):
+            print(f"[티켓 자동 삭제 보류] HTML 기록 채널({TICKET_LOG_CHANNEL_ID}) 접근 불가")
+            return
+        try:
+            transcript = await ticket_build_html(channel)
+            TICKET_HTML_DIR.mkdir(parents=True, exist_ok=True)
+            path.write_text(transcript, encoding="utf-8")
+        except (discord.HTTPException, discord.Forbidden, OSError) as error:
+            print(f"[티켓 자동 삭제 보류] #{channel.name} ({key}) 기록 생성 실패: {error}")
+            return
+
+        # 기록 생성 중 운영자가 채널을 삭제하거나 카테고리에서 뺐다면 취소한다.
+        if ticket_records().get(key) is not record or channel.category_id != TICKET_CATEGORY_ID:
+            path.unlink(missing_ok=True)
+            print(f"[티켓 자동 삭제 취소] #{channel.name} ({key}) 추적 대상에서 제외됨")
+            return
+
+        # 기록을 디스크에 쓰고 삭제 의사를 데이터베이스에 기록한다.
+        # 삭제 직후 봇이 재시작되어도 HTML 업로드를 복구할 수 있다.
+        record["deletion_started"] = True
+        save_data()
+        ticket_auto_deleting.add(key)
+        try:
+            await channel.delete(reason="티켓 생성 후 48시간(연장 시 연장 기한) 경과")
+        except discord.NotFound:
+            # 봇보다 먼저 다른 관리자 등이 지웠다면 수동 삭제 취급: HTML 업로드 안 함.
+            ticket_records().pop(key, None)
+            save_data()
+            path.unlink(missing_ok=True)
+            print(f"[티켓 수동 삭제] #{channel.name} ({key}) — HTML 로그 없음")
+            return
+        except (discord.HTTPException, discord.Forbidden) as error:
+            record["deletion_started"] = False
+            save_data()
+            print(f"[티켓 자동 삭제 실패] #{channel.name} ({key}): {error}")
+            return
+
+        ticket_pending_logs()[key] = {
+            "channel_name": channel.name,
+            "deleted_at": datetime.now(timezone.utc).isoformat(),
+            "last_try": 0,
+        }
+        ticket_records().pop(key, None)
+        save_data()
+        print(f"[티켓 자동 삭제] #{channel.name} ({key})")
+        await ticket_send_pending_logs()
+    finally:
+        ticket_auto_deleting.discard(key)
+        ticket_processing.discard(key)
+
+
+@bot.event
+async def on_guild_channel_create(channel):
+    if (
+        not isinstance(channel, discord.TextChannel)
+        or channel.guild.id != GUILD_ID
+        or channel.category_id != TICKET_CATEGORY_ID
+    ):
+        return
+
+    key = str(channel.id)
+    if key in ticket_records():
+        return
+    created_at = channel.created_at.astimezone(timezone.utc)
+    expires_at = created_at + TICKET_LIFETIME
+    ticket_records()[key] = {
+        "channel_name": channel.name,
+        "expires_at": expires_at.isoformat(),
+        "notice_1h": False,
+        "notice_5m": False,
+        "deletion_started": False,
+    }
+    save_data()
+    try:
+        await channel.send(
+            "🎭 **흠흠! 이 푸리나님의 새로운 티켓 무대에 온 걸 환영해!**\n\n"
+            "이곳은 방금 생성된 티켓 채널이야. 하지만 모든 공연에는 막이 내리는 순간이 있는 법!\n"
+            f"**이 채널은 생성된 시점부터 2일 뒤, {ticket_discord_time(expires_at)}에 자동 삭제될 예정이야.**\n"
+            "삭제 1시간 전과 5분 전에도 내가 직접 알려줄 테니 걱정하지 말라고! 후후!\n"
+            "중요한 내용이 있다면 기한 전에 꼭 확인해 줘!",
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+    except discord.HTTPException as error:
+        print(f"[티켓 생성 안내 실패] #{channel.name} ({key}): {error}")
+    print(f"[티켓 생성 등록] #{channel.name} ({key}) 만료: {expires_at.isoformat()}")
+
+
+@bot.event
+async def on_guild_channel_delete(channel):
+    if channel.guild.id != GUILD_ID:
+        return
+    key = str(channel.id)
+    if key in ticket_auto_deleting:
+        return
+    if ticket_records().pop(key, None) is not None:
+        save_data()
+        print(f"[티켓 수동 삭제] #{channel.name} ({key}) — HTML 로그 업로드 없음")
+
+
+@bot.event
+async def on_guild_channel_update(before, after):
+    if after.guild.id != GUILD_ID:
+        return
+    key = str(after.id)
+    record = ticket_records().get(key)
+    if record is None:
+        return
+    if after.category_id != TICKET_CATEGORY_ID:
+        ticket_records().pop(key, None)
+        save_data()
+        print(f"[티켓 추적 종료] #{after.name} ({after.id}): 대상 카테고리 밖으로 이동")
+    elif record.get("channel_name") != after.name:
+        record["channel_name"] = after.name
+        save_data()
+
+
+@bot.tree.command(
+    name="티켓기한늘리기",
+    description="지정 티켓의 자동 삭제 기한을 연장합니다. (관리자 전용)",
+    guild=GUILD
+)
+@app_commands.rename(channel="채널", amount="기한", unit="단위")
+@app_commands.describe(
+    channel="연장할 티켓 카테고리의 채널",
+    amount="추가할 기간의 양(양수)",
+    unit="분 / 시간 / 일 중 선택"
+)
+@app_commands.default_permissions(administrator=True)
+async def ticket_extend_command(
+    interaction: discord.Interaction,
+    channel: discord.TextChannel,
+    amount: app_commands.Range[int, 1, 10000],
+    unit: Literal["분", "시간", "일"]
+):
+    if not isinstance(interaction.user, discord.Member) or not interaction.user.guild_permissions.administrator:
+        await interaction.response.send_message("이 명령어는 관리자만 사용할 수 있어!", ephemeral=True)
+        return
+    if channel.guild.id != GUILD_ID or channel.category_id != TICKET_CATEGORY_ID:
+        await interaction.response.send_message("지정한 티켓 카테고리 안의 텍스트 채널만 선택해 줘!", ephemeral=True)
+        return
+
+    key = str(channel.id)
+    record = ticket_records().get(key)
+    if record is None:
+        await interaction.response.send_message(
+            "이 채널은 자동 삭제 대상으로 등록되지 않았어. 봇 실행 중 새로 생성한 티켓만 연장할 수 있어!",
+            ephemeral=True
+        )
+        return
+    if key in ticket_processing or record.get("deletion_started"):
+        await interaction.response.send_message("이미 자동 삭제를 처리 중인 티켓이라 연장할 수 없어!", ephemeral=True)
+        return
+
+    unit_seconds = {"분": 60, "시간": 3600, "일": 86400}
+    extra = timedelta(seconds=amount * unit_seconds[unit])
+    if extra > timedelta(days=365):
+        await interaction.response.send_message("한 번에 최대 365일까지만 연장할 수 있어!", ephemeral=True)
+        return
+
+    old_expiry = ticket_get_expiry(record)
+    new_expiry = old_expiry + extra
+    now = datetime.now(timezone.utc)
+    if old_expiry <= now:
+        await interaction.response.send_message("이미 삭제 예정 시각이 지난 티켓이야. 자동 삭제 처리 전에 연장해 줘!", ephemeral=True)
+        return
+
+    record["expires_at"] = new_expiry.isoformat()
+    # 연장으로 알림 시각이 뒤로 이동했다면 해당 알림을 다시 허용한다.
+    if new_expiry - now > timedelta(hours=1):
+        record["notice_1h"] = False
+    if new_expiry - now > timedelta(minutes=5):
+        record["notice_5m"] = False
+    save_data()
+
+    try:
+        await channel.send(
+            "🎭 **후후! 이 푸리나님의 특별 배려로 공연 시간을 연장해 주겠어!**\n"
+            f"관리자의 요청으로 티켓의 자동 삭제 기한이 **{amount}{unit}** 연장됐어.\n"
+            f"새로운 폐막 시간은 **{ticket_discord_time(new_expiry)}**! 남은 시간을 소중히 쓰라고?",
+            allowed_mentions=discord.AllowedMentions.none()
+        )
+    except discord.HTTPException as error:
+        print(f"[티켓 연장 안내 실패] #{channel.name} ({key}): {error}")
+
+    await interaction.response.send_message(
+        f"✅ {channel.mention} 기한을 **{amount}{unit}** 연장했어!\n"
+        f"변경 전: {ticket_discord_time(old_expiry)}\n"
+        f"변경 후: {ticket_discord_time(new_expiry)}",
+        ephemeral=True
+    )
+    print(f"[티켓 기한 연장] #{channel.name} ({key}) +{amount}{unit} by {interaction.user.id}")
+
+
+@tasks.loop(seconds=30)
+async def ticket_expiry_loop():
+    guild = bot.get_guild(GUILD_ID)
+    if guild is None:
+        return
+    now = datetime.now(timezone.utc)
+    for key, record in list(ticket_records().items()):
+        if key not in ticket_records() or key in ticket_processing:
+            continue
+        try:
+            expiry = ticket_get_expiry(record)
+        except (KeyError, ValueError, TypeError) as error:
+            print(f"[티켓 기록 오류] {key}: {error}")
+            continue
+
+        channel = guild.get_channel(int(key))
+        if channel is None:
+            # 캐시에서만 빠졌다고 수동 삭제로 오판하지 않도록 HTTP로 확인한다.
+            try:
+                channel = await guild.fetch_channel(int(key))
+            except discord.NotFound:
+                channel = None
+            except (discord.Forbidden, discord.HTTPException) as error:
+                print(f"[티켓 채널 확인 보류] {key}: {error}")
+                continue
+        if not isinstance(channel, discord.TextChannel):
+            # 재시작 전에 자동 삭제를 시작했다면 이미 저장된 HTML 로그를 복구한다.
+            path = TICKET_HTML_DIR / f"{key}.html"
+            if record.get("deletion_started") and path.is_file():
+                ticket_pending_logs().setdefault(key, {
+                    "channel_name": record.get("channel_name", key),
+                    "deleted_at": now.isoformat(),
+                    "last_try": 0,
+                })
+                print(f"[티켓 자동 삭제 로그 복구] 채널 {key}")
+            else:
+                print(f"[티켓 삭제 확인] #{record.get('channel_name', key)} ({key}) 사라짐 — HTML 로그 없음")
+            ticket_records().pop(key, None)
+            save_data()
+            continue
+
+        if channel.category_id != TICKET_CATEGORY_ID:
+            ticket_records().pop(key, None)
+            save_data()
+            print(f"[티켓 추적 종료] #{channel.name} ({key}) 카테고리 변경")
+            continue
+        if now >= expiry:
+            await ticket_expire_channel(channel, record)
+            continue
+
+        remaining = expiry - now
+        # 1시간 알림은 5분 알림 구간에 들어간 경우 지난 알림으로 간주한다.
+        if remaining <= timedelta(hours=1) and not record.get("notice_1h"):
+            if remaining > timedelta(minutes=5):
+                try:
+                    await channel.send(
+                        "🎭 **흠흠! 마지막 막이 다가오고 있어!**\n"
+                        f"이 티켓은 **{ticket_discord_time(expiry)}**에 자동 삭제될 예정이야.\n"
+                        "이제 **1시간도 남지 않았어!** 중요한 대화나 자료는 미리 챙기는 게 좋겠지?",
+                        allowed_mentions=discord.AllowedMentions.none()
+                    )
+                except discord.HTTPException as error:
+                    print(f"[티켓 1시간 전 알림 실패] #{channel.name} ({key}): {error}")
+                else:
+                    record["notice_1h"] = True
+                    save_data()
+            else:
+                record["notice_1h"] = True
+                save_data()
+
+        if remaining <= timedelta(minutes=5) and not record.get("notice_5m"):
+            try:
+                await channel.send(
+                    "🎭 **자, 잠깐! 이제 정말 막이 내리기 직전이라고!**\n"
+                    f"이 티켓은 **{ticket_discord_time(expiry)}**에 자동 삭제될 거야!\n"
+                    "**5분도 남지 않았으니** 마지막으로 확인할 게 있다면 서두르도록 해! 후후!",
+                    allowed_mentions=discord.AllowedMentions.none()
+                )
+            except discord.HTTPException as error:
+                print(f"[티켓 5분 전 알림 실패] #{channel.name} ({key}): {error}")
+            else:
+                record["notice_5m"] = True
+                save_data()
+
+    await ticket_send_pending_logs()
+
+
+@ticket_expiry_loop.before_loop
+async def before_ticket_expiry_loop():
+    await bot.wait_until_ready()
+
+
+
 @bot.event
 async def on_ready():
     migrate_relic_profiles_changed = migrate_existing_relic_profiles()
@@ -23860,6 +24401,9 @@ async def on_ready():
 
     if not newbie_role_expiry_check.is_running():
         newbie_role_expiry_check.start()
+
+    if not ticket_expiry_loop.is_running():
+        ticket_expiry_loop.start()
 
     synced = await bot.tree.sync(guild=GUILD)
 
