@@ -86,6 +86,7 @@ data = {
     "relic_discovery_stats": {},
     "time_notice_sent": {},
     "furina_ai_threads": {},
+    "furina_ai_mode": False,  # 전체 서버 기본값: OFF (고정 대사 우선)
     "ticket_channels": {},
     "ticket_pending_logs": {},
     "fever_multiplier": 1.0,
@@ -147,6 +148,7 @@ def load_data():
         data["relic_discovery_stats"] = loaded.get("relic_discovery_stats", {})
         data["time_notice_sent"] = loaded.get("time_notice_sent", {})
         data["furina_ai_threads"] = loaded.get("furina_ai_threads", {})
+        data["furina_ai_mode"] = loaded.get("furina_ai_mode", False) is True
         data["ticket_channels"] = loaded.get("ticket_channels", {})
         data["ticket_pending_logs"] = loaded.get("ticket_pending_logs", {})
         data["sticky_message_id"] = loaded.get("sticky_message_id")
@@ -216,6 +218,7 @@ def load_data():
     data["time_notice_sent"] = time_notice_sent
     if not isinstance(data.get("furina_ai_threads"), dict):
         data["furina_ai_threads"] = {}
+    data["furina_ai_mode"] = data.get("furina_ai_mode") is True
     if not isinstance(data.get("ticket_channels"), dict):
         data["ticket_channels"] = {}
     if not isinstance(data.get("ticket_pending_logs"), dict):
@@ -1796,10 +1799,13 @@ async def maybe_continue_furina_ai_thread(message):
     if not text:
         return False
 
-    annoyed = check_furina_repeat_or_spam(message.author.id, text)
-    if annoyed:
-        await message.reply(annoyed, mention_author=False)
-        return True
+    # ON에서는 답장 대화에서도 고정된 반복/도배 경고 대사를 사용하지 않음.
+    # OFF일 때만 원래의 반복/도배 반응을 유지.
+    if not is_furina_ai_mode_on():
+        annoyed = check_furina_repeat_or_spam(message.author.id, text)
+        if annoyed:
+            await message.reply(annoyed, mention_author=False)
+            return True
 
     previous_turns = record.get("turns", [])
     if not isinstance(previous_turns, list):
@@ -2115,6 +2121,76 @@ async def generate_furina_ai_response(user_id, user_text, conversation=None,
         print("[Gemini Error]", e)
         return None
         
+def is_furina_ai_mode_on():
+    """서버 공통 AI 전용 모드 상태. 데이터 파일에 영속적으로 저장됨."""
+    return data.get("furina_ai_mode") is True
+
+
+@bot.tree.command(
+    name="푸리나ai모드",  # 디스코드 슬래시 명령어는 영문 소문자만 허용
+    description="푸리나 답변을 AI 전용(ON) 또는 고정 대사 우선(OFF)으로 변경합니다.",
+    guild=GUILD,
+)
+@app_commands.describe(모드="ON: 모든 호출에 실시간 AI / OFF: 등록된 대사 우선, 그 외 AI")
+@app_commands.default_permissions(administrator=True)
+@app_commands.checks.has_permissions(administrator=True)
+async def furina_ai_mode_command(
+    interaction: discord.Interaction,
+    모드: Literal["ON", "OFF"],
+):
+    # 서버 전체에 적용. 일반 이용자는 설정을 바꾸지 못함.
+    enabled = 모드 == "ON"
+    data["furina_ai_mode"] = enabled
+    save_data()
+    if enabled:
+        info = (
+            "🎭 **푸리나 AI 모드: ON**\n"
+            "이제 `푸리나`로 말을 걸면 고정 대사를 건너뛰고 "
+            "항상 Gemini AI가 실시간으로 답할 거야! "
+            "AI 답변에 답장하는 대화 기억 기능도 그대로 작동해."
+        )
+    else:
+        info = (
+            "🎭 **푸리나 AI 모드: OFF**\n"
+            "기존처럼 등록된 키워드나 고정 대사가 우선 적용돼. "
+            "미리 정해진 답변이 없는 말만 Gemini AI로 답해! "
+            "AI 답변에 답장하는 대화 기억 기능은 계속 작동해."
+        )
+    await interaction.response.send_message(info, ephemeral=True)
+
+
+async def respond_to_furina_with_ai(message, text, *, allow_legacy_fallback):
+    """AI 전용 ON / 혼합 OFF 양쪽에서 공통으로 사용하는 실제 모델 호출."""
+    uid = str(message.author.id)
+    # 이름만 부른 경우도 실시간 AI가 자연스럽게 답할 수 있도록 지시.
+    prompt_text = text if text else "(사용자가 '푸리나'라고 이름만 불렀다.)"
+    async with message.channel.typing():
+        ai_response = await generate_furina_ai_response(uid, prompt_text)
+
+    if ai_response is None:
+        # ON에서 미리 저장한 푸리나 대사를 출력하면 AI 전용의 의미가 없어짐.
+        error_message = (
+            random.choice(DEFAULT_RESPONSES) if allow_legacy_fallback else
+            "⚠️ 지금 실시간 AI 답변을 생성하지 못했어. 잠시 후 다시 시도해 줘."
+        )
+        await message.reply(
+            error_message,
+            mention_author=False,
+            allowed_mentions=discord.AllowedMentions.none(),
+        )
+        return False
+
+    ai_response = add_favor_mood_prefix(message.author.id, ai_response)
+    last_response_key[uid] = "ai"
+    last_topic[uid] = "ai"
+    initial_turns = [
+        {"role": "user", "text": text[:700]},
+        {"role": "assistant", "text": ai_response[:700]},
+    ]
+    await _send_furina_ai_reply(message, ai_response, initial_turns)
+    return True
+
+
 @bot.event
 async def on_message(message):
     global night_chat_date, night_chat_count, night_chat_sent
@@ -2172,6 +2248,13 @@ async def on_message(message):
     if await maybe_answer_furina_person_question(message):
         return
 
+    # AI 전용 ON: 아래의 생일/인사/키워드/반복/욕설 등 모든 고정 대사 분기를 건너뛴다.
+    if is_furina_ai_mode_on():
+        text = message.content[len("푸리나"):].strip()
+        await respond_to_furina_with_ai(message, text, allow_legacy_fallback=False)
+        return
+
+    # OFF에서는 아래의 기존 고정 대사 로직을 그대로 유지한다.
     if "생일" in message.content:
         await message.channel.send(get_furina_birthday_response())
         return
@@ -2315,21 +2398,8 @@ async def on_message(message):
         await message.reply(response)
         return
 
-    async with message.channel.typing():
-        ai_response = await generate_furina_ai_response(uid, text)
-    if ai_response is None:
-        await message.reply(random.choice(DEFAULT_RESPONSES), mention_author=False)
-        return
-    ai_response = add_favor_mood_prefix(message.author.id, ai_response)
-
-    last_response_key[uid] = "ai"
-    last_topic[uid] = "ai"
-
-    initial_turns = [
-        {"role": "user", "text": text[:700]},
-        {"role": "assistant", "text": ai_response[:700]},
-    ]
-    await _send_furina_ai_reply(message, ai_response, initial_turns)
+    # OFF에서도 등록되지 않은 발언은 언제나 실시간 AI가 생성한다.
+    await respond_to_furina_with_ai(message, text, allow_legacy_fallback=True)
 
 @tasks.loop(minutes=1)
 async def voice_xp_loop():
