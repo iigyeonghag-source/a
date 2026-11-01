@@ -11593,7 +11593,9 @@ async def on_app_command_completion(
         "스탯포인트",
         "스탯포인트차감",
         "스탯차감",
-        "티켓기한늘리기"
+        "티켓기한늘리기",
+        "피버타임",
+        "주말피버자동화"
     }
     
     is_admin_command = (
