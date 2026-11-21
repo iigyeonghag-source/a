@@ -75,6 +75,7 @@ data = {
     "quests": {},
     "achievements": {},
     "character_pity": {},
+    "weapon_pity": {},
     "warnings": {},
     "adventures": {},
     "inventories": {},
@@ -157,6 +158,7 @@ def load_data():
         data["ranking_message_id"] = loaded.get("ranking_message_id")
         data["levels"] = loaded.get("levels", {})
         data["character_pity"] = loaded.get("character_pity", {})
+        data["weapon_pity"] = loaded.get("weapon_pity", {})
         data["poker_money"] = loaded.get("poker_money", {})
         data["poker_last_claim"] = loaded.get("poker_last_claim", {})
         data["favor"] = loaded.get("favor", {})
@@ -183,6 +185,9 @@ def load_data():
         data["fever_multiplier"] = max(0.0, float(data.get("fever_multiplier", 1.0)))
     except (TypeError, ValueError):
         data["fever_multiplier"] = 1.0
+
+    if not isinstance(data.get("weapon_pity"), dict):
+        data["weapon_pity"] = {}
 
     data["sticky_message_id"] = data.get("sticky_message_id")
     warnings = data["warnings"]
@@ -2863,6 +2868,7 @@ async def recommend_anime(interaction: discord.Interaction):
         )
     )
     
+
 GENSHIN_CHARACTERS = ({
     "푸리나": {"rarity": 5, "dialogue": "자, 박수! 오늘의 무대에 오른 건 바로 이 푸리나님이야!"},
     "느비예트": {"rarity": 5, "dialogue": "물은 모든 것을 기억한다. 그러니 거짓은 오래 숨지 못하지."},
@@ -2940,7 +2946,7 @@ GENSHIN_CHARACTERS = ({
     "치치": {"rarity": 5, "dialogue": "치치... 코코넛 밀크 좋아해."},
     "쿠키 시노부": {"rarity": 4, "dialogue": "문제 생기면 제가 처리할게요. 늘 그래왔으니까."},
     "고로": {"rarity": 4, "dialogue": "와타츠미의 동료들은 내가 지킨다!"},
-    "키라기": {"rarity": 4, "dialogue": "오늘도 즐겁게 일해보자고!"},
+    "키라라": {"rarity": 4, "dialogue": "오늘도 즐겁게 일해보자고!"},
     "치오리": {"rarity": 5, "dialogue": "패션은 사람의 태도를 보여주는 법이야."},
     "세토스": {"rarity": 4, "dialogue": "사막의 바람은 거칠지만 정직하지."},
     "라이오슬리": {"rarity": 5, "dialogue": "문제는 주먹으로 해결하는 게 아니라 관리하는 거다."},
@@ -2948,8 +2954,8 @@ GENSHIN_CHARACTERS = ({
     "차스카": {"rarity": 5, "dialogue": "하늘에서 보는 풍경은 언제나 특별하지."},
     "시틀라리": {"rarity": 5, "dialogue": "별과 영혼은 생각보다 가까운 곳에 있어."},
     "마비카": {"rarity": 5, "dialogue": "불꽃은 꺼지지 않는다. 내가 있는 한."},
-    "실로넨": {"rarity": 5, "dialogue": "좋은 장비는 실력을 더욱 빛내주지."},
-    "오로론": {"rarity": 4, "dialogue": "어둠 속에서도 길은 존재한다."},
+    "실로닌": {"rarity": 5, "dialogue": "좋은 장비는 실력을 더욱 빛내주지."},
+    "올로룬": {"rarity": 4, "dialogue": "어둠 속에서도 길은 존재한다."},
     "얀사": {"rarity": 4, "dialogue": "몸을 단련하는 건 배신하지 않아."},
     "바레사": {"rarity": 5, "dialogue": "강함은 증명하는 게 아니라 보여주는 거야."},
     "에스코피에": {"rarity": 5, "dialogue": "최고의 요리는 최고의 재료에서 시작되지."},
@@ -2961,7 +2967,38 @@ GENSHIN_CHARACTERS = ({
     "타르탈리아": {"rarity": 5, "dialogue": "싸움이라면 언제든 환영이다. 전력을 다해 와라!"},
     "한운": {"rarity": 5, "dialogue": "본 선인이 직접 나섰으니 걱정할 필요 없다."},
     "가명": {"rarity": 4, "dialogue": "사자춤은 힘과 기세가 중요하지!"},
-    "남연": {"rarity": 4, "dialogue": "강한 바람도 결국 지나가기 마련이야."}
+    "남연": {"rarity": 4, "dialogue": "강한 바람도 결국 지나가기 마련이야."},
+
+    # 5.4 ~ 5.8 버전 추가 캐릭터
+    "유메미즈키 미즈키": {"rarity": 5, "dialogue": "오늘도 많이 지쳤구나? 괜찮아, 잠시 쉬어가도 좋아. 좋은 꿈을 꾸게 해줄게."},
+    "이파": {"rarity": 4, "dialogue": "어디 불편한 곳 있어? 걱정하지 마, 내가 잘 돌봐줄 테니까."},
+    "달리아": {"rarity": 4, "dialogue": "자, 너무 심각하게 생각하지 말자고! 웃는 얼굴이 훨씬 보기 좋잖아?"},
+    "이네파": {"rarity": 5, "dialogue": "명령을 확인했습니다. 걱정하지 마세요, 모든 작업은 제가 처리하겠습니다."},
+
+    # 노드크라이 - 공월의 노래
+    "라우마": {"rarity": 5, "dialogue": "달빛이 숲을 비추는 동안, 모든 생명은 평온한 안식을 누릴 수 있을 거예요."},
+    "플린스": {"rarity": 5, "dialogue": "밤이 깊어졌군요. 등불이 꺼지지 않도록 조심하십시오."},
+    "아이노": {"rarity": 4, "dialogue": "헤헤, 이번 발명품은 정말 대단하다니까! 어디 한번 시험해 볼까?"},
+    "네페르": {"rarity": 5, "dialogue": "진실을 알고 싶어? 좋아. 하지만 정보에는 언제나 대가가 따르는 법이지."},
+    "두린": {"rarity": 5, "dialogue": "언젠가는 나도 이 세상에서 누군가에게 도움이 될 수 있겠지?"},
+    "야호다": {"rarity": 4, "dialogue": "에엑?! 또 나한테 맡기는 거야? 이거 정말 괜찮은 일 맞지?"},
+    "콜롬비나": {"rarity": 5, "dialogue": "달은 언제나 그곳에 있어. 네가 올려다보지 않는 순간에도."},
+    "자백": {"rarity": 5, "dialogue": "흐르는 세월 속에서도 달빛은 변함없이 세상을 비추는구나."},
+    "일루가": {"rarity": 4, "dialogue": "맡은 임무는 반드시 완수하겠습니다. 어떤 어려움이 닥쳐도 말입니다."},
+    "바르카": {"rarity": 5, "dialogue": "하하하! 좋아, 좋아! 모험이라면 역시 직접 부딪쳐 봐야 제맛이지!"},
+    "린네아": {"rarity": 5, "dialogue": "세상에는 아직 발견하지 못한 생물이 잔뜩 있어! 생각만 해도 두근거리지 않아?"},
+    "니콜": {"rarity": 5, "dialogue": "모든 사건에는 이유가 있단다. 다만 그 이유를 이해하려면 조금 더 넓게 바라봐야 하지."},
+    "로엔": {"rarity": 5, "dialogue": "승리를 원한다면 주저하지 마. 기회는 기다려 주지 않으니까."},
+    "프루네": {"rarity": 4, "dialogue": "이건 정말 흥미로운 발견이에요! 조금 더 자세히 살펴봐도 될까요?"},
+    "산드로네": {"rarity": 5, "dialogue": "쓸데없는 질문은 사양하겠어. 내 연구를 방해할 생각이라면 당장 나가."},
+
+    # 스네즈나야 7.0 ~ 7.2 버전
+    "오데트": {"rarity": 5, "dialogue": "눈이 내리는 날에는 모든 것이 조용해지지. 난 그 고요함이 마음에 들어."},
+    "알료샤": {"rarity": 4, "dialogue": "걱정하지 마! 이 정도 추위쯤은 아무것도 아니라고!"},
+    "베스나": {"rarity": 5, "dialogue": "차가운 겨울바람도 언젠가는 따스한 봄바람으로 바뀌는 법이야."},
+    "보댜니차": {"rarity": 5, "dialogue": "물결의 노래를 들어봐. 아주 오래된 이야기들이 그 속에 잠들어 있거든."},
+    "미탸": {"rarity": 5, "dialogue": "아아, 또 해야 할 일이 생겼네. 적당히 끝내고 쉬면 안 되는 거야?"},
+    "발레리": {"rarity": 4, "dialogue": "규칙은 지키라고 있는 겁니다. 적어도 제가 있는 동안에는 말이죠."}
 })
 
 SIGNATURE_WEAPON_OVERRIDES = {
@@ -3018,14 +3055,38 @@ SIGNATURE_WEAPON_OVERRIDES = {
     "차스카": "붉은 깃털 별독수리",
     "시틀라리": "제사의 옥",
     "마비카": "천 개의 불타는 태양",
-    "실로넨": "바위산을 맴도는 노래",
+    "실로닌": "바위산을 맴도는 노래",
     "바레사": "비비드 하트",
     "에스코피에": "향기로운 협주",
     "스커크": "창백한 천상의 검",
 
     "여행자": "빛나는 여행자의 검",
     "알로이": "프레데터",
+
+    # 5.4 ~ 5.8 신규 전용 무기
+    "유메미즈키 미즈키": "나른한 새해",
+    "이네파": "파멸의 빛고리",
+
+    # 노드크라이 - 공월의 노래 신규 전용 무기
+    "라우마": "밤을 엮는 거울",
+    "플린스": "피로 물든 성",
+    "네페르": "진실의 함",
+    "두린": "검은 침식",
+    "콜롬비나": "막간의 야상곡",
+    "자백": "신월의 달빛",
+    "바르카": "늑대의 무용담",
+    "린네아": "서리 맺힌 금빛 가지",
+    "니콜": "일곱빛 계시",
+    "로엔": "재앙",
+    "산드로네": "초월의 열쇠",
+
+    # 스네즈나야 7.0 ~ 7.2 신규 전용 무기
+    "오데트": "백조의 호수",
+    "베스나": "나비의 우화",
+    "보댜니차": "파도의 찬송가",
+    "미탸": "별빛 계시",
 }
+
 
 SIGNATURE_WEAPONS = {
     name: SIGNATURE_WEAPON_OVERRIDES.get(name, f"{name}의 전용 무기")
@@ -3046,41 +3107,71 @@ def get_character_level(exp):
     if exp >= 1:
         return 2
     return 1
+# 아래 게이지는 서버에만 저장하며 뽑기 결과/도감에는 표시하지 않는다.
+# 신규 캐릭터 또는 신규 전무를 30회 연속 못 뽑으면 다음 뽑기에서 보정한다.
+NEW_CHARACTER_PITY_LIMIT = 30
+NEW_WEAPON_PITY_LIMIT = 30
+MAX_FAVOR_DUPLICATE_PRIMOGEMS = 20
+
+
 def draw_character(user_id):
     uid = str(user_id)
+    user_chars = get_user_characters(uid)
 
-    character_pity.setdefault(uid, {
-        "no_5star": 0,   # 5성 안 뜬 연속 횟수
-        "total": 0       # 누적 뽑기 횟수
+    pity = character_pity.setdefault(uid, {
+        "no_5star": 0,   # 기존 5성 천장
+        "total": 0,      # 기존 누적 5성 천장
+        "no_new": 0      # 유저에게 노출하지 않는 신규 캐릭터 천장
     })
-
-    pity = character_pity[uid]
+    # 기존 저장 파일에도 신규 게이지를 자동 추가한다.
+    pity.setdefault("no_new", 0)
 
     five_stars = [
         name for name, info in GENSHIN_CHARACTERS.items()
         if info["rarity"] == 5
     ]
-
     four_stars = [
         name for name, info in GENSHIN_CHARACTERS.items()
         if info["rarity"] == 4
     ]
+    unowned = [name for name in GENSHIN_CHARACTERS if name not in user_chars]
 
     pity["no_5star"] += 1
     pity["total"] += 1
 
-    # 누적 200회 or 연속 50회 확정 5성
-    if pity["total"] >= 200 or pity["no_5star"] >= 50:
+    # 기존 확률 및 5성 천장 유지: 5성 기본 8%, 50회 또는 누적 200회 확정
+    guaranteed_five = pity["no_5star"] >= 50 or pity["total"] >= 200
+    if guaranteed_five or random.random() < 0.08:
+        pool = five_stars
+    else:
+        pool = four_stars
+
+    # 신규 미획득 게이지가 가득 차면 미보유 캐릭터를 선택한다.
+    # 단, 기존 강제 5성 천장과 충돌하면 5성 천장을 먼저 지킨다.
+    if unowned and pity["no_new"] >= NEW_CHARACTER_PITY_LIMIT - 1:
+        unowned_in_pool = [name for name in pool if name not in user_chars]
+        if unowned_in_pool:
+            name = random.choice(unowned_in_pool)
+        elif guaranteed_five:
+            name = random.choice(pool)
+        else:
+            name = random.choice(unowned)
+    else:
+        # 이 경로에는 보유 캐릭터가 포함되어 중복 획득이 가능하다.
+        name = random.choice(pool)
+
+    if GENSHIN_CHARACTERS[name]["rarity"] == 5:
         pity["no_5star"] = 0
+    if guaranteed_five:
         pity["total"] = 0
-        return random.choice(five_stars)
 
-    # 일반 5성 확률
-    if random.random() < 0.08:
-        pity["no_5star"] = 0
-        return random.choice(five_stars)
+    # 최초 획득 시 리셋, 중복 시 증가. 전부 수집한 경우 불필요한 누적 방지.
+    if name not in user_chars or not unowned:
+        pity["no_new"] = 0
+    else:
+        pity["no_new"] += 1
 
-    return random.choice(four_stars)
+    return name
     
 SUITS = ["♠", "♥", "♦", "♣"]
 RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
@@ -6328,35 +6419,28 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
 
         else:
 
-            old_level = get_character_level(
-                user_chars[name]["favor_exp"]
-            )
+            user_chars[name].setdefault("favor_exp", 0)
+            old_level = get_character_level(user_chars[name]["favor_exp"])
 
-            if old_level < 3:
-                user_chars[name]["favor_exp"] += 1
+            results.append(f"✨ {'⭐'*info['rarity']} **{name}** (중복)")
 
-            new_level = get_character_level(
-                user_chars[name]["favor_exp"]
-            )
-
-            results.append(
-                f"✨ {'⭐'*info['rarity']} **{name}** (중복)"
-            )
-
-            if old_level != new_level:
-
-                reward = (
-                    300
-                    if new_level == 2
-                    else 700
-                )
-
-                add_poker_money(uid, reward)
-
+            if old_level >= 3:
+                # 호감도 만렙 캐릭터 중복은 즉시 20원석으로 자동 변환.
+                add_primogems(uid, MAX_FAVOR_DUPLICATE_PRIMOGEMS)
                 reward_lines.append(
-                    f"💖 {name} Lv.{old_level} → Lv.{new_level}\n"
-                    f"💰 {reward:,} 모라"
+                    f"💎 {name} 최대 호감도 · +{MAX_FAVOR_DUPLICATE_PRIMOGEMS} 원석"
                 )
+            else:
+                user_chars[name]["favor_exp"] += 1
+                new_level = get_character_level(user_chars[name]["favor_exp"])
+
+                if old_level != new_level:
+                    reward = 300 if new_level == 2 else 700
+                    add_poker_money(uid, reward)
+                    reward_lines.append(
+                        f"💖 {name} Lv.{old_level} → Lv.{new_level}\n"
+                        f"💰 {reward:,} 모라"
+                    )
     add_quest_progress(uid, "gacha_count", 횟수)
     save_data()
 
@@ -6400,6 +6484,12 @@ async def character_gacha(interaction: discord.Interaction, 횟수: int = 1):
     )
 
     embed.add_field(
+        name="💎 원석",
+        value=f"{get_primogems(uid):,}",
+        inline=True
+    )
+
+    embed.add_field(
         name="🎲 뽑기 횟수",
         value=f"{횟수}회",
         inline=True
@@ -6417,8 +6507,27 @@ def get_user_weapons(user_id):
     return weapons[uid]
 
 
-def draw_signature_weapon():
-    return random.choice(list(SIGNATURE_WEAPONS.keys()))
+def draw_signature_weapon(user_id):
+    uid = str(user_id)
+    user_weapons = get_user_weapons(uid)
+    pity = data.setdefault("weapon_pity", {}).setdefault(uid, {"no_new": 0})
+    pity.setdefault("no_new", 0)
+
+    all_weapons = list(SIGNATURE_WEAPONS.keys())
+    unowned = [name for name in all_weapons if name not in user_weapons]
+
+    if unowned and pity["no_new"] >= NEW_WEAPON_PITY_LIMIT - 1:
+        char_name = random.choice(unowned)
+    else:
+        # 보유한 전무도 뽑기 후보에 포함된다.
+        char_name = random.choice(all_weapons)
+
+    if char_name not in user_weapons or not unowned:
+        pity["no_new"] = 0
+    else:
+        pity["no_new"] += 1
+
+    return char_name
 
 
 @bot.tree.command(name="전무뽑기", description="원신 캐릭터 전용 무기를 뽑는다", guild=GUILD)
@@ -6451,7 +6560,7 @@ async def signature_weapon_gacha(interaction: discord.Interaction, 횟수: int =
     matched_lines = []
 
     for _ in range(횟수):
-        char_name = draw_signature_weapon()
+        char_name = draw_signature_weapon(uid)
         weapon_name = SIGNATURE_WEAPONS[char_name]
 
         is_new = char_name not in user_weapons
@@ -6463,7 +6572,7 @@ async def signature_weapon_gacha(interaction: discord.Interaction, 횟수: int =
             }
             results.append(f"🌟 **{weapon_name}** - {char_name} 전용무기 (신규)")
         else:
-            user_weapons[char_name]["count"] += 1
+            user_weapons[char_name]["count"] = int(user_weapons[char_name].get("count", 1)) + 1
             results.append(f"✨ **{weapon_name}** - {char_name} 전용무기 (중복)")
 
         if char_name in user_chars:
