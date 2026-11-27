@@ -10827,6 +10827,7 @@ async def before_weekend_fever_scheduler():
 
 @bot.event
 async def setup_hook():
+    music_service.start()
     if not weekend_fever_scheduler.is_running():
         weekend_fever_scheduler.start()
 
@@ -24972,5 +24973,891 @@ async def on_ready():
     
     print(f"로그인됨: {bot.user}")
     print(f"길드 명령어 {len(synced)}개 동기화")
+
+
+# ============================================================
+# YouTube 음악 추천 / 평가 / 랭킹 시스템
+# ============================================================
+
+"""Single curated YouTube playlist + Discord music community. discord.py >= 2.4."""
+import asyncio
+import json
+import math
+import os
+import random
+import re
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+from urllib.parse import urlencode, urlparse, parse_qs
+
+import aiohttp
+import discord
+from discord import app_commands
+from discord.ext import tasks
+
+MUSIC_KST = ZoneInfo('Asia/Seoul')
+PACIFIC = ZoneInfo('America/Los_Angeles')
+NO_MENTIONS = discord.AllowedMentions.none()
+VIDEO = re.compile(r'^[A-Za-z0-9_-]{11}$')
+PLAYLIST = re.compile(r'^[A-Za-z0-9_-]{8,150}$')
+COLOR = 0x5865F2
+
+
+def now_iso():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def ts(value):
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')).timestamp()
+    except (AttributeError, ValueError, TypeError):
+        return 0
+
+
+def safe(value, limit=120):
+    return discord.utils.escape_markdown(discord.utils.escape_mentions(str(value)))[:limit]
+
+
+def identity(user):
+    return {'user_id': str(user.id), 'display_name': user.display_name,
+            'username': user.name, 'created_at': now_iso()}
+
+
+def author(record):
+    return f"{safe(record['display_name'], 80)} (@{safe(record['username'], 45)})"
+
+
+def count_votes(votes):
+    return sum(v == 1 for v in votes.values()), sum(v == -1 for v in votes.values())
+
+
+def toggle(votes, uid, vote):
+    if votes.get(uid) == vote:
+        votes.pop(uid, None)
+        return False
+    votes[uid] = vote
+    return True
+
+
+def read_json(path, default):
+    if not path.exists():
+        return default
+    with path.open(encoding='utf-8') as f:
+        return json.load(f)
+
+
+def write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix('.tmp')
+    with tmp.open('w', encoding='utf-8') as f:
+        json.dump(value, f, ensure_ascii=False, separators=(',', ':'))
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+class MusicError(Exception):
+    pass
+
+
+class MusicService:
+    def __init__(self, bot, guild, data_dir):
+        self.bot, self.guild = bot, guild
+        self.key = os.getenv('YOUTUBE_API_KEY', '').strip()
+        source = os.getenv('YOUTUBE_PLAYLIST_ID', '').strip()
+        self.playlist = parse_qs(urlparse(source).query).get('list', [source])[0]
+        self.channel_id = int(os.getenv('MUSIC_DAILY_CHANNEL_ID') or '0')
+        self.hour = int(os.getenv('MUSIC_DAILY_HOUR') or '18')
+        if not 0 <= self.hour <= 23:
+            raise ValueError('MUSIC_DAILY_HOUR must be 0..23')
+        self.root = Path(data_dir)
+        self.state_path = self.root / 'music_community.json'
+        self.cache_path = self.root / 'music_youtube_cache.json'
+        self.state = read_json(self.state_path, {'songs': {}, 'daily': {}, 'next_id': 1,
+                                                'quota': {}, 'posted': {}})
+        for k, v in [('songs', {}), ('daily', {}), ('next_id', 1), ('quota', {}), ('posted', {})]:
+            self.state.setdefault(k, v)
+        self.cache = read_json(self.cache_path, {})
+        if self.cache.get('playlist') != self.playlist:
+            self.cache = {}
+        self.refresh_lock = asyncio.Lock()
+        self.daily_lock = asyncio.Lock()
+        self.last_check = 0
+        self.last_attempt = 0
+        self.last_count = None
+        self.last_error = None
+        self.cooldowns = {}
+
+    def save(self):
+        write_json(self.state_path, self.state)
+
+    def configured(self):
+        return bool(self.key and PLAYLIST.fullmatch(self.playlist))
+
+    def songs(self):
+        # Never serve stale YouTube metadata after an extended outage.
+        if time.time() - self.cache.get('refreshed', 0) > 7 * 86400:
+            return {}
+        return self.cache.get('songs', {})
+
+    def song(self, vid):
+        song = self.songs().get(vid)
+        if not song:
+            raise MusicError('현재 추천 목록에 없는 영상이거나 목록을 갱신 중이야.')
+        return song
+
+    def stats(self, vid):
+        return self.state['songs'].setdefault(vid, {'votes': {}, 'reviews': {}, 'exposure': 0,
+                                                   'last_exposure': None})
+
+    def link(self, vid):
+        return 'https://www.youtube.com/watch?' + urlencode({'v': vid, 'list': self.playlist})
+
+    def id(self):
+        value = str(self.state['next_id'])
+        self.state['next_id'] += 1
+        return value
+
+    def cooldown(self, user, action, seconds=3):
+        key = (user.id, action)
+        current = time.monotonic()
+        if self.cooldowns.get(key, 0) > current:
+            raise MusicError('잠깐만! 몇 초 뒤에 다시 시도해 줘.')
+        self.cooldowns[key] = current + seconds
+        if len(self.cooldowns) > 5000:
+            self.cooldowns = {k: v for k, v in self.cooldowns.items() if v > current}
+
+    async def api(self, session, endpoint, **params):
+        day = datetime.now(PACIFIC).date().isoformat()
+        quota = self.state['quota']
+        if quota.get('day') != day:
+            quota.clear()
+            quota.update(day=day, used=0)
+        if quota['used'] >= 8000:
+            raise MusicError('음악 API의 자체 일일 사용 한도에 도달했어.')
+        quota['used'] += 1
+        # Persist periodically, and at the end of every check/refresh.
+        if quota['used'] % 25 == 0:
+            self.save()
+        params['key'] = self.key
+        async with session.get('https://www.googleapis.com/youtube/v3/' + endpoint,
+                               params=params) as response:
+            if response.status != 200:
+                # Never log the URL: it contains the API key.
+                raise MusicError(f'YouTube API 응답 오류 (HTTP {response.status})')
+            return await response.json()
+
+    async def refresh(self, session):
+        ids = {}
+        token = None
+        total = None
+        while True:
+            args = dict(part='snippet,contentDetails', playlistId=self.playlist, maxResults=50)
+            if token:
+                args['pageToken'] = token
+            result = await self.api(session, 'playlistItems', **args)
+            if total is None:
+                total = result.get('pageInfo', {}).get('totalResults')
+            for item in result.get('items', []):
+                vid = item.get('contentDetails', {}).get('videoId', '')
+                if VIDEO.fullmatch(vid):
+                    added = item.get('snippet', {}).get('publishedAt', '')
+                    if vid not in ids or ts(added) > ts(ids[vid]):
+                        ids[vid] = added
+            token = result.get('nextPageToken')
+            if not token:
+                break
+        songs = {}
+        keys = list(ids)
+        for start in range(0, len(keys), 50):
+            result = await self.api(session, 'videos', part='snippet,statistics,status,contentDetails',
+                                    id=','.join(keys[start:start+50]))
+            for v in result.get('items', []):
+                status, details = v.get('status', {}), v.get('contentDetails', {})
+                if (status.get('privacyStatus') not in ('public', 'unlisted') or
+                    status.get('uploadStatus', 'processed') != 'processed' or
+                    details.get('contentRating', {}).get('ytRating') == 'ytAgeRestricted'):
+                    continue
+                snippet, stats = v['snippet'], v.get('statistics', {})
+                if snippet.get('liveBroadcastContent', 'none') != 'none':
+                    continue
+                vid = v['id']
+                thumbnails = snippet.get('thumbnails', {})
+                image = next((thumbnails[k]['url'] for k in ('maxres','standard','high','medium','default')
+                              if thumbnails.get(k, {}).get('url')), '')
+                songs[vid] = {'title': snippet['title'], 'channel': snippet.get('channelTitle', ''),
+                              'channel_id': snippet.get('channelId', ''), 'image': image,
+                              'published': snippet.get('publishedAt', ''), 'added': ids[vid],
+                              'duration': details.get('duration', ''),
+                              'views': int(stats['viewCount']) if 'viewCount' in stats else None,
+                              'likes': int(stats['likeCount']) if 'likeCount' in stats else None}
+        new_cache = {'playlist': self.playlist, 'songs': songs, 'refreshed': time.time(), 'count': total}
+        write_json(self.cache_path, new_cache)
+        self.cache = new_cache
+        self.last_count = total
+        self.last_error = None
+        print(f'[음악] 동기화 완료: {len(songs)}곡')
+
+    async def poll(self):
+        if not self.configured():
+            return
+        async with self.refresh_lock:
+            current = time.time()
+            if current - self.last_check < 55:
+                return
+            self.last_check = current
+            if self.cache and current - self.cache.get('refreshed', 0) > 7 * 86400:
+                self.cache_path.unlink(missing_ok=True)
+                self.cache = {}
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    full = current - self.cache.get('refreshed', 0) >= 3600
+                    if not full:
+                        result = await self.api(session, 'playlists', part='contentDetails', id=self.playlist)
+                        items = result.get('items', [])
+                        if not items:
+                            raise MusicError('재생목록을 조회할 수 없어. 공개 범위를 확인해 줘.')
+                        self.last_count = items[0]['contentDetails']['itemCount']
+                        full = self.last_count != self.cache.get('count')
+                    # Coalesce frequent edits; retry failures at most every 5 minutes.
+                    if full and current - self.last_attempt >= 300:
+                        self.last_attempt = current
+                        await self.refresh(session)
+                    self.last_error = None
+            except (MusicError, aiohttp.ClientError, asyncio.TimeoutError, ValueError, KeyError) as exc:
+                self.last_error = str(exc) if isinstance(exc, MusicError) else type(exc).__name__
+                print('[음악] 갱신 실패:', self.last_error)
+            finally:
+                self.save()
+
+    async def ensure(self):
+        if not self.configured():
+            raise MusicError('관리자가 아직 음악 API 키와 재생목록 ID를 설정하지 않았어.')
+        if not self.songs():
+            await self.poll()
+        if not self.songs():
+            raise MusicError('추천 가능한 영상이 없어. 재생목록 공개 범위 또는 API 상태를 확인해 줘.')
+
+    def recommend(self, exclude=None):
+        ids = [v for v in self.songs() if v != exclude]
+        if not ids:
+            ids = list(self.songs())
+        return random.choice(ids)
+
+    def expose(self, vid):
+        stats = self.stats(vid)
+        stats['exposure'] += 1
+        stats['last_exposure'] = now_iso()
+        self.save()
+
+    def daily_pick(self, date):
+        current = self.state['daily'].get(date)
+        if current and current['vid'] in self.songs():
+            return current
+        history = sorted(self.state['daily'].items(), reverse=True)
+        recent = [d['vid'] for day, d in history if day < date][:30]
+        recent_channels = {self.songs().get(v, {}).get('channel_id') for v in recent[:7]}
+        candidates = [v for v in self.songs() if v not in recent] or list(self.songs())
+        today = datetime.now(timezone.utc).timestamp()
+        def factors(vid):
+            local = self.state['songs'].get(vid, {})
+            reviews = local.get('reviews', {}).values()
+            stars = [(r['stars'] - 1) / 4 for r in reviews]
+            rating = (3 * .6 + sum(stars)) / (3 + len(stars))
+            up, down = count_votes(local.get('votes', {}))
+            approval = (up + 3) / (up + down + 6)
+            discovery = 1 / (1 + math.log1p(local.get('exposure', 0)))
+            last = ts(local.get('last_exposure'))
+            rest = min(1, max(0, (today-last)/(14*86400))) if last else 1
+            diversity = float(self.songs()[vid]['channel_id'] not in recent_channels)
+            score = 35*rating + 25*approval + 20*discovery + 15*rest + 5*diversity
+            return score, (rating, approval, discovery, rest, diversity)
+        # No random draw. Stable tie-break, and rotate ties through exposure/history.
+        vid = max(candidates, key=lambda v: (factors(v)[0], v))
+        score, f = factors(vid)
+        result = {'vid': vid, 'score': round(score, 2), 'factors': list(f)}
+        self.state['daily'][date] = result
+        self.save()
+        return result
+
+    def daily_reason(self, pick):
+        a,b,c,d,e = pick['factors']
+        return (f"별점 {35*a:.1f}/35 · 선호도 {25*b:.1f}/25 · 발견 {20*c:.1f}/20\n"
+                f"미추천 기간 {15*d:.1f}/15 · 다양성 {5*e:.1f}/5\n"
+                f"**종합 {pick['score']:.1f}/100** (서버 활동 기반, 미평가곡은 기본값)")
+
+    def card(self, vid, daily=None):
+        s = self.song(vid)
+        local = self.stats(vid)
+        up, down = count_votes(local['votes'])
+        ratings = [r['stars'] for r in local['reviews'].values()]
+        avg = f'{sum(ratings)/len(ratings):.2f} / 5' if ratings else '아직 평가 없음'
+        embed = discord.Embed(title='🎵 오늘의 노래' if daily else '🎵 랜덤 추천곡',
+                              description=f"**[{safe(s['title'], 220)}]({self.link(vid)})**\n{safe(s['channel'])}",
+                              color=0xF1C40F if daily else COLOR)
+        if s['image']:
+            embed.set_image(url=s['image'])
+        embed.add_field(name='YouTube 조회수', value=f"{s['views']:,}" if s['views'] is not None else '비공개')
+        embed.add_field(name='YouTube 좋아요', value=f"{s['likes']:,}" if s['likes'] is not None else '비공개')
+        embed.add_field(name='업로드 날짜', value=s['published'][:10] or '알 수 없음')
+        embed.add_field(name='서버 별점', value=f'⭐ {avg} ({len(ratings)}명)')
+        embed.add_field(name='서버 반응', value=f'👍 {up}  👎 {down}')
+        embed.add_field(name='서버 추천 표시', value=f"{local['exposure']:,}회")
+        if daily:
+            embed.add_field(name='선정 기준', value=self.daily_reason(daily), inline=False)
+        embed.set_footer(text='YouTube 데이터는 캐시 기준 · 서버 반응은 조회 시점 기준')
+        return embed
+
+    def card_view(self, vid, daily=False):
+        view = discord.ui.View(timeout=None)
+        view.add_item(discord.ui.Button(label='유튜브에서 듣기', emoji='▶️', url=self.link(vid), row=0))
+        for action in ('up','down','rate','reviews'):
+            view.add_item(MusicButton(vid, action, daily))
+        if not daily:
+            view.add_item(MusicButton(vid, 'reroll', False))
+        return view
+
+    def review(self, vid, rid):
+        r = self.stats(vid)['reviews'].get(rid)
+        if not r:
+            raise MusicError('삭제되었거나 존재하지 않는 평가야.')
+        return r
+
+    async def daily_post(self):
+        if not self.configured() or not self.channel_id or not self.songs():
+            return
+        now = datetime.now(MUSIC_KST)
+        date = now.date().isoformat()
+        if now.hour < self.hour:
+            return
+        async with self.daily_lock:
+            if date in self.state['posted']:
+                return
+            channel = self.bot.get_channel(self.channel_id)
+            if channel is None:
+                channel = await self.bot.fetch_channel(self.channel_id)
+            if getattr(getattr(channel, 'guild', None), 'id', None) != self.guild.id:
+                raise MusicError('오늘의 노래 채널은 설정된 서버에 있어야 해.')
+            pick = self.daily_pick(date)
+            vid = pick['vid']
+            message = await channel.send(embed=self.card(vid, pick), view=self.card_view(vid, True),
+                                         allowed_mentions=NO_MENTIONS)
+            self.state['posted'][date] = str(message.id)
+            self.expose(vid)
+
+
+def service(interaction):
+    svc = getattr(interaction.client, 'music_service', None)
+    if not svc or interaction.guild_id != svc.guild.id:
+        raise MusicError('이 서버에서는 사용할 수 없는 기능이야.')
+    return svc
+
+
+async def error_reply(interaction, error):
+    msg = str(error) if isinstance(error, MusicError) else '음악 기능에서 오류가 발생했어. 관리자에게 알려 줘.'
+    if not isinstance(error, MusicError):
+        print('[음악 오류]', type(error).__name__)
+    if interaction.response.is_done():
+        await interaction.followup.send(msg, ephemeral=True, allowed_mentions=NO_MENTIONS)
+    else:
+        await interaction.response.send_message(msg, ephemeral=True, allowed_mentions=NO_MENTIONS)
+
+
+class MusicButton(discord.ui.DynamicItem[discord.ui.Button],
+                  template=r'mus:v1:(?P<vid>[A-Za-z0-9_-]{11}):(?P<action>up|down|rate|reviews|reroll):(?P<daily>[01])'):
+    def __init__(self, vid, action, daily=False):
+        self.vid, self.action, self.daily = vid, action, daily
+        labels = {'up': ('좋아요','👍'), 'down': ('싫어요','👎'), 'rate': ('평가하기','⭐'),
+                  'reviews': ('평가 보기','💬'), 'reroll': ('다시 뽑기','🎲')}
+        label, emoji = labels[action]
+        super().__init__(discord.ui.Button(label=label, emoji=emoji,
+                         style=discord.ButtonStyle.secondary,
+                         custom_id=f'mus:v1:{vid}:{action}:{int(daily)}', row=1 if action != 'reroll' else 2))
+
+    @classmethod
+    async def from_custom_id(cls, interaction, item, match):
+        return cls(match['vid'], match['action'], match['daily']=='1')
+
+    async def callback(self, interaction):
+        try:
+            svc = service(interaction)
+            svc.song(self.vid)
+            uid = str(interaction.user.id)
+            if self.action in ('up','down'):
+                svc.cooldown(interaction.user, 'song_vote', 1)
+                votes = svc.stats(self.vid)['votes']
+                active = toggle(votes, uid, 1 if self.action == 'up' else -1)
+                svc.save()
+                up, down = count_votes(votes)
+                await interaction.response.send_message(f"{'반응 등록' if active else '반응 취소'} · 👍 {up} / 👎 {down}", ephemeral=True)
+            elif self.action == 'rate':
+                view = StarView(svc, self.vid, interaction.user.id)
+                await interaction.response.send_message('별점을 선택하면 댓글 입력창이 열려.', view=view, ephemeral=True)
+            elif self.action == 'reviews':
+                view = ReviewList(svc, self.vid, interaction.user.id)
+                await interaction.response.send_message(embed=view.embed(), view=view, ephemeral=True, allowed_mentions=NO_MENTIONS)
+            elif self.action == 'reroll':
+                if self.daily:
+                    raise MusicError('오늘의 노래는 변경할 수 없어.')
+                svc.cooldown(interaction.user, 'recommend', 4)
+                vid = svc.recommend(self.vid)
+                # A new card avoids changing the meaning of the old card for other users.
+                await interaction.response.send_message(embed=svc.card(vid), view=svc.card_view(vid), allowed_mentions=NO_MENTIONS)
+                svc.expose(vid)
+        except Exception as exc:
+            await error_reply(interaction, exc)
+
+
+class PrivateView(discord.ui.View):
+    def __init__(self, svc, vid, owner):
+        super().__init__(timeout=600)
+        self.svc, self.vid, self.owner = svc, vid, owner
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.owner or interaction.guild_id != self.svc.guild.id:
+            await interaction.response.send_message('본인이 연 화면에서 이용해 줘.', ephemeral=True)
+            return False
+        return True
+
+    async def on_error(self, interaction, error, item):
+        await error_reply(interaction, error)
+
+    def button(self, label, callback, row=1, style=discord.ButtonStyle.secondary, disabled=False):
+        b = discord.ui.Button(label=label, style=style, row=row, disabled=disabled)
+        b.callback = callback
+        self.add_item(b)
+
+
+class StarView(PrivateView):
+    def __init__(self, svc, vid, owner):
+        super().__init__(svc, vid, owner)
+        select = discord.ui.Select(placeholder='별점 선택 (1~5)', options=[
+            discord.SelectOption(label='⭐'*i + f' ({i}점)', value=str(i)) for i in range(1,6)])
+        async def selected(interaction):
+            await interaction.response.send_modal(ReviewModal(svc, vid, int(select.values[0]), owner))
+        select.callback = selected
+        self.add_item(select)
+
+
+class ReviewModal(discord.ui.Modal, title='노래 평가 작성 / 수정'):
+    def __init__(self, svc, vid, stars, owner):
+        super().__init__(timeout=600)
+        self.svc, self.vid, self.stars, self.owner = svc, vid, stars, owner
+        old = next((r for r in svc.stats(vid)['reviews'].values() if r['user_id'] == str(owner)), None)
+        self.comment = discord.ui.TextInput(label=f'별점 {stars}/5 · 댓글 (선택)', style=discord.TextStyle.paragraph,
+                                            required=False, max_length=700, default=old['comment'] if old else None)
+        self.add_item(self.comment)
+
+    async def on_submit(self, interaction):
+        try:
+            if interaction.user.id != self.owner:
+                raise MusicError('본인만 작성할 수 있어.')
+            service(interaction).song(self.vid)
+            self.svc.cooldown(interaction.user, 'review', 4)
+            reviews = self.svc.stats(self.vid)['reviews']
+            old = next((r for r in reviews.values() if r['user_id'] == str(self.owner)), None)
+            if old:
+                old.update(stars=self.stars, comment=self.comment.value.strip(), updated_at=now_iso())
+                old['display_name'], old['username'] = interaction.user.display_name, interaction.user.name
+            else:
+                rid = self.svc.id()
+                reviews[rid] = dict(identity(interaction.user), id=rid, stars=self.stars,
+                                    comment=self.comment.value.strip(), votes={}, replies={})
+            self.svc.save()
+            await interaction.response.send_message(f'⭐ {self.stars}/5 평가를 저장했어.', ephemeral=True)
+        except Exception as exc:
+            await error_reply(interaction, exc)
+
+
+class ReviewList(PrivateView):
+    def __init__(self, svc, vid, owner, page=0):
+        super().__init__(svc, vid, owner)
+        self.rebuild(page)
+
+    def rebuild(self, page):
+        self.clear_items()
+        all_reviews = sorted(self.svc.stats(self.vid)['reviews'].values(), key=lambda r: int(r['id']), reverse=True)
+        self.pages = max(1, math.ceil(len(all_reviews)/5))
+        self.page = max(0, min(page, self.pages-1))
+        self.records = all_reviews[self.page*5:self.page*5+5]
+        if self.records:
+            select = discord.ui.Select(placeholder='자세히 볼 평가 선택', options=[
+                discord.SelectOption(label=f"#{r['id']} {r['display_name']}"[:100], value=r['id'],
+                                     description=f"{r['stars']}/5 · 답글 {len(r['replies'])}개") for r in self.records], row=0)
+            async def selected(interaction):
+                v = ReviewDetail(self.svc, self.vid, self.owner, select.values[0])
+                await interaction.response.edit_message(embed=v.embed(), view=v, allowed_mentions=NO_MENTIONS)
+            select.callback = selected
+            self.add_item(select)
+        async def prev(i):
+            self.rebuild(self.page-1)
+            await i.response.edit_message(embed=self.embed(), view=self, allowed_mentions=NO_MENTIONS)
+        async def nxt(i):
+            self.rebuild(self.page+1)
+            await i.response.edit_message(embed=self.embed(), view=self, allowed_mentions=NO_MENTIONS)
+        self.button('이전', prev, disabled=self.page==0)
+        self.button('다음', nxt, disabled=self.page>=self.pages-1)
+
+    def embed(self):
+        e = discord.Embed(title='💬 노래 평가', description=safe(self.svc.song(self.vid)['title'],200), color=COLOR)
+        local = self.svc.stats(self.vid)
+        up, down = count_votes(local['votes'])
+        stars = [r['stars'] for r in local['reviews'].values()]
+        avg = f'{sum(stars)/len(stars):.2f}/5' if stars else '미평가'
+        e.description += f'\n⭐ {avg} ({len(stars)}명) · 👍 {up} · 👎 {down}'
+        for r in self.records:
+            up, down = count_votes(r['votes'])
+            e.add_field(name=f"#{r['id']} · {author(r)} · {'⭐'*r['stars']}"[:256],
+                        value=f"{safe(r['comment'] or '(댓글 없음)', 450)}\n👍 {up} · 👎 {down} · 답글 {len(r['replies'])}개", inline=False)
+        if not self.records:
+            e.add_field(name='아직 평가 없음', value='첫 평가를 남겨 봐!')
+        e.set_footer(text=f'{self.page+1}/{self.pages} 페이지 · 최신 작성순')
+        return e
+
+
+def may_delete(interaction, record):
+    return str(interaction.user.id) == record['user_id'] or interaction.permissions.administrator
+
+
+class ReviewDetail(PrivateView):
+    def __init__(self, svc, vid, owner, rid, page=0):
+        super().__init__(svc, vid, owner)
+        self.rid = rid
+        self.rebuild(page)
+
+    def rebuild(self, page):
+        self.clear_items()
+        r = self.svc.review(self.vid, self.rid)
+        all_replies = sorted(r['replies'].values(), key=lambda x: int(x['id']))
+        self.pages = max(1, math.ceil(len(all_replies)/5))
+        self.page = max(0, min(page,self.pages-1))
+        self.records = all_replies[self.page*5:self.page*5+5]
+        if self.records:
+            select = discord.ui.Select(placeholder='답글 선택 (자세히 보기 / 삭제)', options=[
+                discord.SelectOption(label=f"#{x['id']} {x['display_name']}"[:100], value=x['id']) for x in self.records], row=0)
+            async def selected(i):
+                record = self.svc.review(self.vid, self.rid)['replies'].get(select.values[0])
+                if not record:
+                    raise MusicError('삭제된 답글이야.')
+                view = ReplyDetail(self.svc,self.vid,self.owner,self.rid,record['id'])
+                await i.response.edit_message(embed=view.embed(),view=view,allowed_mentions=NO_MENTIONS)
+            select.callback = selected
+            self.add_item(select)
+        async def vote(i, val):
+            r = self.svc.review(self.vid,self.rid)
+            if r['user_id'] == str(i.user.id):
+                raise MusicError('자기 평가에는 반응할 수 없어.')
+            self.svc.cooldown(i.user, 'review_vote', 1)
+            toggle(r['votes'], str(i.user.id), val)
+            self.svc.save()
+            self.rebuild(self.page)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        async def up(i): await vote(i,1)
+        async def down(i): await vote(i,-1)
+        async def reply(i):
+            await i.response.send_modal(ReplyModal(self.svc,self.vid,self.owner,self.rid))
+        async def delete(i):
+            r = self.svc.review(self.vid,self.rid)
+            if not may_delete(i,r):
+                raise MusicError('작성자 또는 관리자만 삭제할 수 있어.')
+            v = DeleteConfirm(self.svc,self.vid,self.owner,self.rid)
+            await i.response.send_message('평가와 포함된 답글을 모두 삭제할까?',view=v,ephemeral=True)
+        async def prev(i):
+            self.rebuild(self.page-1)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        async def nxt(i):
+            self.rebuild(self.page+1)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        async def back(i):
+            v=ReviewList(self.svc,self.vid,self.owner)
+            await i.response.edit_message(embed=v.embed(),view=v,allowed_mentions=NO_MENTIONS)
+        self.button('👍 좋아요',up)
+        self.button('👎 싫어요',down)
+        self.button('답글 작성',reply)
+        self.button('평가 삭제',delete,style=discord.ButtonStyle.danger)
+        self.button('이전 답글',prev,row=2,disabled=self.page==0)
+        self.button('다음 답글',nxt,row=2,disabled=self.page>=self.pages-1)
+        self.button('평가 목록',back,row=2)
+
+    def embed(self):
+        r=self.svc.review(self.vid,self.rid)
+        up,down=count_votes(r['votes'])
+        e=discord.Embed(title=f"평가 #{self.rid} · {'⭐'*r['stars']}", description=f"**{author(r)}**\n{safe(r['comment'] or '(댓글 없음)',1500)}\n\n👍 {up} · 👎 {down}",color=COLOR)
+        for x in self.records:
+            e.add_field(name=f"↳ #{x['id']} · {author(x)}"[:256],value=safe(x['comment'],500) or '(빈 답글)',inline=False)
+        e.set_footer(text=f"답글 {len(r['replies'])}개 · {self.page+1}/{self.pages} 페이지 · 작성 {r['created_at'][:10]}")
+        return e
+
+
+class ReplyModal(discord.ui.Modal,title='평가에 답글 작성'):
+    def __init__(self,svc,vid,owner,rid):
+        super().__init__(timeout=600)
+        self.svc,self.vid,self.owner,self.rid=svc,vid,owner,rid
+        self.comment=discord.ui.TextInput(label='답글',style=discord.TextStyle.paragraph,max_length=700)
+        self.add_item(self.comment)
+
+    async def on_submit(self,i):
+        try:
+            if i.user.id != self.owner:
+                raise MusicError('본인만 작성할 수 있어.')
+            service(i).song(self.vid)
+            text=self.comment.value.strip()
+            if not text:
+                raise MusicError('답글 내용을 입력해 줘.')
+            self.svc.cooldown(i.user,'reply',5)
+            r=self.svc.review(self.vid,self.rid)
+            rid=self.svc.id()
+            r['replies'][rid]=dict(identity(i.user),id=rid,comment=text)
+            self.svc.save()
+            v=ReviewDetail(self.svc,self.vid,self.owner,self.rid,math.ceil(len(r['replies'])/5)-1)
+            await i.response.send_message('답글을 등록했어.',embed=v.embed(),view=v,ephemeral=True,allowed_mentions=NO_MENTIONS)
+        except Exception as exc:
+            await error_reply(i,exc)
+
+
+class ReplyDetail(PrivateView):
+    def __init__(self,svc,vid,owner,rid,reply_id):
+        super().__init__(svc,vid,owner)
+        self.rid,self.reply_id=rid,reply_id
+        async def delete(i):
+            x=self.record()
+            if not may_delete(i,x):
+                raise MusicError('작성자 또는 관리자만 삭제할 수 있어.')
+            v=DeleteConfirm(svc,vid,owner,rid,reply_id)
+            await i.response.send_message('이 답글을 삭제할까?',view=v,ephemeral=True)
+        async def back(i):
+            v=ReviewDetail(svc,vid,owner,rid)
+            await i.response.edit_message(embed=v.embed(),view=v,allowed_mentions=NO_MENTIONS)
+        self.button('답글 삭제',delete,style=discord.ButtonStyle.danger)
+        self.button('돌아가기',back)
+
+    def record(self):
+        x=self.svc.review(self.vid,self.rid)['replies'].get(self.reply_id)
+        if not x:
+            raise MusicError('삭제된 답글이야.')
+        return x
+
+    def embed(self):
+        x=self.record()
+        return discord.Embed(title=f"답글 #{x['id']}",description=f"**{author(x)}**\n{safe(x['comment'],1500)}",color=COLOR)
+
+
+class DeleteConfirm(PrivateView):
+    def __init__(self,svc,vid,owner,rid,reply_id=None):
+        super().__init__(svc,vid,owner)
+        async def yes(i):
+            r=svc.review(vid,rid)
+            records=r['replies'] if reply_id else svc.stats(vid)['reviews']
+            key=reply_id or rid
+            record=records.get(key)
+            if not record or not may_delete(i,record):
+                raise MusicError('이미 삭제되었거나 삭제 권한이 없어.')
+            del records[key]
+            svc.save()
+            self.stop()
+            await i.response.edit_message(content='삭제했어. 기존 평가 화면은 다시 열어 줘.',view=None)
+        async def no(i):
+            self.stop()
+            await i.response.edit_message(content='삭제를 취소했어.',view=None)
+        self.button('삭제 확인',yes,style=discord.ButtonStyle.danger)
+        self.button('취소',no)
+
+
+MUSIC_RANKS={'views':'YouTube 조회수','likes':'YouTube 좋아요','new':'최신 업로드','added':'최근 추가',
+       'server_likes':'서버 좋아요','rating':'서버 별점','exposure':'서버 추천 표시 횟수'}
+
+
+def ranking(svc,kind):
+    rows=[]
+    for vid,song in svc.songs().items():
+        local=svc.state['songs'].get(vid,{})
+        reviews=list(local.get('reviews',{}).values())
+        if kind in ('views','likes'):
+            val=song[kind]
+            if val is None: continue
+            key=(val,)
+            label=f'{val:,}회' if kind=='views' else f'{val:,}개'
+        elif kind in ('new','added'):
+            date=song['published' if kind=='new' else 'added']
+            if not ts(date): continue
+            key=(ts(date),)
+            label=date[:10]
+        elif kind=='server_likes':
+            up,down=count_votes(local.get('votes',{}))
+            if up==0: continue
+            key=(up,-down)
+            label=f'👍 {up} · 👎 {down}'
+        elif kind=='rating':
+            if not reviews: continue
+            avg=sum(r['stars'] for r in reviews)/len(reviews)
+            key=(avg,len(reviews))
+            label=f'⭐ {avg:.2f} ({len(reviews)}명)'
+        else:
+            val=local.get('exposure',0)
+            if not val: continue
+            key=(val,)
+            label=f'{val:,}회'
+        rows.append((key,vid,label))
+    rows.sort(key=lambda x:(x[0],x[1]),reverse=True)
+    return [(vid,label) for _,vid,label in rows[:100]]
+
+
+class RankView(PrivateView):
+    def __init__(self,svc,owner,kind):
+        super().__init__(svc,'',owner)
+        self.kind=kind
+        self.rebuild(0)
+
+    def rebuild(self,page):
+        self.clear_items()
+        self.records=ranking(self.svc,self.kind)
+        self.pages=max(1,math.ceil(len(self.records)/10))
+        self.page=max(0,min(page,self.pages-1))
+        select=discord.ui.Select(placeholder='정렬 기준 변경',options=[discord.SelectOption(label=v,value=k,default=k==self.kind) for k,v in MUSIC_RANKS.items()],row=0)
+        async def selected(i):
+            self.kind=select.values[0]
+            self.rebuild(0)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        select.callback=selected
+        self.add_item(select)
+        async def prev(i):
+            self.rebuild(self.page-1)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        async def nxt(i):
+            self.rebuild(self.page+1)
+            await i.response.edit_message(embed=self.embed(),view=self,allowed_mentions=NO_MENTIONS)
+        self.button('이전',prev,disabled=self.page==0)
+        self.button('다음',nxt,disabled=self.page>=self.pages-1)
+        subset=self.records[self.page*10:self.page*10+10]
+        if subset:
+            song_select=discord.ui.Select(placeholder='곡 상세 / 평가 열기',options=[discord.SelectOption(label=self.svc.song(vid)['title'][:100],value=vid) for vid,_ in subset],row=2)
+            async def open_song(i):
+                vid=song_select.values[0]
+                self.svc.song(vid)
+                await i.response.send_message(embed=self.svc.card(vid),view=self.svc.card_view(vid),ephemeral=True,allowed_mentions=NO_MENTIONS)
+            song_select.callback=open_song
+            self.add_item(song_select)
+
+    def embed(self):
+        e=discord.Embed(title=f'🏆 노래 TOP 100 · {MUSIC_RANKS[self.kind]}',color=0xF1C40F)
+        lines=[]
+        for n,(vid,label) in enumerate(self.records[self.page*10:self.page*10+10],self.page*10+1):
+            s=self.svc.song(vid)
+            lines.append(f"**{n:02d}.** [{safe(s['title'],100)}]({self.svc.link(vid)})\n　{label}")
+        e.description='\n'.join(lines) or '아직 집계할 데이터가 없어.'
+        e.set_footer(text=f'{self.page+1}/{self.pages} 페이지 · {len(self.records)}곡 · 비공개/미집계 수치 제외')
+        return e
+
+
+def install_music(bot,guild,data_dir='/data'):
+    """Call once before guild command sync; start_music() from existing setup_hook."""
+    if getattr(bot,'music_service',None):
+        return bot.music_service
+    svc=MusicService(bot,guild,data_dir)
+    bot.music_service=svc
+
+    @bot.tree.command(name='노래추천',description='랜덤 추천곡을 받아요.',guild=guild)
+    async def recommend_command(i: discord.Interaction):
+        await i.response.defer(thinking=True)
+        try:
+            svc.cooldown(i.user,'recommend',4)
+            await svc.ensure()
+            vid=svc.recommend()
+            await i.followup.send(embed=svc.card(vid),view=svc.card_view(vid),allowed_mentions=NO_MENTIONS)
+            svc.expose(vid)
+        except Exception as exc:
+            await error_reply(i,exc)
+
+    @bot.tree.command(name='오늘의노래',description='서버 평가 및 추천 이력을 바탕으로 선정한 오늘의 노래',guild=guild)
+    async def daily_command(i: discord.Interaction):
+        await i.response.defer(thinking=True)
+        try:
+            svc.cooldown(i.user,'daily',4)
+            await svc.ensure()
+            date=datetime.now(MUSIC_KST).date().isoformat()
+            async with svc.daily_lock:
+                pick=svc.daily_pick(date)
+                vid=pick['vid']
+            await i.followup.send(embed=svc.card(vid,pick),view=svc.card_view(vid,True),allowed_mentions=NO_MENTIONS)
+            svc.expose(vid)
+        except Exception as exc:
+            await error_reply(i,exc)
+
+    @bot.tree.command(name='노래랭킹',description='조회수, 좋아요, 최신곡 등 TOP 100',guild=guild)
+    @app_commands.choices(기준=[app_commands.Choice(name=v,value=k) for k,v in MUSIC_RANKS.items()])
+    async def rank_command(i: discord.Interaction, 기준: str='views'):
+        await i.response.defer(ephemeral=True,thinking=True)
+        try:
+            await svc.ensure()
+            v=RankView(svc,i.user.id,기준)
+            await i.followup.send(embed=v.embed(),view=v,ephemeral=True,allowed_mentions=NO_MENTIONS)
+        except Exception as exc:
+            await error_reply(i,exc)
+
+    @bot.tree.command(name='노래평가',description='영상 ID로 별점과 댓글을 작성해요.',guild=guild)
+    @app_commands.describe(영상='추천 카드의 유튜브 링크 또는 영상 ID')
+    async def rate_command(i: discord.Interaction, 영상: str):
+        try:
+            vid=영상.strip()
+            if not VIDEO.fullmatch(vid):
+                u=urlparse(vid)
+                vid=(u.path.strip('/') if u.hostname=='youtu.be' else parse_qs(u.query).get('v',[''])[0])
+            if not VIDEO.fullmatch(vid):
+                raise MusicError('올바른 유튜브 영상 ID 또는 링크를 입력해 줘.')
+            svc.song(vid)
+            await i.response.send_message('별점을 선택해 줘.',view=StarView(svc,vid,i.user.id),ephemeral=True)
+        except Exception as exc:
+            await error_reply(i,exc)
+
+    @bot.tree.command(name='노래평가삭제',description='관리자가 평가 또는 답글 ID를 삭제합니다.',guild=guild)
+    @app_commands.default_permissions(administrator=True)
+    async def delete_command(i: discord.Interaction, 번호: str):
+        try:
+            if not i.permissions.administrator:
+                raise MusicError('관리자만 사용할 수 있어.')
+            key=번호.strip().lstrip('#')
+            for vid,local in svc.state['songs'].items():
+                for rid,r in local['reviews'].items():
+                    if rid==key or key in r['replies']:
+                        v=DeleteConfirm(svc,vid,i.user.id,rid,None if rid==key else key)
+                        await i.response.send_message(f'#{key} 항목을 삭제할까?',view=v,ephemeral=True)
+                        return
+            raise MusicError('해당 번호의 평가나 답글이 없어.')
+        except Exception as exc:
+            await error_reply(i,exc)
+
+    @tasks.loop(minutes=1)
+    async def sync_loop():
+        try:
+            await svc.poll()
+        except Exception as exc:
+            print('[음악 동기화 오류]',type(exc).__name__)
+
+    @sync_loop.before_loop
+    async def before_sync():
+        await bot.wait_until_ready()
+
+    @tasks.loop(minutes=1)
+    async def daily_loop():
+        try:
+            await svc.daily_post()
+        except Exception as exc:
+            print('[오늘의 노래 오류]',type(exc).__name__)
+
+    @daily_loop.before_loop
+    async def before_daily():
+        await bot.wait_until_ready()
+
+    def start():
+        bot.add_dynamic_items(MusicButton)
+        if not sync_loop.is_running(): sync_loop.start()
+        if not daily_loop.is_running(): daily_loop.start()
+    svc.start=start
+    return svc
+
+
+music_service = install_music(bot, GUILD, DATA_DIR)
 
 bot.run(TOKEN)
