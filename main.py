@@ -25181,7 +25181,7 @@ class MusicService:
                                                    'last_exposure': None})
 
     def link(self, vid):
-        return 'https://www.youtube.com/watch?' + urlencode({'v': vid, 'list': self.playlist})
+        return 'https://www.youtube.com/watch?' + urlencode({'v': vid})
 
     def id(self):
         value = str(self.state['next_id'])
